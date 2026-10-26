@@ -44,8 +44,8 @@ PostgreSQL 接続文字列)と `NYXIS_SUPABASE_ISSUER`(`https://ホスト[:port]
 `NYXIS_SERVICE_PRINCIPAL` が無ければ起動を拒む。
 外部 API 呼び出しには、正本の送り先が名指す鍵 `NYXIS_EXT_SUMMARIZER` と `NYXIS_EXT_AUDIT`(秘密。環境変数でだけ渡す。
 模擬 API に対しては任意の文字列)を渡す。正本に送り先がある限り必須で、無ければ起動を拒む。任意で輸送の上限
-`NYXIS_CALL_CONNECT_TIMEOUT` / `NYXIS_CALL_MAX_TIME` / `NYXIS_CALL_MAX_RESPONSE_BYTES`(既定 3 秒・10 秒・64KiB)と、
-アウトボックスの内部ループの `NYXIS_OUTBOX_INTERVAL_SECONDS` / `NYXIS_OUTBOX_MAX_ATTEMPTS` /
+`NYXIS_CALL_CONNECT_TIMEOUT` / `NYXIS_CALL_MAX_TIME` / `NYXIS_CALL_MAX_RESPONSE_BYTES`(既定 3 秒・10 秒・64KiB。本文の上限は
+`sync` だけ)と、アウトボックスの内部ループの `NYXIS_OUTBOX_INTERVAL_SECONDS` / `NYXIS_OUTBOX_MAX_ATTEMPTS` /
 `NYXIS_OUTBOX_BACKOFF_BASE_SECONDS`(既定 5 秒・8 回・10 秒。`docs/external-calls.md` §5)。
 `backend/.lake/build/bin/initTeamDocsDatabase` は正本のテーブルを新規に作る(既存テーブルがあれば失敗する)。
 

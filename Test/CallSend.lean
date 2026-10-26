@@ -67,6 +67,14 @@ def parse (s : String) : Lean.Json := (Lean.Json.parse s).toOption.getD .null
 -- 引数に認証ヘッダ・URL・本文は現れない(固定の輸送の方針だけ)
 #guard (arguments 3 10 65536).all fun a => !(a.splitOn "Authorization").length > 1 && !(a.splitOn "https://").length > 1
 #guard (arguments 3 7 1024).contains "7" && (arguments 3 7 1024).contains "1024" && (arguments 3 7 1024).contains "=https"
+-- sync の引数は従来どおり: 本文を状態コードの前に受け、本文の上限を掛ける
+#guard arguments 3 7 1024 == #["--disable", "--silent", "--globoff", "--noproxy", "*",
+  "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--connect-timeout", "3", "--max-time", "7",
+  "--max-filesize", "1024", "--write-out", "\n%{http_code}", "--config", "-"]
+-- アウトボックスの送信は本文を読まずに捨て(本文の上限も掛けない)、出力は状態コードだけ。輸送の方針は同じ
+#guard arguments 3 7 1024 (discardBody := true) == #["--disable", "--silent", "--globoff", "--noproxy", "*",
+  "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--connect-timeout", "3", "--max-time", "7",
+  "--output", "/dev/null", "--write-out", "\n%{http_code}", "--config", "-"]
 
 -- 出力の分解: 本文 + 改行 + 状態コード
 #guard splitOutput "{\"id\":\"c\"}\n200" == some (200, "{\"id\":\"c\"}")

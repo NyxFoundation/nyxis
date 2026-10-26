@@ -21,7 +21,9 @@ import Nyxis.Internal.PostgresValue
   `NYXIS_CHECK_OUTBOX_SECONDS` 秒だけ回し、処理した行の数を出力する。Python は同じ DB に 2 プロセスを同時に起動し、
   模擬 API の記録で各行がちょうど 1 回送られること、5xx → 2xx の切り替えで再送されて `sent` になること(再送の間隔が
   指数バックオフ以上)、4xx が即 `failed` になること、最大試行回数超過(常に 5xx の行と、閉じたポートへの `url: 列` の行 =
-  輸送の失敗)が `failed` になることを照合する。遷移 `Outbox.settle` そのものは下の `#guard` がビルド時に検査する。
+  輸送の失敗)が `failed` になることを照合する。応答本文は捨てるので、本文が UTF-8 でない・上限より大きい 2xx は
+  `sent`、本文が UTF-8 でない 4xx は `failed` と、状態コードどおりに決まることも照合する。遷移 `Outbox.settle`
+  そのものは下の `#guard` がビルド時に検査する。
 
 `NYXIS_DATABASE_URL` が指す新しい DB、`NYXIS_CHECK_EXTERNAL_PORT`(模擬 API のポート)、`NYXIS_EXT_NOTIFY`(送り先の鍵)、
 `NYXIS_OUTBOX_*`(内部ループの設定)を環境変数で受け取る。HTTP・JWT は通さない(`AuthenticatedRequest` を直接組む)。
@@ -196,7 +198,8 @@ def Context.status (ctx : Context) (name : String) (id : String) (expected : Str
 def parallelOrders : List String := (List.range 12).map fun i => s!"o-par{i}"
 
 def orders : List String :=
-  ["o-ok", "o-twice", "o-boom", "o-404", "o-retry", "o-max", "o-hook"] ++ parallelOrders
+  ["o-ok", "o-twice", "o-boom", "o-404", "o-retry", "o-max", "o-hook", "o-binary", "o-large", "o-binary-404"] ++
+    parallelOrders
 
 def enqueue (ctx : Context) : IO Unit := do
   -- 行の用意(呼び出しは無い)。
@@ -213,6 +216,13 @@ def enqueue (ctx : Context) : IO Unit := do
   ctx.expect "notify o-retry (mock answers 5xx twice, then 2xx)" alice .post "/orders/o-retry/notify" 200 "" (some "")
   ctx.expect "notify o-404 (mock answers 4xx)" alice .post "/orders/o-404/notify" 200 "" (some "")
   ctx.expect "notify o-max (mock always answers 5xx)" alice .post "/orders/o-max/notify" 200 "" (some "")
+  -- 応答本文は捨てる: 本文が UTF-8 でない・上限より大きい 2xx も、UTF-8 でない 4xx も、状態コードどおりに 1 回で決まる。
+  ctx.expect "notify o-binary (mock answers 2xx with a non-UTF-8 body)" alice .post "/orders/o-binary/notify" 200 ""
+    (some "")
+  ctx.expect "notify o-large (mock answers 2xx with a body over the response limit)" alice .post
+    "/orders/o-large/notify" 200 "" (some "")
+  ctx.expect "notify o-binary-404 (mock answers 4xx with a non-UTF-8 body)" alice .post "/orders/o-binary-404/notify"
+    200 "" (some "")
   ctx.expect "notify-twice o-twice (two rows in one request)" alice .post "/orders/o-twice/notify-twice" 200 "" (some "")
   ctx.expect "ping o-hook (url column, no auth)" alice .post "/orders/o-hook/ping" 200 "" (some "")
   ctx.expect "ping o-dead (transport failures at delivery, retried then failed)" alice .post "/orders/o-dead/ping" 200 ""

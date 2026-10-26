@@ -15,7 +15,8 @@ COMMIT の後は、nyxis 自身の内部ループ(`loop`。定期処理のサー
 DB に複数のインスタンスがあっても同じ行を 2 つが送らない)、その行の内容だけを `sync` と同じ輸送の方針(承認済み curl、
 HTTPS のみ、認証ヘッダは送り先ごとにコア設定から)で送り、同じトランザクションで状態を更新して COMMIT する。2xx は `sent`、4xx は即 `failed`(再試行しても
 変わらない)、5xx・その他の状態コード・輸送の失敗は `attempts` を増やして指数バックオフ(`base × 2^attempts` 秒)で再試行し、
-最大試行回数を超えると `failed`。`failed` の行は nyxis が消さない(運用者が SQL で見る。D8)。応答本文は捨てる。
+最大試行回数を超えると `failed`。`failed` の行は nyxis が消さない(運用者が SQL で見る。D8)。応答本文は読まずに捨てる
+(本文の上限 `NYXIS_CALL_MAX_RESPONSE_BYTES` は `sync` にだけ掛かる)。
 
 送信の後に状態の更新・COMMIT が失敗した(プロセスが落ちた)行は `pending` のまま残り、後で再送される(配送は少なくとも 1 回。
 同じ内容が複数回届き得ることは Assumption 2 の「定理が述べないこと」)。間隔・最大試行回数・バックオフの底はコア設定
@@ -127,16 +128,19 @@ def readDue (r : PostgresResult.Reader) : IO (Option Due) := do
 inductive Delivered where
   /-- 応答の状態コード。 -/
   | status (code : Nat)
-  /-- 輸送の失敗(接続・TLS・期限・本文の上限)。再試行する。 -/
+  /-- 輸送の失敗(接続・TLS・期限・受信の中断)。再試行する。 -/
   | transport
   /-- 送り先が設定に無い・URL が HTTPS でない。再試行しても変わらない。 -/
   | config
 
-/-- 行の内容だけを送る(本文は保存した JSON、認証ヘッダはコア設定)。応答本文は捨てる。 -/
+/-- 行の内容だけを送る(本文は保存した JSON、認証ヘッダはコア設定)。応答本文は読まずに捨てるので、応答の受信が
+    完了して状態コードが返れば、その本文の大きさや符号化では遷移が変わらない(受け取った 2xx・4xx を輸送の失敗と
+    取り違えて再送しない)。本文の受信が期限を超える・途中で切れる場合は従来どおり輸送の失敗。 -/
 def deliver (calls : CallSend.Config) (due : Due) : IO Delivered := do
   let some auth := calls.auth.lookup due.destination | return .config
   unless isHttpsUrl due.url do return .config
-  let (code, output) ← CurlStdin.run (CallSend.arguments calls.connectTimeout calls.maxTime calls.maxResponseBytes)
+  let (code, output) ← CurlStdin.run
+    (CallSend.arguments calls.connectTimeout calls.maxTime calls.maxResponseBytes (discardBody := true))
     (CallSend.configTextJson due.url due.method due.body? auth)
   unless code == 0 do return .transport
   let some (status, _) := CallSend.splitOutput output | return .transport

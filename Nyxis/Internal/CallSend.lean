@@ -18,8 +18,9 @@ nyxis が決めたもの)についてだけ、接続層(`PostgresRun.runStaged`)
 復号できなければ固定の例外 `invalidResponse` — トランザクションは取り消され、接続層の入口 `PostgresRun.handleStaged` が
 この例外だけを固定の 502(`PostgresRun.gatewayResponse`)に写す)。2xx 以外の応答は状態コードと生の本文を
 `ExternalResult.calledError` としてハンドラに渡す(トランザクションは続く)。`async` の呼び出しはここでは送らない
-(接続層が要求のトランザクションでアウトボックスに書き、内部ループ `Nyxis.Internal.Outbox` が同じ輸送の方針
-(`arguments` / `configTextJson`)で後から送る)。 -/
+(接続層が要求のトランザクションでアウトボックスに書き、内部ループ `Nyxis.Internal.Outbox` が同じ `configTextJson` と
+`arguments (discardBody := true)` で後から送る。`async` には応答型が無いので応答本文を読まずに捨て、本文の上限
+(`NYXIS_CALL_MAX_RESPONSE_BYTES`)は `sync` にだけ掛かる)。 -/
 namespace Nyxis.Internal.CallSend
 
 open Cedar.Spec
@@ -149,13 +150,14 @@ def configText (url : String) (method : CallMethod) (body? : Option (List (Colum
     String :=
   configTextJson url method (body?.map body) auth
 
-/-- 固定の輸送の方針(`StorageSign.arguments` と同じ形)。状態コードを本文の末尾で読む。 -/
-def arguments (connectTimeout maxTime maxResponseBytes : Nat) : Array String := #[
-  "--disable", "--silent", "--globoff", "--noproxy", "*",
-  "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0",
-  "--connect-timeout", toString connectTimeout, "--max-time", toString maxTime,
-  "--max-filesize", toString maxResponseBytes,
-  "--write-out", "\n%{http_code}", "--config", "-"]
+/-- 固定の輸送の方針(`StorageSign.arguments` と同じ形)。状態コードを本文の末尾で読む。`discardBody` なら本文を
+    読まずに捨て(`--output /dev/null`。本文の上限は掛けない)、出力は状態コードだけになる。 -/
+def arguments (connectTimeout maxTime maxResponseBytes : Nat) (discardBody : Bool := false) : Array String :=
+  #["--disable", "--silent", "--globoff", "--noproxy", "*",
+    "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0",
+    "--connect-timeout", toString connectTimeout, "--max-time", toString maxTime] ++
+  (if discardBody then #["--output", "/dev/null"] else #["--max-filesize", toString maxResponseBytes]) ++
+  #["--write-out", "\n%{http_code}", "--config", "-"]
 
 /-- curl の出力(本文 + 改行 + 状態コード)を本文と状態コードに分ける。 -/
 def splitOutput (output : String) : Option (Nat × String) :=

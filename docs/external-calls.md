@@ -161,7 +161,9 @@ entity Hook;
    - 5xx・輸送の失敗: `attempts` を増やし、次の時刻を指数バックオフで決める。
    - 4xx: 即 `failed`(再試行しても変わらない)。
    - 最大試行回数超過: `failed`。
-5. 応答本文は捨てる(`async` に応答型は無い)。
+5. 応答本文は読まずに捨てる(`async` に応答型は無い)。応答の受信が完了して状態コードが返れば、その本文の大きさや
+   符号化では上の遷移が変わらない(受け取った 2xx・4xx を輸送の失敗として再送しない)。本文の受信が期限を超える・
+   途中で切れる場合は従来どおり輸送の失敗。
 
 ### 4.3 `_nyxis_outbox` の形
 
@@ -185,7 +187,7 @@ entity Hook;
   `_nyxis_outbox_pending_idx (next_at) WHERE state = 'pending'` を添える(ループの 1 回のコストが送信済み・失敗の行の数に
   依存しないため。列・状態・遷移は変えない)。
 - `_nyxis_id` は `<要求の一意 ID>-<その要求で何番目の async 呼び出しか>`(同じトランザクションで先に書いた同じ要求の行の数)。
-  `last_error` のカテゴリは `status`(2xx 以外の応答)/ `transport`(接続・TLS・期限・本文上限)/ `config`(送り先が設定に
+  `last_error` のカテゴリは `status`(2xx 以外の応答)/ `transport`(接続・TLS・期限・受信の中断)/ `config`(送り先が設定に
   無い・URL が HTTPS でない。再試行しない)/ `attempts`(最大試行回数超過)。
 - アプリのハンドラ・ポリシーからは到達できない(`Authz.Schema.tables` に無い)。読む効果は当面足さない(D8)。
 
@@ -196,7 +198,7 @@ entity Hook;
 | `NYXIS_EXT_<名前>`(正本の `auth` が名指す名前) | 送り先ごとの鍵 | 必須(未設定は起動拒否) |
 | `NYXIS_CALL_CONNECT_TIMEOUT` | 接続(秒) | 3 |
 | `NYXIS_CALL_MAX_TIME` | 全転送(秒)。sync の `<秒>s` はこれより短い値だけ | 10 |
-| `NYXIS_CALL_MAX_RESPONSE_BYTES` | 応答本文 | 65536 |
+| `NYXIS_CALL_MAX_RESPONSE_BYTES` | 応答本文(sync だけ。async は本文を読まずに捨てる) | 65536 |
 | `NYXIS_OUTBOX_INTERVAL_SECONDS` | 内部ループの間隔 | 5 |
 | `NYXIS_OUTBOX_MAX_ATTEMPTS` | 最大試行回数 | 8 |
 | `NYXIS_OUTBOX_BACKOFF_BASE_SECONDS` | バックオフの底(`base × 2^attempts`) | 10 |
