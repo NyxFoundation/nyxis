@@ -72,7 +72,7 @@ def tokenizeAux : Nat → List Char → Nat → Nat → Array Tok → Except Ced
     match cs with
     | [] => .ok acc
     | '\n' :: rest => tokenizeAux fuel rest (line + 1) 1 acc
-    | '/' :: '/' :: rest => tokenizeAux fuel (rest.dropWhile (· != '\n')) line col acc
+    | '/' :: '/' :: rest => tokenizeAux fuel (rest.dropWhile (fun c => c != '\n' && c != '\r')) line col acc
     | '/' :: '*' :: rest =>
       match skipBlock rest line (col + 2) with
       | some (rest', line', col') => tokenizeAux fuel rest' line' col' acc

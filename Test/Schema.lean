@@ -111,6 +111,11 @@ action "edit", "edit2" in [Action::"readDoc"] appliesTo { principal: [Group], re
   , ⟨⟨⟨"Action", []⟩, "edit"⟩, ⟨.update ["b", "a"], ⟨"Note", []⟩⟩⟩
   , ⟨⟨⟨"Action", []⟩, "edit2"⟩, ⟨.update ["b", "a"], ⟨"Note", []⟩⟩⟩ ]
 
+-- コメントは CR でも終わる(Cedar の字句規則 `//[^\n\r]*`)。CR の後のアクションを落とさない。
+#guard ((parse (base ++ "@effect(\"read Post\")\naction \"readPost\" appliesTo { principal: [User], resource: [Post] };" ++
+  "// c\r@effect(\"delete Post\") action \"deletePost\" appliesTo { principal: [User], resource: [Post] };\n")).toOption.map
+  (·.actions.map (·.action.eid))) == some ["readPost", "deletePost"]
+
 /-! ## 実体の親
 
 `entity T in [P]` は型環境の祖先の型になり、`@parents("列, …")` が親を指す列を定める。列は親の型 `P` か `Set<P>`。
