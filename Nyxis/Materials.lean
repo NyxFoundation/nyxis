@@ -32,8 +32,9 @@ import Cedar.Thm.Validation.Slice
 適合しない行(列の型や必須の列がスキーマと合わない行)は判定の実体に現れない。そのような行は、nyxis が正本から
 DDL を作り、書き込みを形状検査で拒み、DB へは nyxis 専用ロール以外から到達できない(`ASSUMPTIONS.md` A3)ことから
 実際には生じず、実 DB の接続層(`PostgresRun`)は取得した行の形状検査に失敗すれば要求全体を 503 で閉じる。
-アクションの実体は属性・tag を持たず祖先は宣言どおりで、cedar-lean の実体の整合(`Entities.HasAllActions`)が
-全アクションの存在を要求するために加える。アクション群(`action "a" in [Action::"g"]`)の `in` はこの祖先で判定される。
+アクションの実体は属性・tag を持たず祖先は正本の親の推移閉包(`Nyxis.CedarSchema.closeActionHierarchy`)で、
+cedar-lean の実体の整合(`Entities.HasAllActions`)が全アクションの存在を要求するために加える。
+アクション群(`action "a" in [Action::"g"]`)の `in` はこの祖先で判定される。
 
 行の実体の祖先(実体の親): 正本が `entity T in [P]` と宣言し `@parents("列, …")` で親を指す列を添えたテーブルでは、
 行の実体はその列の値(実体、または実体の集合の要素)のうち宣言された親の型のものを祖先として持つ
@@ -254,7 +255,8 @@ def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Members
     | some row => if conforms ts kv.1 row then some (kv.1, rowData ts pc mc store kv.1 row) else none
     | none => none
 
-/-- スキーマの全アクションの実体。属性・tag は無く、祖先は宣言どおり(`actionSchemaEntryToEntityData`)。
+/-- スキーマの全アクションの実体。属性・tag は無く、祖先は型環境の項目のとおり(正本の親の推移閉包。
+    `actionSchemaEntryToEntityData`)。
     各アクションの項目は型環境の `find?` で引く(重複した宣言があっても `find?` と同じ項目になる)。 -/
 def actionEntries (ts : Cedar.Validation.Schema) : List (EntityUID × EntityData) :=
   ts.acts.toList.filterMap fun kv =>
