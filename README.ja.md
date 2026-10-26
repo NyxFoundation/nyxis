@@ -12,9 +12,9 @@
 [![Supabase Auth](https://img.shields.io/badge/auth-Supabase%20Auth-3ECF8E.svg?logo=supabase&logoColor=white)](https://supabase.com/auth)
 [![GitHub stars](https://img.shields.io/github/stars/NyxFoundation/nyxis?style=social)](https://github.com/NyxFoundation/nyxis)
 
-**認可安全性が形式証明で保証された、Lean 製の Web バックエンド基盤。**
+**認可安全性が形式証明で保証された、Lean 製のバックエンドフレームワーク。**
 
-Nyxis は、AI エージェントにコードを書かせて Web アプリケーションを出す個人開発者が、認可について安心してリリースできるようにするための基盤です。開発者が書いて承認するのは [Cedar](https://www.cedarpolicy.com/) のスキーマとポリシーだけです。ハンドラは Claude Code などに普通に書かせればよく、開発者が Lean を書く必要はありません。
+Nyxis は、AI エージェントにコードを書かせて Web アプリケーションを出す個人開発者が、認可について安心してリリースできるようにするためのフレームワークです。開発者が書いて承認するのは [Cedar](https://www.cedarpolicy.com/) のスキーマとポリシーだけです。ハンドラは Claude Code などに普通に書かせればよく、開発者が Lean を書く必要はありません。
 
 構築されたバックエンドには、次の形式証明が付きます。
 
@@ -23,7 +23,7 @@ Nyxis は、AI エージェントにコードを書かせて Web アプリケー
 この性質は `lake build` のたびに Lean のカーネルが検査します。認可のレビューと監査は、スキーマとポリシーを読み、証明が通っていることを確かめれば済みます。
 
 > [!NOTE]
-> Nyxis は開発中(v0.1.0)です。保証が届く範囲と、証明の外側で信頼する仮定は [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) に明記しています。本番で使う前に必ず読んでください。
+> Nyxis は開発中(v0.1.1)です。保証が届く範囲と、証明の外側で信頼する仮定は [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) に明記しています。本番で使う前に必ず読んでください。
 
 ## 仕組み
 

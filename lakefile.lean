@@ -12,7 +12,7 @@ def postgresLinkArgs : Array String := run_io do
   return #[s!"-L{dir.trimAscii}"] ++ libs.trimAscii.toString.splitOn.toArray.filter (· != "")
 
 package nyxis where
-  version := v!"0.1.0"
+  version := v!"0.1.1"
   moreLinkArgs := postgresLinkArgs
 
 require Cedar from git "https://github.com/cedar-policy/cedar-spec" @

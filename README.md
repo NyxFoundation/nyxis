@@ -12,7 +12,7 @@ English | [日本語](README.ja.md)
 [![Supabase Auth](https://img.shields.io/badge/auth-Supabase%20Auth-3ECF8E.svg?logo=supabase&logoColor=white)](https://supabase.com/auth)
 [![GitHub stars](https://img.shields.io/github/stars/NyxFoundation/nyxis?style=social)](https://github.com/NyxFoundation/nyxis)
 
-**A Lean web backend framework whose authorization safety is formally proven.**
+**A Lean backend framework whose authorization safety is formally proven.**
 
 Nyxis lets solo developers who ship web applications written by AI agents release them with confidence about authorization. The only things a developer writes and approves are a [Cedar](https://www.cedarpolicy.com/) schema and policies. Handlers can be written as usual by Claude Code or similar tools, and the developer never has to write Lean.
 
@@ -23,7 +23,7 @@ Every backend built on Nyxis comes with a formal proof of the following:
 The Lean kernel checks this property on every `lake build`. Reviewing and auditing authorization comes down to reading the schema and policies and confirming that the proof checks.
 
 > [!NOTE]
-> Nyxis is under active development (v0.1.0). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
+> Nyxis is under active development (v0.1.1). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
 
 ## How it works
 
