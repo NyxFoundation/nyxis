@@ -2,6 +2,7 @@ import Lean
 import Nyxis.Runtime
 import Nyxis.Approved
 import Nyxis.ReadSafety
+import Nyxis.SliceSafety
 import Nyxis.Internal.PostgresRun
 import Nyxis.Internal.PostgresHttp
 import Nyxis.Internal.HttpResponse
@@ -107,6 +108,10 @@ elab "#assert_axioms_under " ns:ident : command => do
 #assert_axioms Nyxis.Authz.externalStep_eq_of_covers
 #assert_axioms Nyxis.Authz.step_external_indep
 #assert_axioms Nyxis.Runtime.App.handlerOf_externals
+-- 判定材料による応答の決定: 結果タグを含む結果列と応答が、各呼び出しの判定材料だけに依ること。
+#assert_axioms Nyxis.SliceSafety.step_eq_of_slice
+#assert_axioms Nyxis.SliceSafety.runHandler_eq_of_agree
+#assert_axioms Nyxis.SliceSafety.handleRequest_eq_of_agree
 #print axioms Nyxis.Runtime.trace_external
 #print axioms Nyxis.Runtime.trace_call
 #print axioms Nyxis.Runtime.trace_called

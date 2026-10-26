@@ -10,6 +10,7 @@ import Test.PostgresSql
 import Test.PostgresShape
 import Test.PostgresSnapshot
 import Test.Materials
+import Test.SliceSafety
 import Test.External
 import Test.CallSend
 import Test.Generated
@@ -31,6 +32,8 @@ import Test.Generated
 - `Test.Materials` — 判定材料の限定(`Nyxis.Materials`、点検索の土台): 検査用正本からの型環境の構成、cedar-lean の
   level 検証、限定した材料での判定と全実体での判定の一致。末尾にサーバー生成値の検査: 正本が `context` に
   `now` / `id` を宣言したときだけ判定の文脈に現れ、判定がその値に依存し、偽った時刻・ID の提案が拒否されること。
+- `Test.SliceSafety` — 判定材料による応答の決定(`Nyxis.SliceSafety`)の実例: 判定材料が一致する 2 つの状態で、
+  結果(許可も拒否も)・発行・2 回の呼び出しのハンドラの応答が一致すること、判定材料が異なれば一覧の件数が異なりうること。
 - `Test.External` — 宣言された外部効果(添付の署名付き URL の発行。メール送信・サービス主体。外部 API 呼び出し): `upload` / `download` / `@attachment` / `mail` / `@external` / `call` の受理と拒否(`docs/external-calls.md` §3.4 の
   各変種を含む)、permit されたときだけの発行の記録と nyxis が決めるパス・宛先・URL・本文、結果の列の消費、部分的な取得との
   一致。
