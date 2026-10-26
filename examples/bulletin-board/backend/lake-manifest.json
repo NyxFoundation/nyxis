@@ -1,0 +1,90 @@
+{
+ "version": "1.2.0",
+ "packagesDir": ".lake/packages",
+ "packages": [
+  {
+   "type": "path",
+   "dir": "../../../.lake/vendor/lean-pq",
+   "name": "leanPq",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "scope": "",
+   "name": "Cedar",
+   "manifestFile": "lake-manifest.json",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "dir": "../../../.lake/packages/Cedar/cedar-lean"
+  },
+  {
+   "type": "path",
+   "scope": "leanprover-community",
+   "name": "batteries",
+   "manifestFile": "lake-manifest.json",
+   "inherited": true,
+   "configFile": "lakefile.toml",
+   "dir": "../../../.lake/packages/batteries"
+  },
+  {
+   "type": "path",
+   "dir": "../../../.lake/vendor/lean-jose",
+   "name": "jose",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": "../../../.lake/vendor/jose-libcrypto",
+   "name": "«jose-libcrypto»",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": "../../../.lake/vendor/lean-libcrypto",
+   "name": "«lean-libcrypto»",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": "../../../.lake/vendor/lean-json",
+   "name": "json",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": "../../../.lake/vendor/leancrypto",
+   "name": "leancrypto",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": "../../..",
+   "name": "nyxis",
+   "scope": "",
+   "inherited": false,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  }
+ ],
+ "name": "bulletinBoard",
+ "lakeDir": ".lake",
+ "fixedToolchain": false
+}

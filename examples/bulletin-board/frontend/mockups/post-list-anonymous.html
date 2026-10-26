@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ホーム ゲスト</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F2F1EC;color:#17181A;font-family:"Zen Kaku Gothic New","Hiragino Sans",system-ui,sans-serif;font-size:16px;line-height:1.7}
+a{color:#17181A}
+h1,h2,h3,p{margin:0}
+.mono{font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:.88em;letter-spacing:.02em}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px;box-sizing:border-box;width:100%}
+.ic{width:18px;height:18px;flex:none}
+.wordmark{display:inline-flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:.04em;text-decoration:none;color:#17181A;min-height:44px}
+.wordmark i{width:12px;height:12px;background:#C8311F;border-radius:2px;display:inline-block}
+.nav{display:flex;gap:4px 22px;flex-wrap:wrap}
+.nav a{display:inline-flex;align-items:center;min-height:44px;font-weight:700;font-size:15px;text-decoration:none;color:#6E7177;border-bottom:3px solid transparent}
+.nav a.on{color:#17181A;border-bottom-color:#17181A}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:4px;border:1.5px solid #17181A;background:#17181A;color:#F2F1EC;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;box-sizing:border-box;white-space:nowrap}
+.btn.line{background:transparent;color:#17181A}
+.btn.plain{border-color:transparent;background:transparent;color:#4A4D52;font-weight:500}
+.btn.sm{min-height:36px;padding:0 12px;font-size:14px}
+.tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;border:1.5px solid currentColor;border-radius:2px;font-size:12px;font-weight:700;line-height:1;letter-spacing:.08em;white-space:nowrap}
+.tag.pub{color:#1F7A3E}
+.tag.draft{color:#6E7177;border-style:dashed}
+.tag.me{color:#2851A3}
+.who{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:#17181A;min-height:44px;font-weight:700;font-size:14px}
+.avatar{width:32px;height:32px;border-radius:50%;background:#17181A;color:#F2F1EC;display:inline-flex;align-items:center;justify-content:center;font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:13px;flex:none;box-sizing:border-box}
+.avatar.guest{background:transparent;border:1.5px dashed #6E7177;color:#6E7177}
+.list{border-bottom:1px solid #D6D4CC}
+.row{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:4px 16px;padding:18px 0;border-top:1px solid #D6D4CC;align-items:baseline}
+.row .num{font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:13px;color:#6E7177}
+.row .title{font-size:20px;font-weight:700;text-decoration:none;color:#17181A;line-height:1.4}
+.row .title:hover{text-decoration:underline;text-underline-offset:4px}
+.row .excerpt{grid-column:2;color:#4A4D52;font-size:14px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.row .by{grid-column:2;font-size:12px;color:#6E7177;display:flex;gap:12px}
+.row .tags{display:flex;gap:6px;align-items:center}
+.input{font:inherit;min-height:48px;padding:10px 0;border:0;border-bottom:1.5px solid #17181A;background:transparent;width:100%;box-sizing:border-box;color:#17181A;border-radius:0}
+.input::placeholder{color:#9A9C9F}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
+<header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
+  <nav class="nav" aria-label="メニュー">
+    <a class="on" href="post-list-anonymous.html">ホーム</a>
+  </nav>
+  <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+    <a class="who" href="me.html" aria-label="いまはゲストです"><span class="avatar guest"></span>ゲスト</a>
+    <a class="btn sm" href="login.html">Googleでログイン</a>
+  </div>
+</header>
+<div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
+<main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 28px; padding-top: 36px; padding-bottom: 56px">
+  <div style="display: flex; align-items: baseline; gap: 14px">
+    <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">ホーム</h1>
+    <span class="mono" style="color: #6E7177">3</span>
+  </div>
+  <div class="list">
+    <article class="row">
+      <span class="num">01</span>
+      <a class="title" href="post-detail-author.html">Nyxis 掲示板へようこそ</a>
+      <span class="tags"><span class="tag pub">公開中</span></span>
+      <p class="excerpt">この掲示板では、見ていい人だけが見られ、できる人だけができます。試してみてください。</p>
+      <div class="by"><span>6c0fe2a1</span></div>
+    </article>
+    <article class="row">
+      <span class="num">02</span>
+      <a class="title" href="post-detail-author.html">ルールの読み方</a>
+      <span class="tags"><span class="tag pub">公開中</span></span>
+      <p class="excerpt">書かれていないことは、すべてできません。</p>
+      <div class="by"><span>3f2a9c1e</span></div>
+    </article>
+    <article class="row">
+      <span class="num">03</span>
+      <a class="title" href="post-detail-author.html">手元で動かすメモ</a>
+      <span class="tags"><span class="tag pub">公開中</span></span>
+      <p class="excerpt">Google アカウントでログインすると、自分の投稿を書けます。</p>
+      <div class="by"><span>b7d104af</span></div>
+    </article>
+  </div>
+  <form style="display: flex; align-items: flex-end; gap: 12px; max-width: 460px">
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 4px">
+      <label for="open-id" style="font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #6E7177">IDで開く</label>
+      <input class="input mono" id="open-id" type="text" placeholder="投稿のID">
+    </div>
+    <button class="btn line" type="button">開く</button>
+  </form>
+</main>
+</div>
+</body>
+</html>

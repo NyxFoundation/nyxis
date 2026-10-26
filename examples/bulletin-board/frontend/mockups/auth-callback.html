@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ログインしています</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F2F1EC;color:#17181A;font-family:"Zen Kaku Gothic New","Hiragino Sans",system-ui,sans-serif;font-size:16px;line-height:1.7}
+h1,h2,h3,p,ol,li{margin:0}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px;box-sizing:border-box;width:100%}
+.ic{width:18px;height:18px;flex:none}
+.steps{list-style:none;padding:0;display:flex;align-items:flex-start;gap:0}
+.steps li{display:flex;flex-direction:column;align-items:center;gap:10px;width:140px;font-weight:700;font-size:14px}
+.steps .line{width:80px;height:2px;background:#D6D4CC;margin-top:19px}
+.steps .line.done{background:#17181A}
+.dot{width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box}
+.dot.done{background:#17181A;color:#F2F1EC}
+.dot.now{border:2px solid #17181A;background:#FFFFFF}
+.dot.todo{border:1.5px dashed #9A9C9F;color:#9A9C9F}
+.spin{width:16px;height:16px;border-radius:50%;border:2.5px solid #D6D4CC;border-top-color:#17181A;display:inline-block}
+.todo{color:#9A9C9F}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
+<main class="wrap" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 36px; padding-top: 80px; padding-bottom: 80px; text-align: center" aria-live="polite">
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 14px">
+    <span style="width: 20px; height: 20px; background: #C8311F; border-radius: 3px; display: block" aria-hidden="true"></span>
+    <h1 style="font-size: 28px; font-weight: 900; letter-spacing: .04em; line-height: 1.2">ログインしています</h1>
+  </div>
+  <ol class="steps" aria-label="進みぐあい">
+    <li>
+      <span class="dot done"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg></span>
+      Google
+    </li>
+    <li style="width: 80px" aria-hidden="true"><span class="line done"></span></li>
+    <li>
+      <span class="dot now"><span class="spin" aria-hidden="true"></span></span>
+      利用登録
+    </li>
+    <li style="width: 80px" aria-hidden="true"><span class="line"></span></li>
+    <li class="todo">
+      <span class="dot todo">3</span>
+      ホームへ
+    </li>
+  </ol>
+</main>
+</div>
+</body>
+</html>

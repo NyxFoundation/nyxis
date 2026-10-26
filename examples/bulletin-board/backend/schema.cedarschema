@@ -1,0 +1,95 @@
+// サンプルアプリ(掲示板)の Cedar スキーマ。
+//
+// nyxis ではこの文書がテーブル定義を兼ねる:
+//   - エンティティ型 = テーブル、属性 = 列、エンティティ ID = 主キー(写像のコードは無い)。
+//   - 各アクションには `@effect("…")` で効果(permit されたとき DB で起きる操作)を 1 つ添える。
+//       @effect("read <Table>")                    行の読み取り
+//       @effect("list <Table>")                    許可された行の一覧
+//       @effect("insert <Table>")                  行の挿入(提案される値が対象になる)
+//       @effect("update <Table>(<col>, <col>, …)")  列挙した列だけの更新
+//       @effect("delete <Table>")                  行の削除
+//     nyxis は、効果の無いアクション、スキーマに無いテーブル・列を参照する効果をビルド時に拒む。
+//   - `Anonymous` は nyxis が予約する主体の型で、JWT が無い・検証に失敗したリクエストの主体
+//     `Anonymous::"anonymous"` を表す。テーブルには対応しない。
+//
+// 開発者はこの文書と policies.cedar を読んで承認する。
+
+// 利用者。Supabase Auth のユーザー ID がエンティティ ID(主キー)になる。
+entity User = {
+  "admin": Bool
+};
+
+// 投稿。
+entity Post = {
+  "author": User,
+  "title": String,
+  "body": String,
+  "published": Bool
+};
+
+// 匿名の主体(nyxis が予約。テーブルではない)。
+entity Anonymous;
+
+// 投稿を読む。公開済みは誰でも、下書きは作者と管理者だけ(policies.cedar)。
+@effect("read Post")
+action "readPost" appliesTo {
+  principal: [User, Anonymous],
+  resource: [Post]
+};
+
+// 投稿の一覧。各行に readPost と同じポリシー条件を適用する。
+@effect("list Post")
+action "listPosts" appliesTo {
+  principal: [User, Anonymous],
+  resource: [Post]
+};
+
+// 投稿を作成する。提案される行(author・title・body・published)が対象になる。
+@effect("insert Post")
+action "createPost" appliesTo {
+  principal: [User],
+  resource: [Post]
+};
+
+// 投稿の題名と本文を編集する。
+@effect("update Post(title, body)")
+action "editPost" appliesTo {
+  principal: [User],
+  resource: [Post]
+};
+
+// 投稿を公開する(または下書きに戻す)。
+@effect("update Post(published)")
+action "publishPost" appliesTo {
+  principal: [User],
+  resource: [Post]
+};
+
+// 投稿を削除する。
+@effect("delete Post")
+action "deletePost" appliesTo {
+  principal: [User],
+  resource: [Post]
+};
+
+// 管理者権限を付与・剥奪する(利用者の admin 列を書き換える)。
+@effect("update User(admin)")
+action "setAdmin" appliesTo {
+  principal: [User],
+  resource: [User]
+};
+
+// 利用者を登録する(自分自身の User 行を admin=false で作る)。提案される値は context.values。
+@effect("insert User")
+action "registerUser" appliesTo {
+  principal: [User],
+  resource: [User],
+  context: { "values": { "admin": Bool } }
+};
+
+// 利用者を読む。本人と管理者だけ(policies.cedar)。
+@effect("read User")
+action "readUser" appliesTo {
+  principal: [User],
+  resource: [User]
+};

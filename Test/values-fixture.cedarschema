@@ -1,0 +1,64 @@
+// コアの検査用スキーマ。アプリケーションのファイルではない。
+// datetime / decimal の拡張値、Set<実体> / Set<String>、レコード型の属性を列として持ち、
+// Doc は所有者(親を指す列 owner)を親に持つ(ポリシーの `resource in principal` で判定する)。
+
+entity User = {
+  "admin": Bool
+};
+
+@parents("owner")
+entity Doc in [User] = {
+  "owner": User,
+  "viewers": Set<User>,
+  "labels": Set<String>,
+  "created": datetime,
+  "expires": datetime,
+  "price": decimal,
+  "meta": { "editor": User, "pinned": Bool, "note"?: String }
+};
+
+entity Anonymous;
+
+@effect("insert User")
+action "registerUser" appliesTo {
+  principal: [User],
+  resource: [User],
+  context: { "values": { "admin": Bool } }
+};
+
+@effect("read Doc")
+action "readDoc" appliesTo {
+  principal: [User, Anonymous],
+  resource: [Doc]
+};
+
+@effect("list Doc")
+action "listDocs" appliesTo {
+  principal: [User, Anonymous],
+  resource: [Doc]
+};
+
+@effect("insert Doc")
+action "createDoc" appliesTo {
+  principal: [User],
+  resource: [Doc],
+  context: { "values": {
+    "owner": User, "viewers": Set<User>, "labels": Set<String>, "created": datetime,
+    "expires": datetime, "price": decimal,
+    "meta": { "editor": User, "pinned": Bool, "note"?: String } } }
+};
+
+@effect("update Doc(viewers, labels, expires, price, meta)")
+action "editDoc" appliesTo {
+  principal: [User],
+  resource: [Doc],
+  context: { "values": {
+    "viewers"?: Set<User>, "labels"?: Set<String>, "expires"?: datetime, "price"?: decimal,
+    "meta"?: { "editor": User, "pinned": Bool, "note"?: String } } }
+};
+
+@effect("delete Doc")
+action "deleteDoc" appliesTo {
+  principal: [User],
+  resource: [Doc]
+};

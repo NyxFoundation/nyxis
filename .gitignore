@@ -1,0 +1,13 @@
+# Lake のビルド成果物と取得した依存
+.lake/
+
+# 環境ごとの秘密(Supabase のトークン等は環境変数で渡す)
+.env
+.env.*
+
+# Terraform のローカルキャッシュ・state・保存plan
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log

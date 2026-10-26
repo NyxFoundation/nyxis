@@ -1,0 +1,14 @@
+{
+  "revision": "10078db9e5f4885996dabb149baf245beb76ec4e",
+  "patch_sha256": "5c4ba7952c3952939ba63a27b682f27f2ec94dab04350ee34008496d551e3f72",
+  "files": {
+    "LeanPq/Extern.lean": {
+      "before": "0fad7d66bc5ac8ea8e108d9b7c512fb3552858f9dec98750f7f5e52c136d52e6",
+      "after": "62caceecac102765dc7d1c799d179b2d2e16844a281d257b017a272e727c3032"
+    },
+    "LeanPq/extern.c": {
+      "before": "c18ad2533a58e9b4a5e49dce2d6c6330071478e2c37ff0016ce6084219f72dfc",
+      "after": "5400a135f4274611e3eda24dc6dd7c215fcdada413f6e0007e6a2253642fab6e"
+    }
+  }
+}

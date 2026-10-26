@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>あなた</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F2F1EC;color:#17181A;font-family:"Zen Kaku Gothic New","Hiragino Sans",system-ui,sans-serif;font-size:16px;line-height:1.7}
+a{color:#17181A}
+h1,h2,h3,p{margin:0}
+.mono{font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:.88em;letter-spacing:.02em}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px;box-sizing:border-box;width:100%}
+.ic{width:18px;height:18px;flex:none}
+.wordmark{display:inline-flex;align-items:center;gap:10px;font-weight:900;font-size:18px;letter-spacing:.04em;text-decoration:none;color:#17181A;min-height:44px}
+.wordmark i{width:12px;height:12px;background:#C8311F;border-radius:2px;display:inline-block}
+.nav{display:flex;gap:4px 22px;flex-wrap:wrap}
+.nav a{display:inline-flex;align-items:center;min-height:44px;font-weight:700;font-size:15px;text-decoration:none;color:#6E7177;border-bottom:3px solid transparent}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:4px;border:1.5px solid #17181A;background:#17181A;color:#F2F1EC;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;box-sizing:border-box;white-space:nowrap}
+.btn.line{background:transparent;color:#17181A}
+.btn.plain{border-color:transparent;background:transparent;color:#4A4D52;font-weight:500}
+.btn.sm{min-height:36px;padding:0 12px;font-size:14px}
+.who{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:#17181A;min-height:44px;font-weight:700;font-size:14px}
+.avatar{width:32px;height:32px;border-radius:50%;background:#17181A;color:#F2F1EC;display:inline-flex;align-items:center;justify-content:center;font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:13px;flex:none;box-sizing:border-box}
+.avatar.big{width:64px;height:64px;font-size:22px}
+.sheet{background:#FFFFFF;border-top:3px solid #17181A;padding:28px 32px;box-sizing:border-box}
+.cap{font-size:12px;font-weight:700;letter-spacing:.14em;color:#6E7177}
+.can{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.can div{background:#FFFFFF;border-top:3px solid #17181A;padding:18px 16px;display:flex;flex-direction:column;gap:12px;font-weight:700;font-size:15px;line-height:1.4}
+.can .ic{width:30px;height:30px}
+.can .no{color:#9A9C9F;border-top-color:#D6D4CC}
+.can .mark{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#1F7A3E;color:#FFFFFF;margin-top:auto}
+.can .no .mark{background:#C8311F}
+.can .mark .ic{width:14px;height:14px}
+</style>
+</head>
+<body>
+<div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
+<header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
+  <nav class="nav" aria-label="メニュー">
+    <a href="post-list-anonymous.html">ホーム</a>
+    <a href="post-create.html">投稿</a>
+  </nav>
+  <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+    <a class="who" href="me.html" aria-current="page" aria-label="いまは 3f2a9c1e としてログイン中です"><span class="avatar">3f</span>ログイン中</a>
+    <button class="btn plain sm" type="button">ログアウト</button>
+  </div>
+</header>
+<div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
+<main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 28px; padding-top: 36px; padding-bottom: 56px">
+  <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">あなた</h1>
+  <section class="sheet" style="display: flex; flex-wrap: wrap; align-items: center; gap: 20px 28px">
+    <span class="avatar big">3f</span>
+    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 320px; min-width: 0">
+      <span style="font-weight: 900; font-size: 22px">ログイン中</span>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+        <span class="mono" style="word-break: break-all; color: #4A4D52">3f2a9c1e-5d7b-4e21-9a0c-1b2d3e4f5a6b</span>
+        <button class="btn plain sm" type="button" style="padding: 0 6px">
+          <svg class="ic" style="width: 16px; height: 16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          コピー
+        </button>
+      </div>
+    </div>
+    <button class="btn line" type="button">ログアウト</button>
+  </section>
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 class="cap">できること</h2>
+    <div class="can">
+      <div>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        <span>公開中の投稿を見る</span>
+        <span class="mark" role="img" aria-label="できる"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg></span>
+      </div>
+      <div>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+        <span>投稿する</span>
+        <span class="mark" role="img" aria-label="できる"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg></span>
+      </div>
+      <div>
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="m9 15 2 2 4-4"></path></svg>
+        <span>自分の投稿を直す・公開する・消す</span>
+        <span class="mark" role="img" aria-label="できる"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg></span>
+      </div>
+      <div class="no">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6"></path><path d="m15.5 7.5 3 3L22 7l-3-3"></path></svg>
+        <span>管理者を決める</span>
+        <span class="mark" role="img" aria-label="できない"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></span>
+      </div>
+    </div>
+  </section>
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 class="cap">ためす</h2>
+    <div style="display: flex; flex-wrap: wrap; gap: 10px">
+      <a class="btn line" href="post-detail-denied.html">ほかの人の下書きを開く</a>
+      <a class="btn line" href="admin-users.html">管理の画面を開く</a>
+    </div>
+  </section>
+</main>
+</div>
+</body>
+</html>

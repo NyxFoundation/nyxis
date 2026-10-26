@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>印と状態の部品</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F2F1EC;color:#17181A;font-family:"Zen Kaku Gothic New","Hiragino Sans",system-ui,sans-serif;font-size:16px;line-height:1.7}
+a{color:#17181A}
+h1,h2,h3,p{margin:0}
+.mono{font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:.88em;letter-spacing:.02em}
+.ic{width:18px;height:18px;flex:none}
+.cap{font-size:12px;font-weight:700;letter-spacing:.14em;color:#6E7177;border-top:1.5px solid #17181A;padding-top:8px}
+.sec{display:flex;flex-direction:column;gap:16px}
+.rowwrap{display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:4px;border:1.5px solid #17181A;background:#17181A;color:#F2F1EC;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;box-sizing:border-box;white-space:nowrap}
+.btn.line{background:transparent;color:#17181A}
+.btn.red{background:transparent;color:#C8311F;border-color:#C8311F}
+.btn.red.fill{background:#C8311F;color:#FFFFFF}
+.btn.plain{border-color:transparent;background:transparent;color:#4A4D52;font-weight:500}
+.btn.sm{min-height:36px;padding:0 12px;font-size:14px}
+.btn.ghost{background:#F2F1EC;color:#F2F1EC;border-color:transparent}
+.tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;border:1.5px solid currentColor;border-radius:2px;font-size:12px;font-weight:700;line-height:1;letter-spacing:.08em;white-space:nowrap}
+.tag.pub{color:#1F7A3E}
+.tag.draft{color:#6E7177;border-style:dashed}
+.tag.me{color:#2851A3}
+.tag.admin{color:#C8311F}
+.who{display:inline-flex;align-items:center;gap:10px;color:#17181A;min-height:44px;font-weight:700;font-size:14px}
+.avatar{width:32px;height:32px;border-radius:50%;background:#17181A;color:#F2F1EC;display:inline-flex;align-items:center;justify-content:center;font-family:"DM Mono",ui-monospace,Menlo,monospace;font-size:13px;flex:none;box-sizing:border-box}
+.avatar.guest{background:transparent;border:1.5px dashed #6E7177}
+.avatar.admin{background:#C8311F}
+.avatar.none{background:transparent;border:1.5px solid #B7791F;color:#B7791F}
+.stamp{display:inline-block;padding:10px 20px;border:3px solid #C8311F;border-radius:6px;color:#C8311F;font-weight:900;font-size:26px;letter-spacing:.18em;line-height:1.2;transform:rotate(-7deg);box-shadow:inset 0 0 0 3px #F2F1EC,inset 0 0 0 4px #C8311F;background:rgba(255,255,255,.9);white-space:nowrap}
+.stamp.ok{border-color:#1F7A3E;color:#1F7A3E;box-shadow:inset 0 0 0 3px #F2F1EC,inset 0 0 0 4px #1F7A3E}
+.stamp.sm{font-size:16px;padding:6px 14px;border-width:2px;box-shadow:inset 0 0 0 2px #F2F1EC,inset 0 0 0 3px currentColor;transform:rotate(-5deg)}
+.empty{border:1.5px dashed #9A9C9F;border-radius:4px;padding:36px 24px;text-align:center;color:#6E7177;font-weight:700;font-size:18px}
+.band{background:#17181A;color:#F2F1EC;display:flex;align-items:center;gap:14px;padding:10px 20px;font-weight:700;font-size:15px;border-radius:4px}
+.band .btn{min-height:36px;padding:0 12px;font-size:14px;background:transparent;color:#F2F1EC;border-color:#F2F1EC;margin-left:auto}
+.input{font:inherit;min-height:48px;padding:10px 0;border:0;border-bottom:1.5px solid #17181A;background:transparent;width:100%;box-sizing:border-box;color:#17181A;border-radius:0}
+.input.big{font-size:24px;font-weight:900}
+.input.attn{border-bottom-color:#B7791F;background:#FBF0D9;padding-left:8px}
+.input::placeholder{color:#B3B5B8}
+.attn-msg{font-size:13px;font-weight:700;color:#8A5A12;display:flex;align-items:center;gap:6px}
+.confirm{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;border:1.5px solid #C8311F;border-radius:4px;padding:12px 16px;color:#C8311F;font-weight:700}
+.toast{display:inline-flex;align-items:center;gap:10px;padding:10px 16px;border-radius:4px;background:#17181A;color:#F2F1EC;font-size:14px;font-weight:700}
+.toast .ic{color:#5BD08A}
+.seg{display:inline-flex;border:1.5px solid #17181A;border-radius:4px;overflow:hidden}
+.seg button{font:inherit;font-weight:700;min-height:44px;padding:0 18px;border:0;background:transparent;color:#17181A;cursor:pointer}
+.seg button.on{background:#17181A;color:#F2F1EC}
+.sheet{background:#FFFFFF;border-top:3px solid #17181A;padding:20px 24px;box-sizing:border-box}
+.sil{height:12px;background:#E6E4DD;border-radius:2px}
+</style>
+</head>
+<body>
+<div style="width: 1280px; box-sizing: border-box; padding: 48px 56px 56px; display: flex; flex-direction: column; gap: 40px; background: #F2F1EC">
+  <h1 style="font-size: 34px; font-weight: 900; letter-spacing: .02em; line-height: 1.2">印と状態の部品</h1>
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 56px">
+    <section class="sec">
+      <h2 class="cap">印 — 許可されなかったとき</h2>
+      <div class="rowwrap" style="gap: 32px; padding: 12px 0">
+        <span class="stamp">見られません</span>
+        <span class="stamp">できません</span>
+      </div>
+      <div class="sheet" style="position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 150px; overflow: hidden">
+        <div class="sil" style="width: 55%; height: 22px"></div>
+        <div class="sil" style="width: 90%"></div>
+        <div class="sil" style="width: 70%"></div>
+        <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center"><span class="stamp">見られません</span></div>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">印 — できたとき</h2>
+      <div class="rowwrap" style="gap: 32px; padding: 12px 0">
+        <span class="stamp ok">公開しました</span>
+        <span class="stamp ok sm">保存しました</span>
+        <span class="stamp ok sm">できました</span>
+      </div>
+      <div class="rowwrap">
+        <div class="toast" role="status"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg>消しました</div>
+        <div class="toast" role="status"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg>ログアウトしました</div>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">見つかりません</h2>
+      <div class="empty">見つかりません</div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">つながりません</h2>
+      <div class="band" role="alert">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 2 20 20"></path><path d="M8.5 16.4a5 5 0 0 1 7 0"></path><path d="M5 12.9a10 10 0 0 1 5.2-2.7"></path><path d="M19 12.9a10 10 0 0 0-3-2"></path><path d="M12 20h.01"></path></svg>
+        つながりません
+        <button class="btn" type="button">もう一度</button>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">入力をたしかめる</h2>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label class="mono" for="ex-title" style="font-size: 12px; color: #6E7177; font-weight: 700; letter-spacing: .1em">題名</label>
+        <input class="input big attn" id="ex-title" type="text" value="" placeholder="題名" aria-invalid="true" aria-describedby="ex-msg">
+        <p class="attn-msg" id="ex-msg"><svg class="ic" style="width: 14px; height: 14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4M12 16h.01"></path></svg>題名を入れてください</p>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">すでにあります</h2>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 14px">
+        <span style="font-weight: 700; letter-spacing: .1em; font-size: 12px; color: #6E7177">ID</span>
+        <span class="mono" style="color: #C8311F; text-decoration: line-through">9d1c7e2b-3a4f-4b6c-8e2d-0f1a2b3c4d5e</span>
+        <span style="font-weight: 700; color: #C8311F">このIDはすでにあります</span>
+        <button class="btn line sm" type="button">新しいIDに</button>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">タグ</h2>
+      <div class="rowwrap">
+        <span class="tag pub">公開中</span>
+        <span class="tag draft">下書き</span>
+        <span class="tag me">あなた</span>
+        <span class="tag admin">管理者</span>
+      </div>
+      <h2 class="cap">公開するかどうか</h2>
+      <div class="seg" role="group" aria-label="公開するかどうか">
+        <button type="button" class="on" aria-pressed="true">下書き</button>
+        <button type="button" aria-pressed="false">公開する</button>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">いま誰か</h2>
+      <div class="rowwrap" style="gap: 28px">
+        <span class="who"><span class="avatar guest"></span>ゲスト</span>
+        <span class="who"><span class="avatar">3f</span>ログイン中</span>
+        <span class="who"><span class="avatar admin">6c</span><span class="tag admin">管理者</span></span>
+        <span class="who"><span class="avatar none">3f</span>利用登録まだ</span>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">ボタン</h2>
+      <div class="rowwrap" style="gap: 10px">
+        <button class="btn" type="button">保存</button>
+        <button class="btn line" type="button">編集</button>
+        <button class="btn red" type="button">削除</button>
+        <button class="btn red fill" type="button">消す</button>
+        <button class="btn plain" type="button">やめる</button>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="cap">たしかめる</h2>
+      <div class="confirm" role="alertdialog">
+        <span>この投稿を消しますか?</span>
+        <div style="display: flex; gap: 8px; margin-left: auto">
+          <button class="btn red fill sm" type="button">消す</button>
+          <button class="btn plain sm" type="button">やめる</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

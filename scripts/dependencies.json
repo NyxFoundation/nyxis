@@ -1,0 +1,27 @@
+{
+  "lean-jose": {
+    "revision": "afc51478a8d39abed3cc373c266e65f2633fd7f7",
+    "sha256": "de6435538181c9a3012d57bd9160470145f53f39b25a6db1e5170bd2ceabadaf"
+  },
+  "jose-libcrypto": {
+    "revision": "d722d4a55c9dfebffe69dde58d8087ae3c004e09",
+    "sha256": "965544932523627d6ce200f2fe6bb7e61af41f62b466a98dd61af069e3363d60"
+  },
+  "lean-libcrypto": {
+    "revision": "d246281419d8df65c9405a86c5351609535dfeda",
+    "sha256": "9e5257aaf199b3ca9a0d061a1a52bee805fdd4be20d5c87f5fbb178d8025600f"
+  },
+  "lean-json": {
+    "revision": "c7323a3eb8323fb16ee451de495ff91192453aa5",
+    "sha256": "7401ffb6ad7e929cad525fcd6099f212e803e22a9e92aa9a08dd847d24ed98a7"
+  },
+  "leancrypto": {
+    "revision": "9119ae98445fefbe4f29f0ec90a455c186da7a75",
+    "sha256": "7fe5db3ef740ee864c576e08a1906c6d8bbcc16a8f92b038662c283ca1eeebed"
+  },
+  "lean-pq": {
+    "revision": "10078db9e5f4885996dabb149baf245beb76ec4e",
+    "sha256": "89a86e91082492ab93df3daca2581fc69fa89af034bba18cd5ebb11986642cd9",
+    "owner": "typednotes"
+  }
+}

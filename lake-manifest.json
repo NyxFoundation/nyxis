@@ -1,0 +1,87 @@
+{
+ "version": "1.2.0",
+ "packagesDir": ".lake/packages",
+ "packages": [
+  {
+   "type": "path",
+   "dir": ".lake/vendor/lean-pq",
+   "name": "leanPq",
+   "scope": "",
+   "inherited": false,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "url": "https://github.com/cedar-policy/cedar-spec",
+   "type": "git",
+   "subDir": "cedar-lean",
+   "scope": "",
+   "rev": "6d7fb269d5eec6ce4ae1d4aff9794feba0c0d5a9",
+   "name": "Cedar",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": "6d7fb269d5eec6ce4ae1d4aff9794feba0c0d5a9",
+   "inherited": false,
+   "configFile": "lakefile.lean"
+  },
+  {
+   "url": "https://github.com/leanprover-community/batteries",
+   "type": "git",
+   "subDir": null,
+   "scope": "leanprover-community",
+   "rev": "f2effa3d803fda822b1f97b806c47cf2adfbcbc2",
+   "name": "batteries",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": "v4.34.0",
+   "inherited": true,
+   "configFile": "lakefile.toml"
+  },
+  {
+   "type": "path",
+   "dir": ".lake/vendor/lean-jose",
+   "name": "jose",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": ".lake/vendor/jose-libcrypto",
+   "name": "«jose-libcrypto»",
+   "scope": "",
+   "inherited": false,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": ".lake/vendor/lean-libcrypto",
+   "name": "«lean-libcrypto»",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": ".lake/vendor/lean-json",
+   "name": "json",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  },
+  {
+   "type": "path",
+   "dir": ".lake/vendor/leancrypto",
+   "name": "leancrypto",
+   "scope": "",
+   "inherited": true,
+   "configFile": "lakefile.lean",
+   "manifestFile": "lake-manifest.json"
+  }
+ ],
+ "name": "nyxis",
+ "lakeDir": ".lake",
+ "fixedToolchain": false
+}
