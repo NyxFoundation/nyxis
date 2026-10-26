@@ -206,6 +206,20 @@ EOF
 audit_variant unsafe-decl 'unsafe declaration' <<'EOF'
 unsafe def BulletinBoard.escape (n : Nat) : Nat := n
 EOF
+audit_variant axiom-decl 'depends on axiom BulletinBoard.cheat' <<'EOF'
+axiom BulletinBoard.cheat : False
+EOF
+audit_variant forged-bound 'depends on axiom BulletinBoard.cheat' <<'EOF'
+axiom BulletinBoard.cheat : False
+namespace Unrelated
+def peek (i : Nat) : UInt8 := (ByteArray.mk #[0]).get i BulletinBoard.cheat.elim
+end Unrelated
+def BulletinBoard.leak : Nyxis.Handler Nyxis.Http.Response :=
+  pure { status := .ok, body := toString (Unrelated.peek 4096) }
+EOF
+audit_variant native-decide 'depends on axiom' <<'EOF'
+theorem BulletinBoard.viaNative : 2 + 2 = 4 := by native_decide
+EOF
 audit_variant extern-decl 'extern attribute' <<'EOF'
 @[extern "nyxis_test_unused"] opaque BulletinBoard.escape : Nat → Nat
 EOF
