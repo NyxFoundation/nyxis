@@ -11,6 +11,8 @@ import socket
 import subprocess
 import time
 
+import nyxis_docker
+
 if not __debug__:
     raise SystemExit('assertions disabled')
 
@@ -24,11 +26,23 @@ for _signal in (signal.SIGTERM, signal.SIGHUP):
 
 
 def scrub_docker_env(env):
-    """Use only the local Docker Desktop context, never a caller's remote daemon."""
-    for name in ('DOCKER_HOST', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH'):
-        env.pop(name, None)
-    env['DOCKER_CONTEXT'] = 'desktop-linux'
-    return env
+    """Use only the selected local Docker context (nyxis_docker), never a caller's remote daemon."""
+    try:
+        return nyxis_docker.scrub(env)
+    except ValueError:
+        raise SystemExit('NYXIS_DOCKER_CONTEXT is not a Docker context name') from None
+
+
+def require_local_docker(env):
+    """Before any SQL or child: the context pinned in `env` must inspect as a Unix socket."""
+    name = env['DOCKER_CONTEXT']
+    context = subprocess.run(['docker', 'context', 'inspect', name], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+    assert context.returncode == 0, 'Docker context unavailable'
+    try:
+        nyxis_docker.unix_endpoint(context.stdout, name)
+    except ValueError:
+        raise AssertionError('local Docker required') from None
 
 
 def require_free_port(port):
