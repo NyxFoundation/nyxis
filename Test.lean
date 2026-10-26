@@ -12,6 +12,7 @@ import Test.PostgresSnapshot
 import Test.Materials
 import Test.External
 import Test.CallSend
+import Test.MailSend
 import Test.Generated
 
 /-!
