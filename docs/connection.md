@@ -77,7 +77,7 @@
 
 - `Nyxis.Handler` は IO への持ち上げや DB の操作・状態を受け取る構成子を持たない。
 - `nyxis_check_app` は、検査器のコンパイル時に固定した信頼済みモジュール(nyxis とその Lean・Std・Cedar 等の依存)以外の全定数を調べ、`dbgTrace*` / `panic*` / `ptrAddrUnsafe` / `unsafeCast` / `sorryAx` / `setImplementedBy` への参照、unsafe 宣言、extern・implemented_by 属性、初期化、macro・elaborator 属性を拒否する。private な補助関数や別モジュールのラッパーも対象になる。
-- アプリからの lean-pq・JOSE・それらを使う `Nyxis.Internal.*` の import は、依存の extern 属性で監査が拒む。`Nyxis.Internal.Generated` / `HttpAuth` のように extern を持たない内部モジュールの import は監査に掛からないが、それらの処理は IO で、`Handler` の型からは呼べない。
+- アプリからの lean-pq・JOSE・それらを使う `Nyxis.Internal.*` の import は、依存の extern 属性で監査が拒む(`Nyxis.Internal.PostgresShapeBuild` は elaborator 属性で拒む)。`Nyxis.Internal.Generated` / `HttpAuth` / `CallSend` のように検査に掛かる定数を持たない内部モジュールの import は監査に掛からないが、それらの処理は IO で、`Handler` の型からは呼べない。
 - 限界: 監査は elaboration と import の後の環境を検査するもので、ビルドのサンドボックスではない。検査に到達する前のビルド過程の IO、定数を残さないコマンド、検査後に追加したコード、検査を削除・差し替えたビルドは防げず、`main` の IO の内容も制限しない。禁止リストの網羅性は未証明。これらは Assumption 3 として信頼する。
 
 ## 9. 型と定義による性質(仮定ではないもの。多くは定理の文ではなく型と定義の構造による)

@@ -30,5 +30,6 @@ import Nyxis.Build
 - `Nyxis.ReadSafety` — ハンドラに渡る行の出所についての系(接続層の証明が参照する)。
 - `Nyxis.AppCheck` — アプリケーションの最終モジュールが呼ぶ監査 `nyxis_check_app`(`ASSUMPTIONS.md` A7)。
 - `Nyxis.Internal.*` — 接続コード(JWT の検証、PostgreSQL、HTTP の入口、CORS、実起動 `ApprovedServer`)。
-  アプリケーションからの import は監査が拒む。起動処理だけが監査の後に import する。
+  起動処理だけが監査の後に import する。監査が拒むのは検査に掛かる定数を持ち込むもの(lean-pq・JOSE の extern、
+  `PostgresShapeBuild` の elaborator)だけで、`Generated` / `HttpAuth` / `CallSend` などは通る(`docs/connection.md` §8)。
 -/
