@@ -148,6 +148,20 @@ private def proposing (action : String) (key : String) (values : Row) : App :=
       let o ← Handler.callAction (act action) key values
       pure (BulletinBoard.noContent o)) }
 
+-- A write whose values are not of the declared Cedar types is never issued: its `context.values` is not an
+-- instance of the action's context type, so the per-decision premises fail and `Authz.permits` denies it.
+-- Only the earlier read reaches SQL and the response is 403. The shape check that `prepare` applies to every
+-- issued write rejects the same operation on its own.
+private def checkIllTypedWrite (name : String) (action : String) (key : String) (values : Row) : IO Unit := do
+  let some effect := BulletinBoard.schema.effectOf (act action) | throw (IO.userError s!"{name}: no effect")
+  let op := Operation.ofEffect effect key values
+  if Nyxis.Materials.premisesHold BulletinBoard.schema.types
+      (Authz.judgementRequest BulletinBoard.schema root BulletinBoardTest.Fixture.gen (act action) op) then
+    throw (IO.userError s!"{name}: request premises hold")
+  unless PostgresShape.validateOperation testPostgresShape store op matches .error _ do
+    throw (IO.userError s!"{name}: shape check accepted the write")
+  check name (proposing action key values) (req root .get "/") [.read postT "pub1"] 403
+
 def main : IO Unit := do
   for (p, owner, admin, authenticated) in
       [(anon, false, false, false), (alice, true, false, true),
@@ -204,10 +218,19 @@ def main : IO Unit := do
   checkShapeFailure "snapshot unknown column" BulletinBoard.app
     (store.put userT "root" (row [("admin", true), ("extra", true)]))
   checkShapeFailure "shape mismatch before authorization" BulletinBoard.app store []
-  checkShapeFailure "insert missing required values preflight" (proposing "createPost" "new" (row [("title", "t")]))
-  checkShapeFailure "conflicting insert still validates values" (proposing "createPost" "pub1" (row [("title", "t")]))
-  checkShapeFailure "update wrong type preflight" (proposing "editPost" "pub1" (row [("title", true)]))
-  checkShapeFailure "missing update still validates values" (proposing "setAdmin" "missing" (row [("admin", "true")]))
-  checkShapeFailure "insert wrong reference type preflight" (proposing "createPost" "new"
-    (row [("author", post "pub1"), ("title", "t"), ("body", "b"), ("published", false)]))
-  IO.println "PostgreSQL model replay: 69 cases passed (injected drivers, not HTTP/DB/JWT integration)"
+  -- Well-typed writes the model permits, with a value PostgreSQL cannot store (NUL): the preflight in `prepare`
+  -- (the shape check, and also SQL encoding) rejects them before the earlier read runs.
+  checkShapeFailure "insert unstorable value preflight" (proposing "createPost" "new" (postRow "root" "t\x00" false))
+  checkShapeFailure "conflicting insert still validates values"
+    (proposing "createPost" "pub1" (postRow "root" "t\x00" false))
+  checkShapeFailure "update unstorable value preflight" (proposing "editPost" "pub1" (row [("title", "t\x00")]))
+  checkShapeFailure "missing update still validates values" (proposing "editPost" "missing" (row [("title", "t\x00")]))
+  checkShapeFailure "insert unstorable reference preflight"
+    (proposing "createPost" "new" (postRow "a\x00" "t" false))
+  checkIllTypedWrite "insert missing required values denied" "createPost" "new" (row [("title", "t")])
+  checkIllTypedWrite "conflicting insert missing required values denied" "createPost" "pub1" (row [("title", "t")])
+  checkIllTypedWrite "update wrong type denied" "editPost" "pub1" (row [("title", true)])
+  checkIllTypedWrite "missing update wrong type denied" "setAdmin" "missing" (row [("admin", "true")])
+  checkIllTypedWrite "insert wrong reference type denied" "createPost" "new"
+    (row [("author", post "pub1"), ("title", "t"), ("body", "b"), ("published", false)])
+  IO.println "PostgreSQL model replay: 74 cases passed (injected drivers, not HTTP/DB/JWT integration)"
