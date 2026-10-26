@@ -87,4 +87,4 @@
 - 認可層 `Authz.step` が呼ぶ Cedar の評価器が cedar-spec の Lean モデルそのもの(`Cedar.Spec.isAuthorized`)であり、別の実装を使わないこと。したがって「Cedar の実装がモデルと一致する」という仮定を置かない(評価器を実行するランタイムは Assumption 1)。
 - 判定の実体は現在の行のうちスキーマに適合する行とスキーマのアクションで、親を指す列(`@parents`)と所属行(`@memberships`)の値のうち宣言された親の型のものが祖先になる(`Materials.rowAncestors_ty`)。認可層の実際の判定(`Authz.permits`)は要求から有限の段数で到達できる実体だけ(`Authz.materials`、cedar-lean の `sliceAtLevel`)で行う。全体での判定と一致することは定理(`Authz.permits_authorized`。proofs.md)。
 - ハンドラが読める要求ヘッダと設定できる応答ヘッダが列挙型に限られること(上の 2.)。「列挙外の名前が現れない」は型と定義による性質で、定理の文ではない。
-- 判定材料の約束: 主体の実体は常に DB の現在の行(無ければ実体なし)。対象は DB の現在の行、挿入で行が無ければ提案される行(主体自身を除く)。挿入・更新の提案値は `context.values`。書き込みの `Outcome.ok` は行を返さない。permit された操作が `conflict` / `notFound` で終わっても操作は記録される(状態は変わらない)。
+- 判定材料の約束: 主体の実体は常に DB の現在の行(無ければ実体なし)。対象は DB の現在の行、挿入で行が無ければ提案される行(主体自身を除く)。挿入・更新の提案値は `context.values`。書き込みの `Outcome.ok` は行を返さない。permit された操作が DB 層で `conflict`(挿入で同じ主キーの行がある)/ `notFound` に終わっても操作は記録される(状態は変わらない)。正本の制約(`@unique` / `@references`)に違反する操作は permit されていても記録されず `conflict` になり、競合が無く連鎖で消える行のどれかが permit されない削除は記録されず `denied` になる(どちらもその呼び出しだけ。競合の判定が先。`Authz.stepOp`)。
