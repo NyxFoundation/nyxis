@@ -48,10 +48,11 @@ def main (args : List String) : IO Unit := do
     return
   let backend : Nyxis.Runtime.AuthenticatedRequest → IO Nyxis.Http.Response := fun r => do
     if r.request.path == "/principal" then
-      return ⟨.ok, match r.principal with
+      return { status := .ok, body := match r.principal with
         | .anonymous => "anonymous"
-        | .user uid => uid.eid⟩
+        | .user uid => uid.eid }
     return (Nyxis.Runtime.handleRequest BulletinBoard.app BulletinBoardTest.Fixture.store r).result
   Nyxis.Http.serve port.toNat!.toUInt16 (Std.Http.Server.Handler.ofFn
     (Nyxis.Internal.PostgresHttp.handleAuthenticatedWith
-      (Nyxis.Internal.HttpAuth.principalOf BulletinBoardTest.Fixture.userT verify) backend))
+      (Nyxis.Internal.HttpAuth.principalOf BulletinBoardTest.Fixture.userT verify)
+      Nyxis.Internal.Generated.fresh backend))
