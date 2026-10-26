@@ -31,7 +31,7 @@ theorem app_policies (router : Http.Router) (jobs : List Runtime.Job := []) : (a
 URL の発行。通知のメール送信)は要求の主体と生成値について、この正本が `upload Doc` / `download Doc` /
 `mail Notification(email; subject, body)` を宣言したアクションで対象の行について permit され、内容(パス、または宛先・
 件名・本文)は nyxis がその行から決めたもの(`Authz.ExternalAuthorized`)で、ハンドラに渡った署名付き URL には
-その呼び出しの記録がある。記録された外部 API 呼び出し(この正本はまだ宣言していないので記録は生じない)の内容は
+その呼び出しの発行の記録がある。記録された外部 API 呼び出し(この正本はまだ宣言していないので記録は生じない)の内容は
 その正本の宣言と対象の行と提案値だけから決まり(`Authz.CallRecorded`)、ハンドラに渡った外部 API の応答にはその呼び出しの
 記録がある。定期処理の起動(主体はサービス主体)についても同じ。認可前の内部取得や生HTTP応答全体、URL や応答の中身は
 この結論に含まない。
@@ -59,7 +59,8 @@ theorem authorization_safety (router : Http.Router) (jobs : List Runtime.Job) (s
         ∀ c ∈ cs, ∀ url, c.outcome = .signed url →
           ∃ e, (r, e) ∈ (Runtime.trace (app router jobs) store requests).external ∧
             e.principal = r.principal ∧ e.generated = r.generated ∧ Authz.ExternalAuthorized schema policies e ∧
-            e.action = c.action ∧ e.key = c.key ∧ e.store = c.store)
+            e.action = c.action ∧ e.key = c.key ∧ e.store = c.store ∧
+            (e.payload.kind = .upload ∨ e.payload.kind = .download))
     ∧ (∀ r e, (r, e) ∈ (Runtime.trace (app router jobs) store requests).external → Authz.CallRecorded schema e)
     ∧ (∀ r cs, (r, cs) ∈ Runtime.traceCalls (app router jobs) store requests →
         ∀ c ∈ cs, c.outcome.isCalled = true →

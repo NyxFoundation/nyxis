@@ -587,16 +587,17 @@ theorem trace_result (app : App) (store : Store) (requests : List AuthenticatedR
       exact Or.inr he
 
 /-- リクエスト列の処理で、各リクエストのハンドラに渡った署名付き URL には、それを起こしたリクエストのその呼び出しが
-    記録した認可済みの外部効果がある(主定理の (7))。 -/
+    記録した認可済みの添付の署名付き URL の発行(内容は `Payload.upload` / `download`)がある(主定理の (7))。 -/
 theorem trace_signed (app : App) (store : Store) (requests : List AuthenticatedRequest) :
     ∀ r cs, (r, cs) ∈ traceCalls app store requests → ∀ c ∈ cs, ∀ url, c.outcome = .signed url →
       ∃ e, (r, e) ∈ (trace app store requests).external ∧
         e.principal = r.principal ∧ e.generated = r.generated ∧ ExternalAuthorized app.schema app.policies e ∧
-        e.action = c.action ∧ e.key = c.key ∧ e.store = c.store := by
+        e.action = c.action ∧ e.key = c.key ∧ e.store = c.store ∧
+        (e.payload.kind = .upload ∨ e.payload.kind = .download) := by
   intro r cs h c hc url ho
-  obtain ⟨e, he, hp, hg, hauth, ha, hk, hs, _⟩ :=
+  obtain ⟨e, he, hp, hg, hauth, ha, hk, hs, ext, hout⟩ :=
     trace_result app store requests r cs h c hc (by rw [ho]; rfl)
-  exact ⟨e, he, hp, hg, hauth, ha, hk, hs⟩
+  exact ⟨e, he, hp, hg, hauth, ha, hk, hs, Payload.outcome_signed e.payload ext url (by rw [← hout, ho])⟩
 
 /-- リクエスト列の処理で、各リクエストのハンドラに渡った外部 API の応答(`Outcome.called` / `calledError`)には、それを
     起こしたリクエストのその呼び出しが記録した認可済みの呼び出し(内容は `Payload.call`。(8) のとおり正本の宣言と対象の行と
@@ -706,7 +707,8 @@ URL の発行、メール送信、外部 API 呼び出し。`trace.external`)は
 
 **(7) 署名付き URL の由来**— 呼び出し `c` の結果が署名付き URL `Outcome.signed url` なら、同じリクエスト `r` で
 記録された外部効果 `e` があり、`e` は (6) のとおり認可済みで、`e.action = c.action`・`e.key = c.key`・`e.store = c.store`
-(その呼び出しのアクションと主キー、判定時の状態)である。すなわち、ハンドラ(したがって HTTP 応答)に渡る署名付き
+(その呼び出しのアクションと主キー、判定時の状態)、その内容は添付の署名付き URL の発行(`e.payload.kind` が `.upload`
+か `.download`)である。すなわち、ハンドラ(したがって HTTP 応答)に渡る署名付き
 URL は、その呼び出しについて permit された発行のものだけである。URL の中身(Storage が返した文字列)はこの定理の主張に
 含まない(`r.externals` は任意)。実際の URL は発行の対象のパス `e.object` を含むので、ダウンロードの permit は添付の列の
 現在の値(オブジェクトの名)をハンドラに見せる — それは `download` の効果が宣言する範囲(permit された行の添付への到達)
@@ -760,7 +762,8 @@ theorem authorization_safety (app : App) (store : Store) (requests : List Authen
     ∧ (∀ r cs, (r, cs) ∈ traceCalls app store requests → ∀ c ∈ cs, ∀ url, c.outcome = .signed url →
         ∃ e, (r, e) ∈ (trace app store requests).external ∧
           e.principal = r.principal ∧ e.generated = r.generated ∧ ExternalAuthorized app.schema app.policies e ∧
-          e.action = c.action ∧ e.key = c.key ∧ e.store = c.store)
+          e.action = c.action ∧ e.key = c.key ∧ e.store = c.store ∧
+          (e.payload.kind = .upload ∨ e.payload.kind = .download))
     ∧ (∀ r e, (r, e) ∈ (trace app store requests).external → CallRecorded app.schema e)
     ∧ (∀ r cs, (r, cs) ∈ traceCalls app store requests → ∀ c ∈ cs, c.outcome.isCalled = true →
         ∃ e, (r, e) ∈ (trace app store requests).external ∧

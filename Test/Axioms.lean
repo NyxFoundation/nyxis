@@ -104,6 +104,7 @@ elab "#assert_axioms_under " ns:ident : command => do
 #assert_axioms Nyxis.Authz.step_result
 #assert_axioms Nyxis.Authz.call_recorded
 #assert_axioms Nyxis.Authz.Payload.outcome_isCalled
+#assert_axioms Nyxis.Authz.Payload.outcome_signed
 #assert_axioms Nyxis.Authz.externalStep_eq_of_covers
 #assert_axioms Nyxis.Authz.step_external_indep
 #assert_axioms Nyxis.Runtime.App.handlerOf_externals

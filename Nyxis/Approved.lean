@@ -36,10 +36,10 @@ theorem app_policies (sources : Approved) (router : Http.Router) (jobs : List Ru
 アクション(その宣言のテーブルの行の削除。`Authz.ActionOrigin`)である。記録された外部効果(添付の署名付き URL の
 発行。メール送信。外部 API 呼び出し)は要求の主体と生成値について、その正本が効果を宣言したアクションで
 対象の行について permit され、内容は nyxis が決めたもの(`Authz.ExternalAuthorized`)で、ハンドラに渡った署名付き URL には
-その呼び出し(同じアクション・主キー・判定時の状態)の記録がある。記録された呼び出しの送り先・メソッド・URL・本文はその
-正本の宣言(効果と `@external` の送り先)と対象の行と判定を通った提案値だけから決まり(`Authz.CallRecorded`)、ハンドラに
-渡った外部 API の応答にはその呼び出しの認可済みの記録がある(応答の値は任意で判定を変えない)。認可前の内部取得や
-生HTTP応答全体、URL や応答の中身はこの結論に含まない。
+その呼び出し(同じアクション・主キー・判定時の状態)の発行の記録がある。記録された呼び出しの送り先・メソッド・URL・本文は
+その正本の宣言(効果と `@external` の送り先)と対象の行と判定を通った提案値だけから決まり(`Authz.CallRecorded`)、
+ハンドラに渡った外部 API の応答にはその呼び出しの認可済みの記録がある(応答の値は任意で判定を変えない)。認可前の
+内部取得や生HTTP応答全体、URL や応答の中身はこの結論に含まない。
 -/
 theorem authorization_safety (sources : Approved) (router : Http.Router) (jobs : List Runtime.Job)
     (store : Db.Store) (requests : List Runtime.AuthenticatedRequest) :
@@ -68,7 +68,8 @@ theorem authorization_safety (sources : Approved) (router : Http.Router) (jobs :
           ∃ e, (r, e) ∈ (Runtime.trace (sources.app router jobs) store requests).external ∧
             e.principal = r.principal ∧ e.generated = r.generated ∧
             Authz.ExternalAuthorized sources.schema sources.policies e ∧
-            e.action = c.action ∧ e.key = c.key ∧ e.store = c.store)
+            e.action = c.action ∧ e.key = c.key ∧ e.store = c.store ∧
+            (e.payload.kind = .upload ∨ e.payload.kind = .download))
     ∧ (∀ r e, (r, e) ∈ (Runtime.trace (sources.app router jobs) store requests).external →
         Authz.CallRecorded sources.schema e)
     ∧ (∀ r cs, (r, cs) ∈ Runtime.traceCalls (sources.app router jobs) store requests →
