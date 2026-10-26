@@ -95,6 +95,16 @@ private def fullDoc : Row := row
    ("labels", .set (Cedar.Data.Set.make [.prim (.string "x")])), ("created", stamp 10),
    ("price", .ext (.decimal (Int64.ofInt 12345))), ("meta", fullMeta)]
 #guard (validateRow docShape doc fullDoc).isOk
+-- 正規形でない集合・レコード(整列していない・重複のある値)は保存形式にできないので拒む。整列済みなら
+-- `Set.mk` / `Map.mk` で作った値も受け入れる。
+#guard !(validatePatch docShape doc (row [("viewers", .set (Cedar.Data.Set.mk [userRef "b", userRef "a"]))])).isOk
+#guard !(validatePatch docShape doc
+  (row [("labels", .set (Cedar.Data.Set.mk [.prim (.string "x"), .prim (.string "x")]))])).isOk
+#guard !(validateRow docShape doc (fullDoc.patch (row [("meta", .record (Cedar.Data.Map.mk
+  [("title", .prim (.string "t")), ("editor", userRef "e"), ("since", stamp 1)]))]))).isOk
+#guard (validatePatch docShape doc (row [("viewers", .set (Cedar.Data.Set.mk [userRef "a", userRef "b"]))])).isOk
+#guard (validateRow docShape doc (fullDoc.patch (row [("meta", .record (Cedar.Data.Map.mk
+  [("editor", userRef "e"), ("since", stamp 1), ("title", .prim (.string "t"))]))]))).isOk
 #guard (validateRow docShape doc (fullDoc.patch (row
   [("updated", stamp 11), ("ttl", .ext (.duration ⟨Int64.ofInt 5⟩)),
    ("viewers", .set Cedar.Data.Set.empty),
