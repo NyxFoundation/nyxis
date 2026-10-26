@@ -13,7 +13,7 @@ import tempfile
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCK = json.loads((ROOT / 'scripts/dependencies.json').read_text())
+LOCK = json.loads((ROOT / 'scripts/dependencies.json').read_text(encoding='utf-8'))
 CACHE = ROOT / '.lake/vendor'
 
 
@@ -29,7 +29,7 @@ def digest_tree(path):
 
 
 def pq_metadata():
-    metadata = json.loads((ROOT / 'scripts/patches/lean-pq-ownership.json').read_text())
+    metadata = json.loads((ROOT / 'scripts/patches/lean-pq-ownership.json').read_text(encoding='utf-8'))
     patch = (ROOT / 'scripts/patches/lean-pq-ownership.patch').read_bytes()
     if (metadata['revision'] != LOCK['lean-pq']['revision'] or
             hashlib.sha256(patch).hexdigest() != metadata['patch_sha256']):
@@ -63,9 +63,9 @@ def install():
         patch_metadata = pq_metadata()[0] if name == 'lean-pq' else None
         patch_id = patch_metadata['patch_sha256'] if patch_metadata else None
         if destination.exists():
-            expected = {'pin': pin, 'toolchain': (ROOT / 'lean-toolchain').read_text(),
+            expected = {'pin': pin, 'toolchain': (ROOT / 'lean-toolchain').read_text(encoding='utf-8'),
                         'adaptation': 1, 'tree': digest_tree(destination)}
-            actual = json.loads(marker.read_text()) if marker.is_file() else None
+            actual = json.loads(marker.read_text(encoding='utf-8')) if marker.is_file() else None
             if actual and 'patch' in actual:
                 expected['patch'] = patch_id
                 if not patch_metadata or not pq_matches(destination, patch_metadata, 'after'):
@@ -75,7 +75,7 @@ def install():
             if name == 'lean-pq' and 'patch' not in actual:
                 expected['patch'] = pq_patch(destination)
                 expected['tree'] = digest_tree(destination)
-                marker.write_text(json.dumps(expected, indent=2) + '\n')
+                marker.write_text(json.dumps(expected, indent=2) + '\n', encoding='utf-8', newline='\n')
             print(f'{name}: locked sources verified' + (' (approved ownership patch)' if patch_id else ''))
             continue
         with tempfile.TemporaryDirectory(prefix='prepare-', dir=CACHE) as temporary:
@@ -92,7 +92,7 @@ def install():
                 source.extractall(work, filter='data')
             path = work / f'{name}-{pin["revision"]}'
             config = path / 'lakefile.lean'
-            text = config.read_text()
+            text = config.read_text(encoding='utf-8')
             def dependency(match):
                 repo = match[2].rsplit('/', 1)[-1]
                 if repo not in LOCK:
@@ -106,15 +106,15 @@ def install():
                 if text.count(old) != 1:
                     raise RuntimeError('lean-json: unexpected compatibility configuration')
                 text = text.replace(old, old + ', ⟨`linter.deprecated, false⟩')
-            config.write_text(text)
+            config.write_text(text, encoding='utf-8', newline='\n')
             (path / 'lake-manifest.json').unlink(missing_ok=True)
-            toolchain = (ROOT / 'lean-toolchain').read_text()
-            (path / 'lean-toolchain').write_text(toolchain)
+            toolchain = (ROOT / 'lean-toolchain').read_text(encoding='utf-8')
+            (path / 'lean-toolchain').write_text(toolchain, encoding='utf-8', newline='\n')
             metadata = {'pin': pin, 'toolchain': toolchain, 'adaptation': 1}
             if name == 'lean-pq':
                 metadata['patch'] = pq_patch(path)
             metadata['tree'] = digest_tree(path)
-            (path / 'nyxis-source.json').write_text(json.dumps(metadata, indent=2) + '\n')
+            (path / 'nyxis-source.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8', newline='\n')
             shutil.move(str(path), destination)
         print(f'{name}: installed {pin["revision"]} (archive SHA256 verified)')
 
