@@ -98,11 +98,11 @@ try:
     checks += 1
 
     # Injection attempts: invalid Content-Type/ETag are dropped (default Content-Type returns),
-    # Set-Cookie never appears, only the valid Location remains.
+    # Set-Cookie never appears, Location remains, and unsafe Cache-Control becomes no-store.
     _, response_headers = expect('GET', '/inject', 201)
     assert values(response_headers, 'location') == ['/echo'], response_headers
     assert values(response_headers, 'etag') == [], response_headers
-    assert values(response_headers, 'cache-control') == [], response_headers
+    assert values(response_headers, 'cache-control') == ['no-store'], response_headers
     assert not any(k == 'set-cookie' or 'set-cookie' in v.lower() for k, v in response_headers), response_headers
     checks += 1
 
@@ -112,7 +112,13 @@ try:
     checks += 1
 
     # The principal comes from Authorization alone: the authorization layer sees alice, the handler does not.
-    expect('GET', '/posts/draft1', 200, headers=[('Authorization', 'Bearer test-alice')])
+    text, response_headers = expect('GET', '/posts/draft1', 200,
+                                    headers=[('Authorization', 'Bearer test-alice')])
+    assert text == 'draft', text
+    # RFC 9111 section 3.5: must-revalidate permits sharing authenticated responses.
+    # Do not let the handler make Alice's authorized draft reusable by another user.
+    assert values(response_headers, 'cache-control') == ['no-store'], response_headers
+    expect('GET', '/posts/draft1', 403, headers=[('Authorization', 'Bearer test-bob')])
     expect('GET', '/posts/draft1', 403)
     expect('GET', '/posts/draft1', 403, headers=[('Cookie', 'auth=test-alice'), ('X-Principal', 'alice')])
     expect('GET', '/posts/draft1', 403, headers=[('Authorization', 'Bearer unknown')])

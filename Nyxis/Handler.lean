@@ -20,9 +20,9 @@ Content-Type・If-None-Match・If-Match。名前は型で列挙され、Authoriz
 
 ハンドラが返す応答は `Http.Response`: 状態コード・本文・nyxis が許す少数の応答ヘッダ(`ResponseHeader`:
 Content-Type・Cache-Control・ETag・Location。名前は型で列挙され、Set-Cookie には構成子が無い)。
-Content-Type を設定しなければ `text/plain; charset=utf-8`。HTTP のヘッダ値として妥当でない値(改行・制御文字・非 ASCII)と、
-認証済みの主体への応答を共有キャッシュが別の主体へ再送することを許す Cache-Control の `public` / `s-maxage` は
-接続層が捨てる(`Nyxis.Http.responseBuilder`)。
+Content-Type を設定しなければ `text/plain; charset=utf-8`。HTTP のヘッダ値として妥当でない値(改行・制御文字・非 ASCII)は
+接続層が捨てる。認証済みの主体への応答を共有キャッシュが別の主体へ再送することを許す `public` / `s-maxage` /
+`must-revalidate` を含む Cache-Control は `no-store` に置き換える(`Nyxis.Http.responseBuilder`)。
 -/
 
 namespace Nyxis
@@ -124,8 +124,9 @@ structure Request where
   headers : List (RequestHeader × String) := []
 
 /-- ハンドラが返す HTTP レスポンス。`headers` は nyxis が許す応答ヘッダ(同じ名前は最初のものだけが使われ、
-    HTTP のヘッダ値として妥当でない値(改行・制御文字・非 ASCII)と、共有キャッシュへの保存を許す
-    Cache-Control の `public` / `s-maxage` は捨てられる)。Content-Type を設定しなければ `text/plain; charset=utf-8`。 -/
+    HTTP のヘッダ値として妥当でない値(改行・制御文字・非 ASCII)は捨てられる。共有キャッシュへの保存を許す
+    `public` / `s-maxage` / `must-revalidate` を含む Cache-Control は `no-store` に置き換える)。
+    Content-Type を設定しなければ `text/plain; charset=utf-8`。 -/
 structure Response where
   status : Std.Http.Status
   body : String

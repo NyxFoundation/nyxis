@@ -103,13 +103,27 @@ private def allowed : Response :=
 -- 同じ名前は最初のものだけ(2 つめ以降は妥当でも使わない)。
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "\"a\""), (.etag, "\"b\"")] } "etag" == ["\"a\""]
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "bad\nvalue"), (.etag, "\"b\"")] } "etag" == []
--- Cache-Control: 共有キャッシュへの保存を許す public / s-maxage は捨てる(大小・空白を問わない)。
+-- Cache-Control: 共有キャッシュへの保存を許す指示は no-store に置き換える(大小・空白を問わない)。
 #guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "private, max-age=0")] } "cache-control"
   == ["private, max-age=0"]
-#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "public, max-age=60")] } "cache-control" == []
-#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "max-age=60, S-MaxAge = 10")] } "cache-control" == []
-#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, " Public ")] } "cache-control" == []
-#guard acceptableCacheControl "no-cache, no-store, must-revalidate"
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "public, max-age=60")] } "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "max-age=60, S-MaxAge = 10")] } "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, " Public ")] } "cache-control" == ["no-store"]
+-- must-revalidate も認証付き応答の共有を許す(RFC 9111 §3.5)。新鮮な応答は再認可されずに再利用されうる。
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "max-age=60, must-revalidate")] }
+  "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, " MuSt-ReVaLiDaTe ")] }
+  "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "must-revalidate"),
+    (.cacheControl, "private, max-age=60")] } "cache-control" == ["no-store"]
+#guard acceptableCacheControl "no-cache, no-store"
+#guard !acceptableCacheControl "must-revalidate"
+#guard !acceptableCacheControl "no-cache, no-store, must-revalidate"
+-- 拒否する指示が混ざっても、元の no-store を消して保存可能にしてはならない。
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "no-cache, no-store, must-revalidate")] }
+  "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "must-revalidate, \r\nSet-Cookie: a=b")] }
+  "cache-control" == []
 #guard !acceptableCacheControl "public"
 #guard !acceptableCacheControl "s-maxage=1"
 #guard acceptable .etag "public"
