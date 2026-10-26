@@ -29,7 +29,8 @@ import nyxis_local
 DATABASE = 'nyxis_external_test_' + uuid.uuid4().hex
 ENV = nyxis_local.scrub_docker_env(os.environ.copy())
 PAY_SECRET = 'pay-' + uuid.uuid4().hex
-MAPS_SECRET = 'maps-' + uuid.uuid4().hex
+MAPS_SECRET = 'maps ' + uuid.uuid4().hex  # `auth: header` values may contain spaces (e.g. `Basic …`)
+SECRETS = (PAY_SECRET, MAPS_SECRET, MAPS_SECRET.split()[-1])  # leak checks also cover the part after the space
 BINARY = ROOT / '.lake/build/bin/checkExternalCalls'
 checks = 0
 
@@ -180,8 +181,8 @@ def main():
             lean_checks = int(summary.split()[1])
             expect(lean_checks >= 40, 'unexpectedly few Lean checks')
             # The secrets never reach the executable's output (responses, check names, exception texts).
-            expect(PAY_SECRET not in output and MAPS_SECRET not in output, 'secret in stdout')
-            expect(PAY_SECRET not in errors and MAPS_SECRET not in errors, 'secret in stderr')
+            expect(all(s not in output for s in SECRETS), 'secret in stdout')
+            expect(all(s not in errors for s in SECRETS), 'secret in stderr')
             # The mock saw exactly the permitted calls, in order, each with the configured authentication header
             # and a body made of the declared columns and the proposed values only (none on GET).
             seen = [(m, p, a, b) for (m, p, a, b, clean) in record]
@@ -195,7 +196,7 @@ def main():
                                 'o-nested=new,o-ok=charged,o-plain=new,o-slow=new,o-text=new,o-wrong=new'),
                    'order statuses: ' + statuses)
             dump = sql('SELECT string_agg(to_jsonb(o)::text, \',\') FROM public."Order" o;', DATABASE)
-            expect(PAY_SECRET not in dump and MAPS_SECRET not in dump, 'secret stored in the database')
+            expect(all(s not in dump for s in SECRETS), 'secret stored in the database')
             # The schema tables plus nyxis's reserved outbox (created with every schema, empty here: no async call).
             tables = sql('''SELECT string_agg(table_name, ',' ORDER BY table_name COLLATE "C")
                             FROM information_schema.tables WHERE table_schema = 'public';''', DATABASE)

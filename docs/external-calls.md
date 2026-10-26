@@ -69,7 +69,9 @@ entity Stripe;
 - `base`: `https://` で始まる固定のベース URL。パスを含んでよい。末尾の `/` は正規化する。
 - `auth`: 次の 3 種。環境変数名だけが正本に載り、値はコア設定で渡す。未設定なら起動を拒む。
   - `bearer <環境変数名>` — `Authorization: Bearer <値>`
-  - `header <ヘッダ名> <環境変数名>` — 任意の 1 ヘッダ(例: `header X-API-Key NYXIS_EXT_MAPS`)
+  - `header <ヘッダ名> <環境変数名>` — 任意の 1 ヘッダ(例: `header X-API-Key NYXIS_EXT_MAPS`)。値は前後の空白を
+    除いたうえで、途中に空白(SP)を含んでよい(例: `header Authorization NYXIS_EXT_LEGACY` に `Basic …` を渡す)。
+    `bearer` の値は空白を含まない
   - `none`
 - 1 つの正本に送り先はいくつでも宣言できる。
 
