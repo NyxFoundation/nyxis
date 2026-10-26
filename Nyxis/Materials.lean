@@ -245,13 +245,14 @@ def rowData (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Membership
     (uid : EntityUID) (row : Row) : EntityData :=
   { attrs := row, ancestors := rowAncestors ts pc mc store uid row, tags := Map.empty }
 
-/-- DB の状態のうち、スキーマに適合する行の実体(主キー順は `Store` のまま)。行はその主キーで `find?` を引き直す
-    (`Store.rows` と同じ経路。同じ主キーが重複していても `find?` の行だけが実体になる)。 -/
-def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) :
+/-- DB の状態 `store` のうち、スキーマに適合する行の実体(主キー順は `Store` のまま)。行はその主キーで `find?` を引き直す
+    (`Store.rows` と同じ経路。同じ主キーが重複していても `find?` の行だけが実体になる)。所属行から得る祖先は状態
+    `members` の所属行から決める(`entitiesWith`)。 -/
+def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (members store : Store) :
     List (EntityUID × EntityData) :=
   store.toList.filterMap fun kv =>
     match Map.find? store kv.1 with
-    | some row => if conforms ts kv.1 row then some (kv.1, rowData ts pc mc store kv.1 row) else none
+    | some row => if conforms ts kv.1 row then some (kv.1, rowData ts pc mc members kv.1 row) else none
     | none => none
 
 /-- スキーマの全アクションの実体。属性・tag は無く、祖先は宣言どおり(`actionSchemaEntryToEntityData`)。
@@ -260,14 +261,21 @@ def actionEntries (ts : Cedar.Validation.Schema) : List (EntityUID × EntityData
   ts.acts.toList.filterMap fun kv =>
     (ts.acts.find? kv.1).map fun entry => (kv.1, Cedar.Validation.actionSchemaEntryToEntityData entry)
 
-/-- 判定の実体: DB の状態のうちスキーマに適合する行(親を指す列と所属行の値を祖先に持つ)と、スキーマの全アクション。 -/
-def entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) : Entities :=
-  Map.make (rowEntries ts pc mc store ++ actionEntries ts)
+/-- 判定の実体の一般形: 状態 `store` のうちスキーマに適合する行(親を指す列の値と、状態 `members` の所属行の値を祖先に
+    持つ)と、スキーマの全アクション。挿入の判定(`Nyxis.Authz.judgementEntities`)は、行には提案される行を置いた状態を、
+    所属行には挿入の前の状態を使う(提案される行は対象の実体になるだけで、他の実体 — 主体を含む — の祖先を変えない)。 -/
+def entitiesWith (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (members store : Store) :
+    Entities :=
+  Map.make (rowEntries ts pc mc members store ++ actionEntries ts)
 
-theorem mem_rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store)
-    (u : EntityUID) (d : EntityData) :
-    (u, d) ∈ rowEntries ts pc mc store ↔
-      ∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc store u row := by
+/-- 判定の実体: DB の状態のうちスキーマに適合する行(親を指す列と所属行の値を祖先に持つ)と、スキーマの全アクション。 -/
+abbrev entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) : Entities :=
+  entitiesWith ts pc mc store store
+
+theorem mem_rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
+    (members store : Store) (u : EntityUID) (d : EntityData) :
+    (u, d) ∈ rowEntries ts pc mc members store ↔
+      ∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc members u row := by
   simp only [rowEntries, List.mem_filterMap]
   constructor
   · rintro ⟨⟨u', r⟩, _, hsome⟩
@@ -297,9 +305,9 @@ theorem mem_actionEntries (ts : Cedar.Validation.Schema) (u : EntityUID) (d : En
 
 /-- 判定の実体の組は鍵ごとに一意(行は `find?` の行、アクションは `find?` の項目、両者の UID は重ならない)。 -/
 theorem entries_functional (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (store : Store) :
-    ∀ k v v', (k, v) ∈ rowEntries ts pc mc store ++ actionEntries ts →
-      (k, v') ∈ rowEntries ts pc mc store ++ actionEntries ts → v = v' := by
+    (members store : Store) :
+    ∀ k v v', (k, v) ∈ rowEntries ts pc mc members store ++ actionEntries ts →
+      (k, v') ∈ rowEntries ts pc mc members store ++ actionEntries ts → v = v' := by
   intro k v v' h h'
   simp only [List.mem_append, mem_rowEntries, mem_actionEntries] at h h'
   rcases h with ⟨row, hr, hc, rfl⟩ | ⟨entry, he, rfl⟩ <;>
@@ -321,12 +329,12 @@ theorem entries_functional (ts : Cedar.Validation.Schema) (pc : ParentColumns) (
 
 /-- 判定の実体の `find?`: 適合する現在の行か、スキーマのアクション。 -/
 theorem entities_find?_iff (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (store : Store) (u : EntityUID) (d : EntityData) :
-    (entities ts pc mc store).find? u = some d ↔
-      (∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc store u row) ∨
+    (members store : Store) (u : EntityUID) (d : EntityData) :
+    (entitiesWith ts pc mc members store).find? u = some d ↔
+      (∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc members u row) ∨
       (∃ entry, ts.acts.find? u = some entry ∧ d = Cedar.Validation.actionSchemaEntryToEntityData entry) := by
-  unfold entities
-  rw [find?_make_iff_mem (entries_functional ts pc mc store)]
+  unfold entitiesWith
+  rw [find?_make_iff_mem (entries_functional ts pc mc members store)]
   simp only [List.mem_append, mem_rowEntries, mem_actionEntries]
 
 /-- `(key, row)` がテーブルの現在の行列にあるのは、その主キーで `find?` を引いた現在の行がそれであるとき、
@@ -381,14 +389,14 @@ theorem rowData_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Mem
       · exact Or.inr ((membershipRefs_mem mc s₁ s₂ u hm x).mpr h)
   · rfl
 
-/-- 型環境のテーブルの UID について 2 つの状態の `find?` が一致し、その実体の所属行が集合として同じなら、
-    判定の実体の `find?` も一致する(テーブルでない型の UID は行の実体にならないので、状態に依らない)。 -/
+/-- 型環境のテーブルの UID について 2 つの状態の `find?` が一致し、その実体の所属行が(所属行を見る状態どうしで)
+    集合として同じなら、判定の実体の `find?` も一致する(テーブルでない型の UID は行の実体にならないので、状態に依らない)。 -/
 theorem entities_find?_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (s₁ s₂ : Store) (u : EntityUID)
+    (m₁ s₁ m₂ s₂ : Store) (u : EntityUID)
     (h : (ts.ets.find? u.ty).isSome = true → Map.find? s₁ u = Map.find? s₂ u)
     (hm : (ts.ets.find? u.ty).isSome = true →
-      ∀ m ∈ (mc.lookup u.ty).getD [], RowsAgree s₁ s₂ m.table (m.filterOf u)) :
-    (entities ts pc mc s₁).find? u = (entities ts pc mc s₂).find? u := by
+      ∀ m ∈ (mc.lookup u.ty).getD [], RowsAgree m₁ m₂ m.table (m.filterOf u)) :
+    (entitiesWith ts pc mc m₁ s₁).find? u = (entitiesWith ts pc mc m₂ s₂).find? u := by
   apply Option.ext
   intro d
   rw [entities_find?_iff, entities_find?_iff]
@@ -403,7 +411,7 @@ theorem entities_find?_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (m
   | some entry =>
     have htab : (ts.ets.find? u.ty).isSome = true := by rw [hty]; rfl
     rw [h htab]
-    simp only [rowData_eq ts pc mc s₁ s₂ u _ (hm htab)]
+    simp only [rowData_eq ts pc mc m₁ m₂ u _ (hm htab)]
 
 /-! ## 判定ごとの前提の検査 -/
 
@@ -458,15 +466,15 @@ theorem rowAncestors_ty (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc 
   simp only [Set.mem_make, List.mem_filter] at hanc
   exact Set.contains_prop_bool_equiv.mp hanc.2
 
-/-- 判定の実体 `entities ts pc mc store` は、どんな DB の状態についても、型環境 `ts` の各環境のインスタンスである
+/-- 判定の実体 `entitiesWith ts pc mc members store` は、どんな DB の状態についても、型環境 `ts` の各環境のインスタンスである
     (cedar-lean の `InstanceOfSchema`): 各実体は適合する行(祖先の型は宣言どおり)かスキーマのアクションで、
     全アクションが存在する。 -/
 theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (env : Cedar.Validation.TypeEnv) (store : Store) (hets : env.ets = ts.ets) (hacts : env.acts = ts.acts) :
-    Cedar.Thm.InstanceOfSchema (entities ts pc mc store) env := by
+    (env : Cedar.Validation.TypeEnv) (members store : Store) (hets : env.ets = ts.ets) (hacts : env.acts = ts.acts) :
+    Cedar.Thm.InstanceOfSchema (entitiesWith ts pc mc members store) env := by
   constructor
   · intro uid data hfind
-    rcases (entities_find?_iff ts pc mc store uid data).mp hfind with ⟨row, _, hconf, rfl⟩ | ⟨entry, hfind', rfl⟩
+    rcases (entities_find?_iff ts pc mc members store uid data).mp hfind with ⟨row, _, hconf, rfl⟩ | ⟨entry, hfind', rfl⟩
     · left
       unfold conforms at hconf
       simp only [Bool.and_eq_true] at hconf
@@ -489,7 +497,7 @@ theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentCol
           rw [hschema]
           exact htype
         · intro anc hanc
-          exact rowAncestors_ty ts pc mc store uid row entry hentry anc hanc
+          exact rowAncestors_ty ts pc mc members uid row entry hentry anc hanc
         · unfold Cedar.Thm.InstanceOfEntityTags
           split
           · intro v hv
@@ -508,10 +516,10 @@ theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentCol
 /-- 型環境が well-formed で要求がある環境のインスタンスなら、判定の実体はその環境のもとで cedar-lean の
     slicing 定理の前提(`InstanceOfWellFormedSchema`)を満たす。 -/
 theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (store : Store) (req : Request)
+    (members store : Store) (req : Request)
     (hwf : ts.validateWellFormed = .ok ())
     (hreq : Cedar.Validation.validateRequest ts req = .ok ()) :
-    Cedar.Thm.InstanceOfWellFormedSchema ts req (entities ts pc mc store) := by
+    Cedar.Thm.InstanceOfWellFormedSchema ts req (entitiesWith ts pc mc members store) := by
   simp only [Cedar.Validation.validateRequest] at hreq
   split at hreq
   · rename_i hany
@@ -523,7 +531,7 @@ theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentCo
     · exact Cedar.Thm.instance_of_request_type_refl hmatch
     · simp only [Cedar.Validation.Schema.environments, List.mem_map] at henv
       obtain ⟨rty, _, rfl⟩ := henv
-      exact instanceOfSchema_entities ts pc mc _ store rfl rfl
+      exact instanceOfSchema_entities ts pc mc _ members store rfl rfl
   · cases hreq
 
 /-! ## 一致の定理 -/
@@ -533,13 +541,14 @@ theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentCo
     cedar-lean の level 検証に通ること(いずれも実行可能な検査の成功)。証明は cedar-lean の slicing 定理に委ね、
     評価器の中身には触れない。 -/
 theorem isAuthorized_slice (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (policies : Policies) (store : Store) (req : Request) (level : Nat)
+    (policies : Policies) (members store : Store) (req : Request) (level : Nat)
     (hwf : ts.validateWellFormed = .ok ())
     (hreq : Cedar.Validation.validateRequest ts req = .ok ())
     (hlevel : Cedar.Validation.validateWithLevel policies ts level = .ok ()) :
-    isAuthorized req ((entities ts pc mc store).sliceAtLevel req level) policies
-      = isAuthorized req (entities ts pc mc store) policies :=
-  (Cedar.Thm.validate_with_level_is_sound_wf (instanceOfWellFormedSchema ts pc mc store req hwf hreq) hlevel).symm
+    isAuthorized req ((entitiesWith ts pc mc members store).sliceAtLevel req level) policies
+      = isAuthorized req (entitiesWith ts pc mc members store) policies :=
+  (Cedar.Thm.validate_with_level_is_sound_wf
+    (instanceOfWellFormedSchema ts pc mc members store req hwf hreq) hlevel).symm
 
 /-! ## 部分的な取得 -/
 
