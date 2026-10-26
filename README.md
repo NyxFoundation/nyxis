@@ -3,7 +3,7 @@
 English | [日本語](README.ja.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.0-orange.svg)](https://github.com/NyxFoundation/nyxis)
+[![Version](https://img.shields.io/badge/version-v0.1.1-orange.svg)](https://github.com/NyxFoundation/nyxis)
 [![Status](https://img.shields.io/badge/status-under%20development-yellow.svg)](ASSUMPTIONS.md)
 [![Lean](https://img.shields.io/badge/Lean-v4.34.1-0052cc.svg?logo=lean&logoColor=white)](lean-toolchain)
 [![Cedar](https://img.shields.io/badge/policies-Cedar-6f42c1.svg)](https://www.cedarpolicy.com/)
