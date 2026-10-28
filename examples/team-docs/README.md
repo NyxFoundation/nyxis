@@ -5,7 +5,7 @@
 1 つめのサンプル(`../bulletin-board/`)と同じく、nyxis を Lake の依存として取り込む別パッケージの
 バックエンド(`backend/`)と、Next.js のフロントエンド(`frontend/`。人間がデザインを提供した後に作る)から成る。
 
-いまあるのはバックエンドだけである。一覧の絞り込み・並べ替え・ページング(`GET /docs?org=&title=&since=&before=&sort=&dir=&limit=&offset=`。
+いまあるのはバックエンドだけである。一覧の絞り込み・並べ替え・ページング(`GET /docs?org=&title=&titleFrom=&titleTo=&since=&before=&sort=&dir=&limit=&offset=`。
 応答は `{"rows": [...], "total": n}`)、添付ファイル(`POST /docs/{id}/attachment` で署名付き
 アップロード URL、`GET /docs/{id}/attachment` で署名付きダウンロード URL を発行する。ファイルはクライアントが Supabase
 Storage と直接やりとりし、nyxis を通らない)、更新の通知(文書を読める利用者が `POST /docs/{id}/subscriptions`
