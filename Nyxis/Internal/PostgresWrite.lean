@@ -2,7 +2,7 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSql
 import Nyxis.Internal.IOTrace
 
-/-! 書き込み結果の内部の照合(A4。Lean の正常終了の条件は以下で証明する)。
+/-! 書き込み結果の内部の照合(Assumption 1。Lean の正常終了の条件は以下で証明する)。
 これは認可ではない。FFI と外部 DB との対応は信頼する。
 ここに入るのはモデルが発行した操作だけで、スナップショットのトランザクションの中で行う。
 失敗はそのトランザクションを中断しなければならず、COMMIT の前に状態や HTTP の成功は漏れない。

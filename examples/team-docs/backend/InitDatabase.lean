@@ -2,7 +2,7 @@ import TeamDocs
 import Nyxis.Internal.PostgresInit
 import TeamDocs.Approved
 
-/-! team-docs の DB の明示的な構築。A4/A7 の下で信頼する起動コード。
+/-! team-docs の DB の明示的な構築。Assumption 1・3 の下で信頼する起動コード。
 監査済みのアプリケーションを内部の DB 接続より先に import する。
 HTTP の起動とは別の実行ファイルで、移行・初期データ・権限の作成は行わない。
 -/

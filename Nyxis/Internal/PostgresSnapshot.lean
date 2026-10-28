@@ -1,6 +1,6 @@
 import Nyxis.Internal.PostgresSql
 
-/-! 内部の SELECT スナップショットの純粋な復号(A4。定理の外)。
+/-! 内部の SELECT スナップショットの純粋な復号(Assumption 1。定理の外)。
 SQL の NULL は属性の欠落を意味し、Cedar の値にはならない。Store を返す前にスナップショット全体を
 検証する。Map.make が重複した主キーを黙って潰してはならない。
 呼び出し側はすべてのテーブルを同じ SERIALIZABLE トランザクションの中で読まなければならない。

@@ -5,7 +5,7 @@ import Nyxis.Internal.HttpAuth
 import Nyxis.Internal.HttpResponse
 import Nyxis.Internal.Generated
 
-/-! HTTP から PostgreSQL への接続コード(A4。本文取得後の処理は部分的に証明済み)。
+/-! HTTP から PostgreSQL への接続コード(Assumption 1。本文取得後の処理は部分的に証明済み)。
 アプリケーションからは import できない。起動(`ApprovedServer`)が承認済みの JWT 検証器を選び、
 主体や接続文字列をリクエストのどの項目からも決めない。サーバー生成値(現在時刻と一意 ID)は認証の直後に
 `generate`(本番は `Generated.fresh`)で 1 度だけ決め、要求のどの項目からも決めない。外部効果の設定(Supabase
@@ -104,7 +104,7 @@ HttpAuth.principalOfで検証した結果（認証例外なら匿名）であり
 生成され、形状検査も通る(信頼なし)。応答はStoreを受け取らない再生器で要求と各段の
 結果列だけから再現でき、結果列の各行は同じ主体について認可済みの読み取りがその段で
 取得した行で指す行である(信頼なし。認可判定用に取得した行が応答へ渡る別の入力は無い)。
-各段の取得がその時点の全体の状態と整合する(ChainRequest。接続層ではA4の信頼)なら、
+各段の取得がその時点の全体の状態と整合する(ChainRequest。接続層ではAssumption 1の信頼)なら、
 応答は同じ初期状態でのhandleRequestの応答そのもので、SQLに対応する操作の列
 (主体・アクション・操作)はhandleRequestの発行列と一致する。
 もう1つの成功応答は、外部API呼び出しの応答が宣言した型に合わなかった失敗だけを写した固定の502

@@ -1,6 +1,6 @@
 import Nyxis.Internal.PostgresResult
 
-/-! 判定材料の点検索(A4。定理の外)。判定材料の限定(`Nyxis.Materials`)の接続層。
+/-! 判定材料の点検索(Assumption 1。定理の外)。判定材料の限定(`Nyxis.Materials`)の接続層。
 
 1 回のアクション呼び出しの判定に必要な実体だけを、主キーの点検索(`PostgresSql.operation` の読み取りの SELECT)で
 DB から取得し、部分的な取得 `Nyxis.Materials.Known`(取得した行と、引いたが無かった実体)を組み立てる。
@@ -17,7 +17,7 @@ level(`Nyxis.Materials.levelOf`)の段数で到達できる実体(cedar-lean の
 ここで組んだ `Known` が判定材料を覆っているかは、呼び出し側(`PostgresRun.runStaged`)が実行可能な検査
 `Nyxis.Authz.coversStep` で確かめてから判定する(通らなければ要求全体を閉じる)。取得が DB の現在の行と
 整合すること(`Known.Consistent`、一覧では対象テーブルの行のうち絞り込みに合う行の全部)は、点検索(一覧では
-WHERE 句つきの SELECT)の結果が DB の現在の行であるという信頼(`ASSUMPTIONS.md` A4)に当たる。この未選別の
+WHERE 句つきの SELECT)の結果が DB の現在の行であるという信頼(`ASSUMPTIONS.md` Assumption 1)に当たる。この未選別の
 `Known` をハンドラに出してはならない。
 -/
 namespace Nyxis.Internal.PostgresMaterials

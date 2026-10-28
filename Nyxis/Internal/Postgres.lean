@@ -3,7 +3,7 @@ import Nyxis.Internal.IOTrace
 import Nyxis.Internal.Native
 
 /-!
-PostgreSQL 接続の基礎(A4。定理の外)。接続・パラメータ化した実行・SERIALIZABLE トランザクション。
+PostgreSQL 接続の基礎(Assumption 1。定理の外)。接続・パラメータ化した実行・SERIALIZABLE トランザクション。
 アプリケーションからは import できない(lean-pq の import は AppCheck が拒む)。SQL はコアが生成した
 ものだけで、リクエスト由来の値はパラメータとして分離する。サーバの診断と接続文字列は記録しない。
 -/

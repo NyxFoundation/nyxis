@@ -1,7 +1,7 @@
 import Nyxis.Internal.PostgresRun
 import Nyxis.Internal.Generated
 
-/-! 定期処理の起動(A10。コア専用、未証明)。
+/-! 定期処理の起動(Assumption 2・3。コア専用、未証明)。
 
 アプリが宣言した定期処理(`Runtime.App.jobs`。`Job := Generated → Handler Unit`。ハンドラと同じ型で IO は無い)を、同じ
 プロセスの中で固定間隔(コア設定)に、サービス主体(`Authz.Principal.service`。ID はコア設定 `NYXIS_SERVICE_PRINCIPAL`。

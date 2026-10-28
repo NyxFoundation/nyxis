@@ -120,7 +120,7 @@ def Principal.service (id : String) : Principal := .user ⟨serviceType, id⟩
 
 /-- サーバー生成値: nyxis が要求ごとに決める現在時刻と新しい一意 ID。ハンドラには値の提案のために
     渡し、ポリシーには正本のアクションの `context` が宣言していれば `context.now` / `context.id` として渡す。
-    値を決めるのは接続コード(`Nyxis.Internal.Generated.fresh`: 実時計と乱数。A2/A4)で、純粋モデルは任意の値について
+    値を決めるのは接続コード(`Nyxis.Internal.Generated.fresh`: 実時計と乱数。Assumption 1・2)で、純粋モデルは任意の値について
     述べる(一意性や時計の正しさは定理の主張に含まない)。 -/
 structure Generated where
   /-- 要求の処理を始めた現在時刻。 -/

@@ -7,7 +7,7 @@ import Nyxis.Runtime
 Lean 標準ライブラリの `Std.Http`(HTTP/1.1 サーバ)でランタイムを公開するための、接続層が共有する小さな部品:
 リクエスト行からのパスと問い合わせ文字列の取り出し、要求ヘッダの選別、本文の上限、モデルのレスポンスの
 HTTP レスポンスへの変換、サーバの起動。
-ここは定理の外側にある接続コードで、当面は信頼する(`ASSUMPTIONS.md` A4 (b))。
+ここは定理の外側にある接続コードで、当面は信頼する(`ASSUMPTIONS.md` Assumption 1)。
 
 リクエストを主体つきの `AuthenticatedRequest` に変えてモデルを駆動し、PostgreSQL の現在の行で認可する本体は
 `Nyxis.Internal.PostgresHttp`(アプリケーションからは import できない。起動は `Nyxis.Internal.ApprovedServer`)。

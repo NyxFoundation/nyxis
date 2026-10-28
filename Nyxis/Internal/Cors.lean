@@ -1,6 +1,6 @@
 import Nyxis.Http
 
-/-! コアの HTTP ミドルウェア(A4)。設定は配置から来るもので、アプリケーションのハンドラからは来ない。
+/-! コアの HTTP ミドルウェア(Assumption 1)。設定は配置から来るもので、アプリケーションのハンドラからは来ない。
 CORS はブラウザの輸送の方針であり、認可ではない。 -/
 namespace Nyxis.Internal.Cors
 open Std.Async

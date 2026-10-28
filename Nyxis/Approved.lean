@@ -2,8 +2,8 @@ import Nyxis.Runtime
 
 /-! Application-independent pairing of the schema and policies declared by the application.
 The build command constructs these values from two Cedar files. Human approval of those
-files remains A6; this type does not certify that a human has approved arbitrary values.
-Parsing, embedding and deployment wiring remain within the existing A4/A6/A7 boundary.
+files remains Assumption 3; this type does not certify that a human has approved arbitrary values.
+Parsing, embedding and deployment wiring remain within the existing boundary of Assumptions 1 and 3.
 -/
 namespace Nyxis
 

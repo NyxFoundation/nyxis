@@ -1,7 +1,7 @@
 import Nyxis.Authz
 import Nyxis.Internal.PostgresValue
 
-/-! アプリケーションのための内部の SQL の計画(A4。定理の外)。ここでは SQL を実行しない。
+/-! アプリケーションのための内部の SQL の計画(Assumption 1。定理の外)。ここでは SQL を実行しない。
 識別子はスキーマから、値はパラメータからだけ来る。エンティティ型は名前空間の無いものを使う。
 名前空間つきの型は、その DB の配置が定まるまで拒む。
 NULL を許す JSONB の列が属性の欠落を表す。SQL の NULL は Cedar のセルではない。

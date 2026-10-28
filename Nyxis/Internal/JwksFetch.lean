@@ -1,6 +1,6 @@
 import Nyxis.Internal.SupabaseJwt
 
-/-! 承認済みの curl による JWKS の HTTPS 取得(A2/A4。コア専用、未証明)。
+/-! 承認済みの curl による JWKS の HTTPS 取得(Assumption 1・2。コア専用、未証明)。
 リクエストのデータ・shell・コマンドの差し替え・検査用 CA の指定はこの API に入らない。
 PATH・curl/TLS の版・CA 信頼ストアは配置環境の責務。
 -/

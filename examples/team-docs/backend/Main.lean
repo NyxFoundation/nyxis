@@ -1,7 +1,7 @@
 import TeamDocs
 import TeamDocs.Server
 
-/-! team-docs の起動処理。A4/A7 の下で信頼する接続コードで、定理の外にある。
+/-! team-docs の起動処理。Assumption 1・3 の下で信頼する接続コードで、定理の外にある。
 監査済みのアプリケーション(`TeamDocs`)を読み込んだ後に内部の DB 接続を import する。
 このモジュールをアプリケーションのモジュールから import せず、AppCheck の信頼集合も広げない。
 資格情報は環境変数からだけ受け取り、起動時に DDL や初期データの投入は行わない。

@@ -2,7 +2,7 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSql
 import Nyxis.Internal.Native
 
-/-! 承認済みのスキーマから新しいデータベースを明示的に用意する(A4。未証明)。
+/-! 承認済みのスキーマから新しいデータベースを明示的に用意する(Assumption 1。未証明)。
 HTTP リクエストからは呼ばれず、ハンドラ向けの API にも出さない。DROP・ALTER・IF NOT EXISTS は
 使わない: 既存のテーブルは、配置の不一致を隠さず失敗しなければならない。
 -/

@@ -1,7 +1,7 @@
 import Nyxis.CedarSchema
 import Nyxis.Internal.PostgresValue
 
-/-! 正本から導いた列の型・必須属性による行の検査(A4。定理の外)。型の情報は `Authz.Schema` に持たせず、
+/-! 正本から導いた列の型・必須属性による行の検査(Assumption 1。定理の外)。型の情報は `Authz.Schema` に持たせず、
 認可の定理とモデルを変えない。列の型は、スカラー(`Bool` / `Long` / `String` / エンティティ参照 /
 拡張型 `decimal` / `datetime` / `duration`)、スカラーの集合 `Set<…>`、スカラーを属性に持つレコード
 `{ … }` に対応する。対応しない Cedar の形(名前空間・共通型・tags・enum・集合やレコードの入れ子・

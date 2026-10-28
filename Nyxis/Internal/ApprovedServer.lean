@@ -4,9 +4,9 @@ import Nyxis.Internal.JwksFetch
 import Nyxis.Internal.Jobs
 import Nyxis.Internal.Outbox
 
-/-! 実起動(A4/A6/A7。定理の外)。アプリケーションの監査の後に起動処理からだけ import する。
+/-! 実起動(Assumption 1・3。定理の外)。アプリケーションの監査の後に起動処理からだけ import する。
 認可の入力は宣言からだけ組み、任意の App や検証器を受け取る引数は無い。宣言した正本の人間による承認と、
-起動処理がその宣言を選ぶことは A6/A7 に残る。 -/
+起動処理がその宣言を選ぶことは Assumption 3 に残る。 -/
 namespace Nyxis.Internal.ApprovedServer
 
 /-- 配置の設定。宣言した Cedar 正本、正本から構成した PostgreSQL の形状(宣言との一致の証明つき)、
@@ -70,7 +70,7 @@ claims.subjectに設定userTypeを付けたものに一致し、設定userType�
 連続させる。応答はStoreを受け取らない再生器で要求と各段の結果列だけから再現でき、
 結果列の各行は同じ主体について宣言した正本で認可済みの読み取りがその段で取得した行で
 指す行である(信頼なし。認可判定用に取得した行が応答へ渡る別の入力は無い)。
-各段の取得がその時点の全体の状態と整合する(ChainRequest。A4の信頼)なら、
+各段の取得がその時点の全体の状態と整合する(ChainRequest。Assumption 1の信頼)なら、
 応答は同じ初期状態での宣言のAppによるhandleRequestの応答そのもので、SQLに対応する操作の列
 (主体・アクション・操作)と外部効果の記録の列はその発行列・記録列と一致する。返却HTTPのFull/Any構造も保存する。
 backend成功のもう1つの形は、外部API呼び出しの応答が宣言した型に合わなかった失敗だけを写した固定の502で、

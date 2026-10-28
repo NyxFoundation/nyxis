@@ -1,4 +1,4 @@
-/-! 承認済みの curl を、設定を標準入力(`--config -`)で渡して起動する共通部(コア専用、未証明。A2/A4 の curl)。
+/-! 承認済みの curl を、設定を標準入力(`--config -`)で渡して起動する共通部(コア専用、未証明。Assumption 1・2 の curl)。
 `StorageSign`・`MailSend`・`CallSend`が使う。資格情報と要求の値は設定の中にだけ置き、プロセスの引数には
 現れない。診断(stderr)は捨て、子プロセスは必ず回収する。 -/
 namespace Nyxis.Internal.CurlStdin

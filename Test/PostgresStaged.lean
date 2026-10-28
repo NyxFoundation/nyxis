@@ -149,7 +149,7 @@ private def driver (fake : Fake) (fault : Nat) : PostgresRun.Driver where
       let rows := (db.rows table).map fun (k, r) => encodeRow table k r
       return reader ⟨"_nyxis_id" :: columnsOf table, rows⟩
     | .filtered query =>
-      -- 偽の DB は WHERE 句をモデルの `ListQuery.matches` で再現する(実 DB との一致は A4 の信頼)。
+      -- 偽の DB は WHERE 句をモデルの `ListQuery.matches` で再現する(実 DB との一致は Assumption 1 の信頼)。
       fake.events.modify (· ++ [s!"select {table.id} where"])
       let rows := ((db.rows table).filter fun kv => query.matches kv.2).map fun (k, r) => encodeRow table k r
       return reader ⟨"_nyxis_id" :: columnsOf table, rows⟩

@@ -1,7 +1,7 @@
 import JoseLibcrypto
 import Nyxis.Internal.HttpAuth
 
-/-! コア専用の JWT 接続コード(A2/A4)。呼び出し側は issuer と JWKS を信頼する設定・輸送から渡し、
+/-! コア専用の JWT 接続コード(Assumption 1・2)。呼び出し側は issuer と JWKS を信頼する設定・輸送から渡し、
 リクエストからは渡さない。解析・鍵の準備・署名・claim の検証は承認済みのライブラリの責務。
 ネットワークの輸送は信頼するコアのコードが供給する。このモジュールを Nyxis の公開 API や
 AppCheck の信頼するモジュールの集合に import してはならない。

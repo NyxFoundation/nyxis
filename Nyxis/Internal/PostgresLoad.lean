@@ -1,7 +1,7 @@
 import Nyxis.Internal.PostgresResult
 import Nyxis.Internal.IOTrace
 
-/-! 認可の材料の内部の取得(A4。未証明)。
+/-! 認可の材料の内部の取得(Assumption 1。未証明)。
 この未選別の Store をハンドラに出してはならない。すべての SELECT とその後の認可済みの処理は
 1 つの SERIALIZABLE トランザクションを共有し、結果は checked COMMIT の後にだけ公開する。
 -/

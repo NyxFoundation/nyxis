@@ -1,7 +1,7 @@
 import Std.Time
 import Nyxis.Authz
 
-/-! サーバー生成値の実装(A2 の時計と A4 のランタイムの乱数に当たる。定理の外)。
+/-! サーバー生成値の実装(Assumption 2 の時計と Assumption 1 のランタイムの乱数に当たる。定理の外)。
 要求ごとに現在時刻と新しい一意 ID を決める。接続コード(`PostgresHttp.dispatch`)が認証の直後に 1 度だけ呼び、
 その値を `Runtime.AuthenticatedRequest.generated` としてハンドラと認可層に渡す。要求のどの項目からも値を決めない。
 純粋モデルと定理は任意の値について成り立ち、一意性や時計の正しさは主張しない。 -/

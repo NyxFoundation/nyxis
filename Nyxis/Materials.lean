@@ -30,7 +30,7 @@ import Cedar.Thm.Validation.Slice
   接続層(PostgreSQL の点検索)はこの `Known` を組み立て、この検査を通してから判定する(未実装)。
 
 適合しない行(列の型や必須の列がスキーマと合わない行)は判定の実体に現れない。そのような行は、nyxis が正本から
-DDL を作り、書き込みを形状検査で拒み、DB へは nyxis 専用ロール以外から到達できない(`ASSUMPTIONS.md` A3)ことから
+DDL を作り、書き込みを形状検査で拒み、DB へは nyxis 専用ロール以外から到達できない(`ASSUMPTIONS.md` Assumption 2・3)ことから
 実際には生じず、実 DB の接続層(`PostgresRun`)は取得した行の形状検査に失敗すれば要求全体を 503 で閉じる。
 アクションの実体は属性・tag を持たず祖先は宣言どおりで、cedar-lean の実体の整合(`Entities.HasAllActions`)が
 全アクションの存在を要求するために加える。アクション群(`action "a" in [Action::"g"]`)の `in` はこの祖先で判定される。
@@ -568,7 +568,7 @@ def Known.knows (ts : Cedar.Validation.Schema) (mc : MembershipColumns) (k : Kno
 /-- 部分的な取得が全体の状態 `full` と整合すること: 取得した行は `full` のその行であり、無いと分かった実体は
     `full` にも無く、すべて取得したと記録した絞り込みについては、絞り込みに合う行が全体と集合として同じ。
     接続層ではこれが「点検索(絞り込みでは WHERE 句つきの SELECT)の結果は DB の現在の行である」という信頼
-    (`ASSUMPTIONS.md` A4)に当たる。 -/
+    (`ASSUMPTIONS.md` Assumption 1)に当たる。 -/
 def Known.Consistent (k : Known) (full : Store) : Prop :=
   (∀ uid row, Map.find? k.rows uid = some row → Map.find? full uid = some row) ∧
   (∀ uid ∈ k.absent, Map.find? full uid = none) ∧

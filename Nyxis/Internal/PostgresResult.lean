@@ -2,7 +2,7 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSnapshot
 import Nyxis.Internal.IOTrace
 
-/-! libpq の SELECT 結果の内部の抽出(A4。Lean の正常終了の条件は以下で証明する)。ハンドラの API や
+/-! libpq の SELECT 結果の内部の抽出(Assumption 1。Lean の正常終了の条件は以下で証明する)。ハンドラの API や
 SQL の実行は無い。呼び出し側は抽出の間、結果を専有し、すべてのテーブルを 1 つのトランザクションで読む。
 -/
 namespace Nyxis.Internal.PostgresResult

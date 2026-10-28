@@ -6,7 +6,7 @@ import Nyxis.Internal.PostgresShape
 import Nyxis.Internal.ExternalSend
 import Nyxis.Internal.Outbox
 
-/-! モデルから SQL への内部の境界(A4。未証明)。ハンドラ向けの API は無い。
+/-! モデルから SQL への内部の境界(Assumption 1。未証明)。ハンドラ向けの API は無い。
 操作を生成するのはモデルだけ。スナップショット・再生・checked COMMIT は 1 つの SERIALIZABLE
 トランザクションを共有する。SQL との不一致は応答を返さずに中断する。
 
@@ -246,7 +246,7 @@ def process (app : App) (shape : PostgresShape.Shape) (store : Store) (request :
   return plan.response
 
 /-- 1 つの SQL の呼び出しとその結果の照合。IO 状態は連続する。
-Lean の返り値だけを述べ、外部の SQL の意味は A4 に残る。 -/
+Lean の返り値だけを述べ、外部の SQL の意味は Assumption 1 に残る。 -/
 def Checked (schema : Authz.Schema) (driver : Driver) (issued : Authz.Issued)
     (command : PostgresSql.Command) (w w' : Void IO.RealWorld) : Prop :=
   let expected := (issued.store.apply issued.op).2
@@ -660,7 +660,7 @@ theorem handle_cells_read_safety (conninfo : String) (app : App) (shape : Postgr
 
 全テーブルの `Store` は Lean 上に存在しない。`StagedRun` は正常終了の記録(各段の取得・検査・判定・実行・発行)、
 `Chain` は各段の取得がその時点の全体の状態(前段までの操作を適用した状態)と整合すること(接続層では「点検索の結果は
-DB の現在の行」という A4 の信頼)で、`StagedRun.model` が両者から、応答と発行(主体・アクション・操作)・外部効果の記録
+DB の現在の行」という Assumption 1 の信頼)で、`StagedRun.model` が両者から、応答と発行(主体・アクション・操作)・外部効果の記録
 (主体・生成値・アクション・種類・対象・パス)が `runHandler`(したがって `handleRequest`)と一致することを
 `Authz.step_eq_of_covers` で導く。`StagedRun.sql` と `StagedRun.external` は信頼なしに、実行した各 SQL(`commands`。
 `Driver.external` の中でアウトボックスに書く INSERT は含まない)と求めた各発行・送信・アウトボックスへの記録が取得した材料に
@@ -792,7 +792,7 @@ theorem runStaged_success (app : App) (shape : PostgresShape.Shape) (driver : Dr
     見る行(一覧の候補、一意性の組と同じ値の行、削除で消える行を参照する行。`Authz.rowFilters`)をすべて取得して
     おり(絞り込んだ行列の一致)、続きは全体の状態で判定した結果(整合すれば取得した行での結果と同じ。外部効果の結果は
     同じ値 `ext`)とその操作を適用した状態について同じ。接続層では「点検索(絞り込みでは WHERE 句つきの SELECT)の結果は
-    DB の現在の行である」という信頼(`ASSUMPTIONS.md` A4)に当たり、Lean の上では検査できない。 -/
+    DB の現在の行である」という信頼(`ASSUMPTIONS.md` Assumption 1)に当たり、Lean の上では検査できない。 -/
 inductive Chain (schema : Authz.Schema) (policies : Cedar.Spec.Policies) (principal : Authz.Principal)
     (generated : Authz.Generated) : Store → Handler α → List Known → List Authz.ExternalResult → Prop where
   | pure (full : Store) (a : α) : Chain schema policies principal generated full (.pure a) [] []
@@ -1039,7 +1039,7 @@ BEGIN/inTransaction、ルーティングした要求の段階的な実行の記�
 主体についてその段で取得した材料について認可済みの操作から生成され、形状検査も通る。記録した外部効果(`externals`)は
 同じ要求の主体と生成値についてその段で取得した材料について認可済みで、Storageへの発行・メールの送信・外部APIの呼び出しはその内容に
 ついてだけ行った。応答はStoreを受け取らない再生器で要求と各段の結果列だけから再現でき、結果列の各行は同じ主体について認可済みの
-読み取りがその段で取得した行で指す行である(信頼なし)。各段の取得がその時点の全体の状態と整合する(接続層ではA4の
+読み取りがその段で取得した行で指す行である(信頼なし)。各段の取得がその時点の全体の状態と整合する(接続層ではAssumption 1の
 信頼)なら、応答は同じ初期状態とStorageから得た結果の列でのhandleRequestの応答そのもので、SQLに対応する操作の列
 (主体・生成値・アクション・操作)と外部効果の記録の列はhandleRequestの発行列・記録列と一致する。取得と外部DB実状態の
 一致・SQLの意味論・Storageの振る舞い・永続化・HTTP輸送は含まない。要求主体のJWTによる決定は別の接続境界の責務である。

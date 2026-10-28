@@ -1,7 +1,7 @@
 import Nyxis.Internal.CurlStdin
 import Nyxis.Authz
 
-/-! 承認済みの curl による SMTP(S) でのメール送信(A9。コア専用、未証明)。
+/-! 承認済みの curl による SMTP(S) でのメール送信(Assumption 2・3。コア専用、未証明)。
 
 認可層(`Nyxis.Authz.externalStep`)が permit した外部効果の記録(`Authz.Payload.mail`: 宛先・件名・本文。いずれも対象の
 行の宣言された列の値)についてだけ、接続層(`PostgresRun.runStaged`)がここを呼ぶ。中継はコア設定 `Config.url`
@@ -13,7 +13,7 @@ import Nyxis.Authz
   書いて `upload-file` で渡し、送信後に消す(curl の SMTP は標準入力の設定と本文を同時には取れず、`data` は使えない)。
   行頭の `.` の逃がし(dot-stuffing)は curl が行う。
 - `--proto =smtp,smtps`、リダイレクト非追従、接続 5 秒・全転送 20 秒。送信の失敗(curl の終了コードが 0 以外)は例外で、
-  要求全体が 503 になりトランザクションは取り消される(黙って成功にしない)。配送の成否は中継以降の責務(A9)。
+  要求全体が 503 になりトランザクションは取り消される(黙って成功にしない)。配送の成否は中継以降の責務(Assumption 2)。
 -/
 namespace Nyxis.Internal.MailSend
 

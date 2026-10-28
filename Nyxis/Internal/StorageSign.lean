@@ -2,7 +2,7 @@ import Lean.Data.Json
 import Nyxis.Internal.JwksFetch
 import Nyxis.Internal.CurlStdin
 
-/-! 承認済みの curl による Supabase Storage の署名付き URL の発行(A8。コア専用、未証明)。
+/-! 承認済みの curl による Supabase Storage の署名付き URL の発行(Assumption 2・3。コア専用、未証明)。
 
 認可層(`Nyxis.Authz.signStep`)が permit した外部効果の記録(`Nyxis.Authz.External`: 種類とオブジェクトのパス)に
 ついてだけ、接続層(`PostgresRun.runStaged`)がここを呼ぶ。到達する URL は、コア設定 `Config.url`(Supabase プロジェクトの

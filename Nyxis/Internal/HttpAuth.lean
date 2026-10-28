@@ -2,7 +2,7 @@ import Std.Http
 import Nyxis.Authz
 
 /-! 内部の認証の境界。ハンドラの API には無い。subject から主体への変換と Bearer の抽出は以下で
-証明する。HTTP ヘッダの復号と JWT の検証は A2/A4 に残る。
+証明する。HTTP ヘッダの復号と JWT の検証は Assumption 1・2 に残る。
 検証器は、承認済みの JWT 実装が署名・アルゴリズム・issuer・audience・時刻の claim を確かめた後に
 だけ subject を返さなければならない。このモジュールは JOSE を解析せず、リクエストが供給した subject を
 信頼しない。本番の起動処理は JwksFetch.verify を渡す。
