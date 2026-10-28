@@ -38,8 +38,8 @@ python3 scripts/local-supabase.py --exec python3 scripts/check-sample-jwt-db.py
 
 The first verifies that the installed tree still matches the approved archive plus this patch.
 
-The first observes live probes, requires zero sessions and balanced connection /
-result finalizer diagnostics. The second uses one running sample for the HTTP
+The second observes live probes, requires zero sessions and balanced connection /
+result finalizer diagnostics. The third uses one running sample for the HTTP
 operation matrix, statement/COMMIT failures, JWKS failure/recovery and more successful
 authenticated reads than max_connections, requiring zero sessions between groups.
 These test runtime behavior, not a formal proof of FFI correctness. Allocation

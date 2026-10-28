@@ -1,6 +1,6 @@
 #!/bin/sh
 # 検査: nyxis が、効果の宣言が無いアクションや、スキーマに無い列を効果が参照するスキーマを
-# ビルド時に拒むことを確かめる。サンプルのスキーマ BulletinBoard/schema.cedarschema から 2 つの変種を作り、
+# ビルド時に拒むことを確かめる。サンプルのスキーマ examples/bulletin-board/backend/schema.cedarschema から 2 つの変種を作り、
 #   (1) no-effect       — 1 つのアクション(deletePost)の @effect を消す
 #   (2) unknown-column  — editPost の効果に存在しない列 bodyy を書く
 # それぞれを正本の場所に一時的に置いて `lake build` を走らせ、非 0 で終わり期待するエラーが報告されれば合格。
