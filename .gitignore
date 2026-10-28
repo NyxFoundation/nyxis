@@ -5,6 +5,9 @@
 .env
 .env.*
 
+# スクリプトが import する補助モジュール(scripts/nyxis_local.py)のバイトコード
+__pycache__/
+
 # Terraform のローカルキャッシュ・state・保存plan
 *.tfstate
 *.tfstate.*
