@@ -97,7 +97,7 @@ API の対応(現行は `backend/BulletinBoard/Handlers.lean` の表。追加予
 | `PostDetail.published.author` | 書いた人 | 公開中、200 | ボタン列: 編集・下書きにもどす・削除 |
 | `PostDetail.any.admin` | 管理者 | 200 | 書いた人と同じボタン列。「あなた」タグは自分の投稿にだけ付く |
 | `PostDetail.confirmDelete` | 書いた人・管理者 | 「削除」を押した | 朱の枠「この投稿を消しますか?」[消す][やめる]。ブラウザの confirm は使わない |
-| `PostDetail.denied` | 全員 | 403。ほかの人の下書き(ゲスト・ログイン中・利用登録まだ)、または存在しない ID(管理者を含む全員) | 紙の中は灰色のシルエット(固定の幅)に朱い印「見られません」。タグは出さない(存在を断定しない)。下に一文「存在しないか、下書きです。下書きは、書いた人と管理者だけが見られます。」、[Googleでログイン](ゲストのみ)[ホームにもどる]、「くわしく」。模型 `post-detail-denied.png` |
+| `PostDetail.denied` | 全員 | 403。ほかの人の下書き(ゲスト・ログイン中・利用登録まだ)、または存在しない ID(管理者を含む全員) | 紙の中は灰色のシルエット(固定の幅)に朱い印「見られません」。タグは出さない(存在を断定しない)。下に一文「存在しないか、下書きです。下書きは、書いた人と管理者だけが見られます。」、[Googleでログイン]\(ゲストのみ)[ホームにもどる]、「くわしく」。模型 `post-detail-denied.png` |
 | `PostDetail.notFound` | 全員 | 404(通常は起きない。存在しない ID は 403 → `denied`) | 破線の枠「見つかりません」+[ホームにもどる] |
 | `PostDetail.offline` | 全員 | 503 / 通信失敗 | 黒い帯「つながりません」+「もう一度」 |
 | `PostDetail.actionDenied` | 書いた人・管理者 | 公開/下書き/削除が 403(書いた人・管理者とも、ほかで消された投稿でも 403) | ボタン列の横に朱い印「できません」。本文は残す |
@@ -114,7 +114,7 @@ API の対応(現行は `backend/BulletinBoard/Handlers.lean` の表。追加予
 
 | 状態 ID | 誰 | 条件 | 表示 |
 |---|---|---|---|
-| `PostCreate.anonymous` | ゲスト | — | 紙の代わりに一文「投稿するにはログインが必要です」+[Googleでログイン](`?next=/posts/new`) |
+| `PostCreate.anonymous` | ゲスト | — | 紙の代わりに一文「投稿するにはログインが必要です」+[Googleでログイン]\(`?next=/posts/new`) |
 | `PostCreate.editing` | ログイン中・管理者 | — | 入力可能。模型 `post-create.png` |
 | `PostCreate.unregistered` | 利用登録まだ | — | 入力可能。右上の人物マークは「利用登録まだ」。送信は許す(`README.md` Q4) |
 | `PostCreate.invalid` | ログイン中 | 題名または本文が空 | 送らずに、その入力欄を黄色にして「題名を入れてください」「本文を入れてください」 |
