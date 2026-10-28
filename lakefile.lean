@@ -106,7 +106,7 @@ lean_exe checkOutbox where
 lean_exe checkHttpAuth where
   root := `Test.HttpAuth
 
--- 問い合わせ文字列・選別した要求ヘッダ・許可された応答ヘッダの HTTP 統合検査用サーバ(-- scripts/check-http-headers.py が起動して検査する。DB・JWT 不要)。
+-- 問い合わせ文字列・選別した要求ヘッダ・許可された応答ヘッダの HTTP 統合検査用サーバ(scripts/check-http-headers.py が起動して検査する。DB・JWT 不要)。
 @[default_target]
 lean_exe serveHttpHeaders where
   root := `Test.HttpHeaders
