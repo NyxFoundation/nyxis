@@ -213,8 +213,9 @@ entity Hook;
   (現行の `Authz.step_external_indep` の拡張)。応答の値が DB に入る経路は、ハンドラが別アクションで提案する
   `values` だけで、(1) の判定を通る。
 
-純粋モデルの変更点: `Db.EffectKind` に `call (dest method path : …) (columns : List Column) (mode : CallMode)`、
-`Authz.Payload` に `call`、`Db.Outcome` に `called` / `calledError`、`Runtime.Externals` の要素型。接続コードの
+純粋モデルの変更点: `Db.EffectKind` に
+`call (destination : String) (method : CallMethod) (target : CallTarget) (columns : List Column) (proposes : Bool) (mode : CallMode)`、
+`Authz.Payload` に `call`、`Outcome` に `called` / `calledError`、`Runtime.Externals` の要素型。接続コードの
 証明済み範囲(`StagedRun.external`: 記録された内容についてだけ `Driver.external` を呼ぶ)は async の INSERT と
 `Outbox.loop` にも同じ形で述べる(ループが送るのはアウトボックス行の内容だけ)。`Outbox.loop` の外界動作(間隔・
 再試行)は `Jobs.loop` と同じく未証明で Assumption 1(接続コード)に残す。
