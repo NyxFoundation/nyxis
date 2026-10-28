@@ -9,7 +9,7 @@ import Nyxis.Internal.Generated
 アプリケーションからは import できない。起動(`ApprovedServer`)が承認済みの JWT 検証器を選び、
 主体や接続文字列をリクエストのどの項目からも決めない。サーバー生成値(現在時刻と一意 ID)は認証の直後に
 `generate`(本番は `Generated.fresh`)で 1 度だけ決め、要求のどの項目からも決めない。外部効果の設定(Supabase
-Storage・メールの中継)はコア設定で、要求のどの項目からも決めない。HTTP の入口は要求を `job := none`(ルーティング)で
+Storage・メールの中継・外部 API の送り先)はコア設定で、要求のどの項目からも決めない。HTTP の入口は要求を `job := none`(ルーティング)で
 組むので、定期処理とサービス主体はここからは起動しない。
 -/
 namespace Nyxis.Internal.PostgresHttp

@@ -698,7 +698,8 @@ def runStaged (app : App) (shape : PostgresShape.Shape) (driver : Driver) (princ
       (k (Authz.step app.schema app.policies principal generated known.rows action key values query ext).outcome)
 
 /-- 段階的な実行の正常終了の記録: 各呼び出しで使った部分的な取得(`knowns`)、実行した SQL とその操作(`commands`、
-    実行順)、記録した外部効果(`externals`、発生順)、Storage から得た外部効果の結果(`exts`、呼び出しごとに 1 つ)。
+    実行順)、記録した外部効果(`externals`、発生順)、外界から得た外部効果の結果(`exts`、呼び出しごとに 1 つ。
+    Storage の署名付き URL や外部 API の応答)。
     各段は、取得の成功、取得した行の形状検査、閉包の検査、取得した行だけでの `step` の発行の事前検査、計画順の実行と
     照合(`Executes`)、記録した外部効果についての発行・送信の成功(`sendExternal`)、`step` の結果(発行の結果つき)で進めた
     続きの記録から成り、IO 状態は連続する。 -/
@@ -735,7 +736,7 @@ inductive StagedRun (app : App) (shape : PostgresShape.Shape) (driver : Driver) 
 
 /-- 日本語: 実runStagedが正常終了したなら、各呼び出しについて点検索の成功、取得した行の形状検査、
 閉包の検査、取得した行だけでのstepの発行の事前検査、計画順のSQL実行と直前状態からの期待値との照合、
-記録した外部効果についてのStorageへの発行の成功が連続するIO状態で成功し、stepの結果(発行の結果つき)で
+記録した外部効果についての発行・送信の成功が連続するIO状態で成功し、stepの結果(発行の結果つき)で
 続きが進んでいる(`StagedRun`)。取得と外部DBの一致・SQLの意味論・Storageの振る舞い・COMMIT・HTTP輸送は含まない。 -/
 theorem runStaged_success (app : App) (shape : PostgresShape.Shape) (driver : Driver)
     (principal : Authz.Principal) (generated : Authz.Generated) (h : Handler Http.Response) :
@@ -968,7 +969,7 @@ def ChainRequest (app : App) (full : Store) (request : AuthenticatedRequest) (kn
   | some handler => Chain app.schema app.policies request.principal request.generated full handler knowns exts
 
 /-- 日本語: 1つの要求の段階的な実行の記録の各段の取得が全体の状態と整合するなら、応答は同じ
-初期状態でStorageから得た外部効果の結果の列を伴う純粋なhandleRequestの応答そのもので、実行した各SQLに対応する
+初期状態で外界から得た外部効果の結果の列を伴う純粋なhandleRequestの応答そのもので、実行した各SQLに対応する
 操作の列(主体・生成値・アクション・操作)と記録した外部効果の列(主体・生成値・アクション・種類・対象・パス)は
 handleRequestの発行列・記録列と一致する。 -/
 theorem StagedRequest.model {app : App} {shape : PostgresShape.Shape} {driver : Driver}
@@ -1040,7 +1041,7 @@ BEGIN/inTransaction、ルーティングした要求の段階的な実行の記�
 同じ要求の主体と生成値についてその段で取得した材料について認可済みで、Storageへの発行・メールの送信・外部APIの呼び出しはその内容に
 ついてだけ行った。応答はStoreを受け取らない再生器で要求と各段の結果列だけから再現でき、結果列の各行は同じ主体について認可済みの
 読み取りがその段で取得した行で指す行である(信頼なし)。各段の取得がその時点の全体の状態と整合する(接続層ではAssumption 1の
-信頼)なら、応答は同じ初期状態とStorageから得た結果の列でのhandleRequestの応答そのもので、SQLに対応する操作の列
+信頼)なら、応答は同じ初期状態と外界から得た結果の列でのhandleRequestの応答そのもので、SQLに対応する操作の列
 (主体・生成値・アクション・操作)と外部効果の記録の列はhandleRequestの発行列・記録列と一致する。取得と外部DB実状態の
 一致・SQLの意味論・Storageの振る舞い・永続化・HTTP輸送は含まない。要求主体のJWTによる決定は別の接続境界の責務である。
 もう1つの正常終了は、外部API呼び出しの応答が宣言した型に合わなかった失敗(`CallSend.invalidResponse`)だけを写した固定の

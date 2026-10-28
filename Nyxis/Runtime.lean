@@ -70,7 +70,7 @@ structure App where
 
 /-- 認証を済ませた HTTP リクエスト、または定期処理の 1 回の起動。JWT から nyxis が決めた主体(定期処理ではコア設定から
     決めたサービス主体)、この要求のために nyxis が決めたサーバー生成値(現在時刻と新しい一意 ID)、リクエストの
-    要約、外部効果の結果の列(接続層が Storage から得た署名付き URL。ハンドラは選べない)、そして定期処理の起動なら
+    要約、外部効果の結果の列(接続層が得た Storage の署名付き URL や外部 API の応答。ハンドラは選べない)、そして定期処理の起動なら
     `App.jobs` の何番目か(`job`。HTTP のリクエストでは `none`。接続層の HTTP の入口は `none` でだけ組む)。 -/
 structure AuthenticatedRequest where
   principal : Principal

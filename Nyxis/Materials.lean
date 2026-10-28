@@ -27,7 +27,7 @@ import Cedar.Thm.Validation.Slice
   状態と整合し(`Known.Consistent`)、要求から到達できる実体をすべて取得済みなら(`closedAt`: 実行可能な検査)、
   取得した行だけから組んだ判定材料の slice は全体から組んだ slice と等しい(`sliceAtLevel_eq`)。
   `Nyxis.Authz.permits_eq_of_covers` / `step_eq_of_covers` がこれを認可層の判定と `step` の結果の一致に結ぶ。
-  接続層(PostgreSQL の点検索)はこの `Known` を組み立て、この検査を通してから判定する(未実装)。
+  接続層(PostgreSQL の点検索。`PostgresRun.runStaged`)はこの `Known` を組み立て、この検査を通してから判定する。
 
 適合しない行(列の型や必須の列がスキーマと合わない行)は判定の実体に現れない。そのような行は、nyxis が正本から
 DDL を作り、書き込みを形状検査で拒み、DB へは nyxis 専用ロール以外から到達できない(`ASSUMPTIONS.md` Assumption 2・3)ことから
