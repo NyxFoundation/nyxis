@@ -43,6 +43,7 @@ permit (
   resource is User
 ) when { principal.admin };
 
+// 利用者は自分自身の行だけを、管理者でない状態(admin=false)で登録できる。
 @id("register-self")
 permit (
   principal is User,
