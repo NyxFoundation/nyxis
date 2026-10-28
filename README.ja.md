@@ -61,7 +61,7 @@ permit (
 - [elan](https://github.com/leanprover/elan) 経由の Lean 4(版は `lean-toolchain` で固定)
 - Python 3.12 以降、OpenSSL CLI、C コンパイラ
 - pkg-config と、libpq・libcrypto の開発用ファイル(macOS なら `brew install libpq`。keg-only の libpq は `$(brew --prefix libpq)/lib/pkgconfig` を `PKG_CONFIG_PATH` に加える)
-- 実行時: PostgreSQL(Supabase)と Supabase Auth
+- 実行時: PostgreSQL(Supabase)、Supabase Auth、`PATH` 上の curl 8.4 以降(JWKS の取得・Storage・メール・外部 API 呼び出しに使う。起動時に版を確かめ、満たさなければ起動しない)
 
 ## ビルド
 

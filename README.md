@@ -61,7 +61,7 @@ Besides `read`, `list`, `insert`, `update` (with an explicit column list), and `
 - Lean 4 via [elan](https://github.com/leanprover/elan) (the version is pinned in `lean-toolchain`)
 - Python 3.12 or later, the OpenSSL CLI, and a C compiler
 - pkg-config and the development files for libpq and libcrypto (on macOS, `brew install libpq`; because Homebrew's libpq is keg-only, add `$(brew --prefix libpq)/lib/pkgconfig` to `PKG_CONFIG_PATH`)
-- At runtime: PostgreSQL (Supabase) and Supabase Auth
+- At runtime: PostgreSQL (Supabase), Supabase Auth, and curl 8.4 or later on `PATH` (used for JWKS fetching, Storage, mail and external API calls; the backend checks the version at startup and does not start without it)
 
 ## Build
 
