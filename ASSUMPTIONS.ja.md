@@ -1,5 +1,7 @@
 # ASSUMPTIONS — 証明の外側で信頼する仮定
 
+[English](ASSUMPTIONS.md) | 日本語
+
 nyxis の認可安全性の定理 `Nyxis.Runtime.authorization_safety`(`Nyxis/Runtime.lean`)は、「どのような HTTP リクエスト列が送られても、認証された主体の正当な権限を超えるデータの読み取り・変更・削除・権限付与は発生しない」をランタイムの純粋モデルの上で証明している。この文書は、その定理が実際の運用でも成り立つために証明の外側で信頼する仮定を 3 項目(Assumption 1〜3)に分けて列挙する。定理ごとに述べること・述べないことの目録は [docs/proofs.md](docs/proofs.md)、仮定を支える nyxis の作り(接続コードの責務。仮定でも証明でもない)は [docs/connection.md](docs/connection.md) にある。この文書は人間が管理する文書であり、仮定の追加・削除・再構成を含む修正は人間の判断で行う。
 
 ## 保証の範囲
