@@ -33,7 +33,8 @@ def supportedVersion (text : String) : Bool := Id.run do
   let major :: minor :: patch :: _ := version.splitOn "." | return false
   let some major := major.toNat? | return false
   let some minor := minor.toNat? | return false
-  let some _ := patch.toNat? | return false
+  let patchDigits := (patch.takeWhile Char.isDigit).toString
+  let some _ := patchDigits.toNat? | return false
   return major > 8 || (major == 8 && minor >= 4)
 
 /-- 固定の輸送の方針。--disable は最初の引数でなければならない。-L・insecure・ユーザーのヘッダ・

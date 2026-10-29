@@ -533,7 +533,7 @@ def parseExternal (value : String) (pos : Pos) : Except CedarLex.Error Destinati
     | "base" =>
       if base.isSome then err "base が 2 つある"
       unless isHttpsUrl v do err s!"base {v} は https:// で始まる URL でなければならない"
-      base := some (if v.endsWith "/" then (v.dropEnd 1).toString else v)
+      base := some (v.dropEndWhile (· == '/')).toString
     | "auth" =>
       if auth.isSome then err "auth が 2 つある"
       match wordsOf v with

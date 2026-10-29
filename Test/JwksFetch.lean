@@ -15,7 +15,8 @@ open Nyxis.Internal.JwksFetch
   "https://host\\other/auth/v1", "https://host/auth/v1\x00",
   "https://{host,other}/auth/v1", "--insecure"].all (urlOfIssuer · == none))
 #guard supportedVersion "curl 8.4.0 (test)"
-#guard supportedVersion "curl 8.7.1 (test)"
+#guard supportedVersion "curl 8.5.0-2ubuntu1 (test)"
+#guard supportedVersion "curl 8.7.1-DEV (test)"
 #guard supportedVersion "curl 9.0.0 (test)"
 #guard !supportedVersion "curl 8.3.9 (test)"
 #guard !supportedVersion "curl 7.99.0 (test)"

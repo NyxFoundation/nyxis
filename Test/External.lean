@@ -161,6 +161,8 @@ def statusResponse : Cedar.Validation.CedarType := .record (Map.make [("status",
 -- 送り先: ベース URL の末尾の `/` は正規化され、認証方式は環境変数名だけ
 #guard schema.destinations == [("Pay", ⟨some "https://api.example", .bearer "NYXIS_EXT_PAY"⟩), ("Hook", ⟨none, .none⟩)]
 #guard schema.destinationOf "Pay" == some ⟨some "https://api.example", .bearer "NYXIS_EXT_PAY"⟩
+#guard (CedarSchema.parse (schemaText.replace "base: https://api.example/" "base: https://api.example///")).toOption.bind (·.destinationOf "Pay") ==
+  some ⟨some "https://api.example", .bearer "NYXIS_EXT_PAY"⟩
 #guard schema.destinationOf "Doc" == none
 -- 送り先はテーブルではない
 #guard !(schema.tables.any fun t => t.1 == ⟨"Pay", []⟩ || t.1 == ⟨"Hook", []⟩)
