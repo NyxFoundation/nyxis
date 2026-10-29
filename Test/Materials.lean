@@ -880,4 +880,39 @@ def memStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
 #guard memStepAgrees (memKnown [carol, org "zen", team "zen-ed", mem "m3", mem "m4", bob] [carol, bob]) (.user carol)
   "deleteTeam" "zen-ed"
 
+/-! ## 多段のアクション群
+
+`readOne` は `readSome` の、`readSome` は `readAll` の群に入る。祖先は推移閉包なので、`action in Action::"readAll"`
+の permit は 3 つとも許し、`action in Action::"readSome"` の forbid は `readSome` と `readOne` を拒む。群の外の
+`readOther` には効かない。 -/
+
+def groupSchemaText : String := r#"
+entity User = { "admin": Bool };
+entity Doc = { "owner": User };
+@effect("read Doc")
+action "readAll" appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readSome" in ["readAll"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readOne" in ["readSome"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readOther" appliesTo { principal: [User], resource: [Doc] };
+"#
+
+def groupSchema : Schema := (Nyxis.CedarSchema.parse groupSchemaText).toOption.getD schema
+def groupStore : Store := Map.make [(alice, userRow false), (doc "d", row [("owner", uidV alice)])]
+def groupPermits (policies : String) (action : String) : Bool :=
+  permits groupSchema ((Nyxis.CedarPolicy.parse policies).toOption.getD []) (.user alice) gen groupStore
+    (act action) (.read docT "d")
+def groupActions : List String := ["readAll", "readSome", "readOne", "readOther"]
+
+#guard isOk (Nyxis.CedarSchema.parse groupSchemaText)
+#guard groupActions.map (groupPermits "permit (principal, action in Action::\"readAll\", resource);") ==
+  [true, true, true, false]
+#guard groupActions.map (groupPermits r#"
+permit (principal, action in Action::"readAll", resource);
+permit (principal, action == Action::"readOther", resource);
+forbid (principal, action in Action::"readSome", resource);
+"#) == [true, false, false, true]
+
 end Test.Materials

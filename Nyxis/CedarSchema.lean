@@ -13,6 +13,7 @@ import Nyxis.CedarLex
 - `update` の効果が参照する列がそのテーブルに無い、列が空、または重複している。
 - 効果の対象のテーブルが、そのアクションの `appliesTo` の `resource` に無い。
 - アクション以外(エンティティ・共通型・属性)に付けられた `@effect`。
+- 宣言されていないアクションを親(`in`)に持つアクション、アクションの親子関係の循環(自分自身を親に持つものを含む)。
 - 名前空間・共通型(`type`)・enum 型の宣言、アクションの `context` の宣言が nyxis の決める文脈の型と
   一致しない文書(cedar-lean の型環境 `Authz.Schema.types` を構成できない)。
 - 文法に従わない文書。
@@ -43,8 +44,8 @@ header <ヘッダ名> <環境変数名> | none")` を添えた予約の仲間 `e
 
 cedar-lean の `Cedar.Validation.Schema` は注釈を持たないので、解析は nyxis が行い、同じ文書から型環境
 (属性の型・`appliesTo`・祖先・文脈の型)を構成して `Authz.Schema.types` に置く(判定材料の限定の前提検査に使う。
-`Nyxis.Materials`)。この構成コードは証明の対象ではなく、`Test/Schema.lean` と `Test/Smoke.lean` の検査で
-振る舞いを確かめる(`ASSUMPTIONS.md` の A6)。
+`Nyxis.Materials`)。アクションの祖先は、Cedar と同じく親(`in`)の推移閉包。この構成コードは証明の対象
+ではなく、`Test/Schema.lean` と `Test/Smoke.lean` の検査で振る舞いを確かめる(`ASSUMPTIONS.md` の A6)。
 -/
 
 namespace Nyxis.CedarSchema
@@ -1104,6 +1105,31 @@ def actionEntry (tys : List EntityType) (ets : Cedar.Validation.EntitySchema)
   return { appliesToPrincipal := Cedar.Data.Set.make principals, appliesToResource := Cedar.Data.Set.make resources,
            ancestors := Cedar.Data.Set.make parents, context }
 
+/-- アクションの祖先を、直接の親(`actionEntry` の ancestors)から推移閉包に広げる。Cedar のスキーマも親子関係を
+    閉じ(`compute_tc`)、宣言されていない親と循環を拒む。cedar-lean の型環境の well-formedness も、祖先が宣言された
+    アクションで、推移的で、循環しないことを求める(満たさない型環境では判定ごとの前提が成り立たず、`Authz.permits` は
+    すべての要求を拒否する)。同じアクションの重複した宣言は `collectActions` が先に拒む。 -/
+def closeActionHierarchy (acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry × Pos)) :
+    Except CedarLex.Error (List (EntityUID × Cedar.Validation.ActionSchemaEntry)) := do
+  let parentsOf (uid : EntityUID) : List EntityUID :=
+    ((acts.find? (·.1 == uid)).map (·.2.1.ancestors.toList)).getD []
+  for (uid, entry, pos) in acts do
+    for p in entry.ancestors.toList do
+      unless acts.any (·.1 == p) do
+        throw ⟨pos, s!"アクション {uid} の親 {p} は宣言されていない"⟩
+  acts.mapM fun (uid, entry, pos) => do
+    -- 親から幅優先でたどる。アクションの数だけ広げれば、到達できるアクションはすべて集まる。
+    let mut seen : List EntityUID := []
+    let mut frontier := entry.ancestors.toList
+    for _ in [0:acts.length] do
+      let fresh := frontier.eraseDups.filter (!seen.contains ·)
+      if fresh.isEmpty then break
+      seen := seen ++ fresh
+      frontier := fresh.flatMap parentsOf
+    if seen.contains uid then
+      throw ⟨pos, s!"アクション {uid} の親子関係が循環している"⟩
+    return (uid, { entry with ancestors := Cedar.Data.Set.make seen })
+
 /-- 解析済みの正本と、そこから構成したアクションの宣言から、cedar-lean の型環境と親を指す列・所属行を構成する。
     送り先(`@external`)は型環境に入れず、属性の型・親・tags に現れれば拒む。 -/
 def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
@@ -1146,14 +1172,14 @@ def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
   for (ty, items) in pending do
     let some entry := etsMap.find? ty | throw ⟨default, s!"エンティティ {showType ty} の型が無い"⟩
     memberships := memberships ++ [(ty, ← membershipsOf tys etsMap ty entry.ancestors.toList items)]
-  let mut acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry) := []
+  let mut acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry × Pos) := []
   for ns in doc do
     for d in ns.decls do
       if let .action a := d then
         for n in a.names do
           let entry ← actionEntry tys etsMap actions a n
-          acts := acts ++ [(⟨⟨"Action", []⟩, n⟩, entry)]
-  return (⟨etsMap, Cedar.Data.Map.make acts⟩, parents, memberships)
+          acts := acts ++ [(⟨⟨"Action", []⟩, n⟩, entry, a.pos)]
+  return (⟨etsMap, Cedar.Data.Map.make (← closeActionHierarchy acts)⟩, parents, memberships)
 
 /-! ## 一意性と参照整合の宣言
 

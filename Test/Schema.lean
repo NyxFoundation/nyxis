@@ -111,6 +111,63 @@ action "edit", "edit2" in [Action::"readDoc"] appliesTo { principal: [Group], re
   , ⟨⟨⟨"Action", []⟩, "edit"⟩, ⟨.update ["b", "a"], ⟨"Note", []⟩⟩⟩
   , ⟨⟨⟨"Action", []⟩, "edit2"⟩, ⟨.update ["b", "a"], ⟨"Note", []⟩⟩⟩ ]
 
+/-! ## アクションの親(アクション群)
+
+`action "a" in ["b"]` の祖先は、Cedar と同じく親の推移閉包になり、型環境は well-formed(多段のアクション群を
+含む)。宣言されていない親、親子関係の循環(自分自身を親に持つものを含む)は拒む。 -/
+
+def actionBase : String := r#"
+entity User = { "admin": Bool };
+entity Doc = { "title": String };
+@effect("read Doc")
+action "readAll" appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readSome" in ["readAll"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readOne" in [Action::"readSome"] appliesTo { principal: [User], resource: [Doc] };
+"#
+
+/-- 構成した型環境での、アクション `n` の祖先(の名前)。 -/
+def actionAncestors (s n : String) : Option (List String) := do
+  let schema ← (parse s).toOption
+  let entry ← schema.types.acts.find? ⟨⟨"Action", []⟩, n⟩
+  return entry.ancestors.toList.map (·.eid)
+
+/-- 構成でき、型環境が cedar-lean の well-formedness を満たす(判定ごとの前提の一つ)。 -/
+def wellFormed (s : String) : Bool :=
+  match parse s with
+  | .ok schema => match schema.types.validateWellFormed with
+    | .ok _ => true
+    | .error _ => false
+  | .error _ => false
+
+#guard actionAncestors actionBase "readOne" == some ["readAll", "readSome"]
+#guard actionAncestors actionBase "readSome" == some ["readAll"]
+#guard actionAncestors actionBase "readAll" == some []
+#guard wellFormed actionBase
+#guard rejectedWith (actionBase.replace "in [\"readAll\"]" "in [\"nope\"]") "宣言されていない"
+#guard rejectedWith (actionBase.replace "action \"readAll\" appliesTo" "action \"readAll\" in [\"readOne\"] appliesTo")
+  "親子関係が循環"
+#guard rejectedWith (actionBase.replace "in [Action::\"readSome\"]" "in [Action::\"readOne\"]") "親子関係が循環"
+
+-- 後で宣言する親と、2 つの親を通る同じ祖先(菱形)。
+def actionDiamond : String := r#"
+entity User = { "admin": Bool };
+entity Doc = { "title": String };
+@effect("read Doc")
+action "leaf" in ["left", "right"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "left" in ["top"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "right" in ["top"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "top" appliesTo { principal: [User], resource: [Doc] };
+"#
+
+#guard actionAncestors actionDiamond "leaf" == some ["left", "right", "top"]
+#guard actionAncestors actionDiamond "left" == some ["top"]
+#guard wellFormed actionDiamond
+
 /-! ## 実体の親
 
 `entity T in [P]` は型環境の祖先の型になり、`@parents("列, …")` が親を指す列を定める。列は親の型 `P` か `Set<P>`。
