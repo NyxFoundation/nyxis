@@ -79,7 +79,7 @@ backend失敗時は固定503のみを構築する。任意App/検証器への差
 即時本文成功とHTTP応答成功は前提。readAll内部/task継続、JWT/TLS/時計内部、
 外部DB実状態(点検索の結果が現在の行であること)、SQLの意味論、Full消費/輸送、
 CORSによるヘッダ追加後の応答構造はここでは証明しない。
-全HTTP要求の非漏洩やC3達成は主張しない。 -/
+全HTTP要求の非漏洩や、定理の文が理想の命題を忠実に表すことは主張しない。 -/
 theorem readAll_response
     (conninfo issuer : String) (router : Http.Router) (jobs : List Runtime.Job) (external : ExternalSend.Config)
     (req : Std.Http.Request Std.Http.Body.Stream)

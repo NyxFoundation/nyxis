@@ -12,7 +12,7 @@ private def rendered := (LeanPq.Expr.litStr (columns := []) payload).render {}
 
 def main : IO Unit := do
   -- PQunescapeBytea works locally and does not need credentials or a running server.
-  match ← (LeanPq.Extern.PqUnescapeBytea "\\x72696361746f").toBaseIO with
+  match ← (LeanPq.Extern.PqUnescapeBytea "\\x6e79786973").toBaseIO with
   | .ok decoded =>
     unless decoded == "nyxis" do
       throw <| IO.userError "lean-pq/libpq: unexpected bytea decoding result"

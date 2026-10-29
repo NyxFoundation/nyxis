@@ -1,0 +1,111 @@
+# Continuous integration for Nyxis: build, proofs, static checks, and the DCO sign-off check.
+#
+# Runs on GitHub-hosted runners (`ubuntu-latest`) unless the repository defines the Actions
+# variable NYXIS_RUNS_ON. Integration tests that need Docker and a local Supabase are not part
+# of this workflow; run them locally (see docs/local-supabase.md). No secrets are used.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CEDAR_CLI_VERSION: "4.13.0"
+
+jobs:
+  build:
+    name: Build, proofs, and static checks
+    runs-on: ${{ vars.NYXIS_RUNS_ON || 'ubuntu-latest' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libpq-dev libssl-dev pkg-config
+
+      - name: Locate build prerequisites (macOS, Homebrew's keg-only libpq)
+        if: runner.os == 'macOS'
+        run: |
+          echo "PKG_CONFIG_PATH=$(brew --prefix libpq)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Add the elan and cargo tool directories to PATH
+        run: |
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install elan (the Lean toolchain is pinned by lean-toolchain)
+        run: |
+          if [ ! -x "$HOME/.elan/bin/elan" ]; then
+            curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          fi
+
+      - name: Cache the pinned dependencies and their build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            .lake/packages
+            .lake/vendor
+          key: lake-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain', 'lake-manifest.json', 'scripts/dependencies.json', 'scripts/patches/**') }}
+
+      - name: Install the Cedar CLI
+        run: |
+          if ! cedar --version 2>/dev/null | grep -q "cedar-policy-cli $CEDAR_CLI_VERSION"; then
+            cargo install cedar-policy-cli --version "$CEDAR_CLI_VERSION" --locked
+          fi
+
+      - name: Prepare the pinned dependencies (verified by SHA256, no git)
+        run: python3 scripts/prepare-dependencies.py
+
+      - name: Build the core, proofs, and tests
+        run: lake build
+
+      - name: Check the axioms of every theorem
+        run: lake env lean Test/Axioms.lean
+
+      - name: Build the bulletin-board sample
+        run: lake build --dir examples/bulletin-board/backend
+
+      - name: Build the team-docs sample
+        run: lake build --dir examples/team-docs/backend
+
+      - name: Validate the Cedar schema and policies of the samples
+        run: |
+          cedar validate --schema examples/bulletin-board/backend/schema.cedarschema --policies examples/bulletin-board/backend/policies.cedar --deny-warnings
+          cedar validate --schema examples/team-docs/backend/schema.cedarschema --policies examples/team-docs/backend/policies.cedar --deny-warnings
+
+      - name: Check the installed JOSE/OpenSSL backend with throwaway keys
+        run: sh scripts/check-installed-jwt.sh
+
+      - name: Check that the core, proofs, and core tests do not know the samples
+        run: python3 scripts/check-core-isolation.py
+
+      - name: Check that malformed schemas are rejected at build time
+        run: sh scripts/check-schema-rejection.sh
+
+      - name: Check that handlers cannot have effects other than action calls
+        run: sh scripts/check-handler-effects.sh
+
+  dco:
+    name: DCO sign-off
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ vars.NYXIS_RUNS_ON || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check that every commit in the pull request carries a Signed-off-by trailer
+        run: python3 scripts/check-dco.py "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

@@ -3,7 +3,7 @@
 English | [日本語](README.ja.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.0-orange.svg)](https://github.com/NyxFoundation/nyxis)
+[![Version](https://img.shields.io/badge/version-v0.1.2-orange.svg)](https://github.com/NyxFoundation/nyxis)
 [![Status](https://img.shields.io/badge/status-under%20development-yellow.svg)](ASSUMPTIONS.md)
 [![Lean](https://img.shields.io/badge/Lean-v4.34.1-0052cc.svg?logo=lean&logoColor=white)](lean-toolchain)
 [![Cedar](https://img.shields.io/badge/policies-Cedar-6f42c1.svg)](https://www.cedarpolicy.com/)
@@ -23,7 +23,7 @@ Every backend built on Nyxis comes with a formal proof of the following:
 The Lean kernel checks this property on every `lake build`. Reviewing and auditing authorization comes down to reading the schema and policies and confirming that the proof checks.
 
 > [!NOTE]
-> Nyxis is under active development (v0.1.1). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
+> Nyxis is under active development (v0.1.2). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
 
 ## How it works
 
@@ -105,6 +105,7 @@ Apart from the README and ASSUMPTIONS, documentation is currently written in Jap
 - [ASSUMPTIONS.md](ASSUMPTIONS.md): scope of the guarantee and the assumptions trusted outside the proof
 - [docs/proofs.md](docs/proofs.md): catalog of proven theorems and what each one does not state
 - [docs/connection.md](docs/connection.md): how the connection code upholds the assumptions
+- [CONTRIBUTING.md](CONTRIBUTING.md): how pull requests are incorporated, the DCO sign-off, and what CI checks
 
 ## License
 

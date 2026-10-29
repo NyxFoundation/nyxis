@@ -31,7 +31,7 @@ import Nyxis.CedarLex
 `Name::{…}` 形式のエンティティ、`:` による型の注記、スコープの括弧つきのエンティティ参照
 (`principal == (User::"a")`)。
 
-Cedar 自身によるポリシーの検証(スキーマとの整合)は `cedar validate`で別に行う。
+Cedar 自身によるポリシーの検証(スキーマとの整合)は `cedar validate` で別に行う。
 この構成コードは証明の対象ではなく、`Test/Policy.lean` の検査と、`Test/Smoke.lean` の手書きの写しとの
 一致で振る舞いを確かめる(`ASSUMPTIONS.md` の A6)。
 -/

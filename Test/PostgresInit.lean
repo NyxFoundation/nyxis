@@ -53,7 +53,7 @@ private def check (name : String) (schema : Authz.Schema) (expectedSuccess : Boo
 def main : IO Unit := do
   let begin := ["BEGIN ISOLATION LEVEL SERIALIZABLE"]
   let creates := Test.Fixture.schema.tables.map (fun (table, _) => "create " ++ table.id)
-  -- 予約テーブル `_nyxis_outbox`は正本のテーブル(と外部キー)の後に、どの正本でも作る。
+  -- 予約テーブル `_nyxis_outbox` は正本のテーブル(と外部キー)の後に、どの正本でも作る。
   let outbox := ["outbox", "index"]
   check "fixture schema DDL and checked commit" Test.Fixture.schema true (begin ++ creates ++ outbox ++ ["COMMIT"])
   check "empty schema" { Test.Fixture.schema with tables := [] } true (begin ++ outbox ++ ["COMMIT"])

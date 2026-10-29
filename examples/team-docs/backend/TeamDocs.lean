@@ -17,7 +17,7 @@ import Nyxis.AppCheck
 - `TeamDocs.App` — 宣言とルーティングと定期処理を組んだアプリケーション `TeamDocs.app`(`TeamDocs.schema` / `policies` は宣言の別名)。
 - 起動処理は監査済みのこのモジュールを読み込む `Main.lean` に置く。
 
-アプリケーション側のコードは `TeamDocs/` の Lean ファイルで、型の外へ出る語(`unsafe` / `implemented_by` / `extern` / `sorry`)を
+アプリケーション側のコードは `TeamDocs/` の Lean ファイルで、型の外へ出る語(`scripts/check-handler-effects.sh` の grep が探す 4 語)を
 含まない。末尾の `nyxis_check_app` は、全アプリモジュールの定義と属性をビルド時に監査する。
 新しいアプリモジュールは必ずこのファイルから import し、検査の後には宣言を置かない。
 -/

@@ -474,7 +474,7 @@ backend失敗時は固定503/固定本文のみを選ぶ。いずれも返却HTT
 状態コード/本文UTF-8から構築したFullを包むAnyそのものであり、認可判定用の
 内部取得行や例外診断を応答構築時に追加しない。
 即時本文成功は前提。readAll内部/task表現の継続、Full消費/送信、JWT検証器・
-外部DBの意味論は含まず、全HTTP要求の安全性やC3達成を単独では主張しない。 -/
+外部DBの意味論は含まず、全HTTP要求の安全性や、定理の文が理想の命題を忠実に表すことを単独では主張しない。 -/
 theorem handleVerified_readAll_response
     (conninfo : String) (app : Runtime.App) (shape : PostgresShape.Shape) (external : ExternalSend.Config)
     (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Store版HTTPの配線検査(C6の前段。主体は匿名のみ、実DBではない)。
+# Store版HTTPの配線検査(実 DB の統合テストの前段。主体は匿名のみ、実DBではない)。
 #
 # `lake build` の後、検査用の初期状態(BulletinBoardTest.Fixture.store)で serveFixture を起動し、
 # curlで各エンドポイントの状態コードと本文を照合する。確かめるのは、メソッド・パス・

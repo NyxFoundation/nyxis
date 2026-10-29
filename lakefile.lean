@@ -12,7 +12,7 @@ def postgresLinkArgs : Array String := run_io do
   return #[s!"-L{dir.trimAscii}"] ++ libs.trimAscii.toString.splitOn.toArray.filter (· != "")
 
 package nyxis where
-  version := v!"0.1.1"
+  version := v!"0.1.2"
   moreLinkArgs := postgresLinkArgs
 
 require Cedar from git "https://github.com/cedar-policy/cedar-spec" @
@@ -106,7 +106,8 @@ lean_exe checkOutbox where
 lean_exe checkHttpAuth where
   root := `Test.HttpAuth
 
--- 問い合わせ文字列・選別した要求ヘッダ・許可された応答ヘッダの HTTP 統合検査用サーバ(-- scripts/check-http-headers.py が起動して検査する。DB・JWT 不要)。
+-- 問い合わせ文字列・選別した要求ヘッダ・許可された応答ヘッダの HTTP 統合検査用サーバ
+-- (scripts/check-http-headers.py が起動して検査する。DB・JWT 不要)。
 @[default_target]
 lean_exe serveHttpHeaders where
   root := `Test.HttpHeaders

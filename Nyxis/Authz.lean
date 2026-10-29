@@ -27,8 +27,8 @@ DB 層で実行する。
 - 判定は判定材料の全体ではなく、要求に現れる実体から有限の段数で到達できる実体だけ(`materials` =
   cedar-lean の `Entities.sliceAtLevel`。段数は正本のポリシーが level 検証に通る最小の level)で行う(`permits`)。
   その判定が判定材料の全体での判定と一致することは `permits_authorized` が cedar-lean の slicing 定理から導き、
-  主定理(`Nyxis.Runtime.authorization_safety`)の「正当な権限」(`Authorized`)は判定材料の全体での判定で述べる
- 。一致の前提(型環境の well-formedness・要求のインスタンス性・level 検証)は判定ごとに実行可能な検査と
+  主定理(`Nyxis.Runtime.authorization_safety`)の「正当な権限」(`Authorized`)は判定材料の全体での判定で述べる。
+  一致の前提(型環境の well-formedness・要求のインスタンス性・level 検証)は判定ごとに実行可能な検査と
   して確かめ、通らなければ拒否する。実 DB では、限定した材料を主キーの点検索で取得することになる: 部分的な取得
   (`Nyxis.Materials.Known`)が全体の状態と整合し、実行可能な検査 `coversOp` / `coversStep` に通れば、取得した行
   だけでの判定と `step` の結果は全体の状態でのものと一致する(`permits_eq_of_covers` / `step_eq_of_covers`)。

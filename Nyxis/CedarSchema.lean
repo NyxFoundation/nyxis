@@ -24,9 +24,9 @@ import Nyxis.CedarLex
 エンティティ型。`list` は一覧(テーブルの各行について判定し、permit された行だけを返す)。`upload` / `download`は
 添付の署名付き URL の発行(宣言された外部効果)で、テーブル `T` に添付の列の宣言 `@attachment("列")`(String 型の列。
 添付のオブジェクトの名を保存する)が無ければ拒む。`@attachment` は 1 テーブルに 1 つ、テーブルでないエンティティには
-添えられない。`mail`はメール送信(宣言された外部効果)で、宛先の列(メールアドレス)と件名・本文の列は `T` の
+添えられない。`mail` はメール送信(宣言された外部効果)で、宛先の列(メールアドレス)と件名・本文の列は `T` の
 String 型(省略不可)の列でなければならず、空・重複・無い列は拒む。
-`call`は外部 API 呼び出し(宣言された外部効果)。送り先は `@external("base: https://…; auth: bearer <環境変数名> |
+`call` は外部 API 呼び出し(宣言された外部効果)。送り先は `@external("base: https://…; auth: bearer <環境変数名> |
 header <ヘッダ名> <環境変数名> | none")` を添えた予約の仲間 `entity Stripe;`(テーブルではなく、属性・親・tags を持てず、
 `appliesTo` の主体・対象・属性の型・親にも書けない)。拒むもの(`docs/external-calls.md` §3.4): `@external` の無い型の
 名指し、`https://` でない `base`、形の違う `auth`、`{key}` 以外のプレースホルダや `?` / `#` を含むパス、`base` の無い送り先への
@@ -39,7 +39,7 @@ header <ヘッダ名> <環境変数名> | none")` を添えた予約の仲間 `e
 解析する文法は Cedar の人間可読スキーマ(`namespace`、`entity`(`in`・`=`・`tags`・`enum`)、
 `action`(`in`・`appliesTo`)、`type`、注釈、`//` と `/* */` のコメント)。字句規則(識別子・空白・文字列の
 エスケープ)はポリシー形式と共通(`Nyxis.CedarLex`)。Cedar 自身によるスキーマの検証は
-`cedar validate`で別に行い、ここでは nyxis が必要とする構造と効果の宣言を検査する。
+`cedar validate` で別に行い、ここでは nyxis が必要とする構造と効果の宣言を検査する。
 
 cedar-lean の `Cedar.Validation.Schema` は注釈を持たないので、解析は nyxis が行い、同じ文書から型環境
 (属性の型・`appliesTo`・祖先・文脈の型)を構成して `Authz.Schema.types` に置く(判定材料の限定の前提検査に使う。
@@ -703,7 +703,7 @@ def resolveTable (ctx : Ctx) (ns : List String) (p : List String) (pos : Pos) : 
 `Cedar.Validation.Schema` は注釈を持たないので、解析は上の構成が行い、ここでは属性の型と `appliesTo` を写す。
 アクションの `context` の型は、nyxis が判定に渡す文脈(`Authz.judgementRequest`: 挿入・更新では `context.values` に
 提案される値、それ以外は空)から効果の宣言で決め、正本に `context` が書かれていればそれと一致することを要求する。
-正本の `context` がサーバー生成値の属性 `now: datetime` / `id: String`を宣言していれば、その属性を型に加える
+正本の `context` がサーバー生成値の属性 `now: datetime` / `id: String` を宣言していれば、その属性を型に加える
 (nyxis はそのアクションの判定で `context.now` / `context.id` に要求ごとの値を置く)。
 実体の親: `entity T in [P]` は型環境の祖先の型になり、`@parents("列, …")` が親を指す列を定める(列の型は
 `P` か `Set<P>`。その値が行の実体の祖先になる)。所属行(第 2 段): `@memberships("M: 列 -> 列, …")` は、テーブル `M` の

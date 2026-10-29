@@ -3,7 +3,7 @@
 [English](README.md) | 日本語
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.0-orange.svg)](https://github.com/NyxFoundation/nyxis)
+[![Version](https://img.shields.io/badge/version-v0.1.2-orange.svg)](https://github.com/NyxFoundation/nyxis)
 [![Status](https://img.shields.io/badge/status-under%20development-yellow.svg)](ASSUMPTIONS.ja.md)
 [![Lean](https://img.shields.io/badge/Lean-v4.34.1-0052cc.svg?logo=lean&logoColor=white)](lean-toolchain)
 [![Cedar](https://img.shields.io/badge/policies-Cedar-6f42c1.svg)](https://www.cedarpolicy.com/)
@@ -23,7 +23,7 @@ Nyxis は、AI エージェントにコードを書かせて Web アプリケー
 この性質は `lake build` のたびに Lean のカーネルが検査します。認可のレビューと監査は、スキーマとポリシーを読み、証明が通っていることを確かめれば済みます。
 
 > [!NOTE]
-> Nyxis は開発中(v0.1.1)です。保証が届く範囲と、証明の外側で信頼する仮定は [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) に明記しています。本番で使う前に必ず読んでください。
+> Nyxis は開発中(v0.1.2)です。保証が届く範囲と、証明の外側で信頼する仮定は [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) に明記しています。本番で使う前に必ず読んでください。
 
 ## 仕組み
 
@@ -103,6 +103,7 @@ libpq のリンク引数は require する側に伝わらないため、ルー�
 - [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) — 保証の範囲と、証明の外側で信頼する仮定
 - [docs/proofs.md](docs/proofs.md) — 証明している定理と、それぞれが述べないことの目録
 - [docs/connection.md](docs/connection.md) — 仮定を支える接続コードの作り
+- [CONTRIBUTING.md](CONTRIBUTING.md) — PR の取り込みの流れ、DCO の sign-off、CI が検査すること(英語)
 
 ## ライセンス
 
