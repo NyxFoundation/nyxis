@@ -7,12 +7,17 @@ open Lake DSL
 -- nyxis を require するアプリケーションのパッケージも、同じ定義を自分の lakefile に持つ必要がある。
 def postgresLinkArgs : Array String := run_io do
   let libs ← IO.Process.run { cmd := "pkg-config", args := #["--libs", "libpq"] }
-  let dir ← IO.Process.run { cmd := "pkg-config", args := #["--variable=libdir", "libpq"] }
+  let dir := (← IO.Process.run { cmd := "pkg-config", args := #["--variable=libdir", "libpq"] }).trimAscii.toString
+  let libs := libs.trimAscii.toString.splitOn.toArray.filter (· != "")
   -- pkg-config が -L を省いても、Lean 同梱のリンカはシステムの libdir を探さないことがある。
-  return #[s!"-L{dir.trimAscii}"] ++ libs.trimAscii.toString.splitOn.toArray.filter (· != "")
+  if System.Platform.isOSX then
+    return #[s!"-L{dir}"] ++ libs
+  -- Linux では -L でシステムの libdir を足すと、Lean 同梱の古い glibc ではなくシステムの libc を拾い、
+  -- 同梱の Scrt1.o が参照する __libc_csu_init が見つからずリンクに失敗する。libpq だけをフルパスで渡す。
+  return libs.map fun a => if a == "-lpq" then s!"{dir}/libpq.so" else a
 
 package nyxis where
-  version := v!"0.1.2"
+  version := v!"0.1.3"
   moreLinkArgs := postgresLinkArgs
 
 require Cedar from git "https://github.com/cedar-policy/cedar-spec" @
