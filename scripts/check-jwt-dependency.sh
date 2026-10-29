@@ -41,6 +41,8 @@ if sys.platform == 'darwin':
     pq_link_args = ['-L' + pq_dir] + pq_libs
 else:
     pq_link_args = [pq_dir + '/libpq.so' if a == '-lpq' else a for a in pq_libs]
+    # Same as cryptoShimLinkArgs: let the binaries find libcrypto_shim.so when run directly.
+    pq_link_args.append('-Wl,-rpath,' + str(vendor / 'lean-libcrypto/.lake/build/lib'))
 (check / "lakefile.lean").write_text(
     'import Lake\nopen Lake DSL\nrequire «jose-libcrypto» from '
     + json.dumps(str(paths["jose-libcrypto"]))

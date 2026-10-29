@@ -16,9 +16,15 @@ def postgresLinkArgs : Array String := run_io do
   -- 同梱の Scrt1.o が参照する __libc_csu_init が見つからずリンクに失敗する。libpq だけをフルパスで渡す。
   return libs.map fun a => if a == "-lpq" then s!"{dir}/libpq.so" else a
 
+-- Linux では Lake が lean-libcrypto の libcrypto_shim.so を -L/-l でリンクするだけで実行時の探索先を埋め込まず、
+-- 実行ファイルを直接起動すると見つからない。macOS が dylib の絶対パスを埋め込むのに合わせ、絶対パスの rpath を足す。
+def cryptoShimLinkArgs (nyxisDir : System.FilePath) : Array String :=
+  if System.Platform.isOSX then #[]
+  else #[s!"-Wl,-rpath,{nyxisDir / ".lake" / "vendor" / "lean-libcrypto" / ".lake" / "build" / "lib"}"]
+
 package nyxis where
-  version := v!"0.1.3"
-  moreLinkArgs := postgresLinkArgs
+  version := v!"0.1.4"
+  moreLinkArgs := postgresLinkArgs ++ cryptoShimLinkArgs __dir__
 
 require Cedar from git "https://github.com/cedar-policy/cedar-spec" @
   "6d7fb269d5eec6ce4ae1d4aff9794feba0c0d5a9" / "cedar-lean"
