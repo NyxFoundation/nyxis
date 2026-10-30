@@ -52,12 +52,12 @@ def headerName : ResponseHeader → Std.Http.Header.Name
   | .location => .mk "location"
 
 /-- Cache-Control の指示のうち、認証済みの主体に許可された応答を共有キャッシュが別の主体へ再送することを
-    許す `public` と `s-maxage` は認めない(RFC 9111 §3.5: Authorization 付き要求の応答はこれらが無い限り
-    共有キャッシュに保存されない)。指示はカンマ区切り、名前は大小を区別しない。 -/
+    許す `public`・`s-maxage`・`must-revalidate` は認めない(RFC 9111 §3.5)。`must-revalidate` が再検証を
+    要求するのは応答が古くなってからで、新鮮な応答は再認可なしに共有されうる。指示はカンマ区切り、名前は大小を区別しない。 -/
 def acceptableCacheControl (value : String) : Bool :=
   (value.splitOn ",").all fun directive =>
     let name := ((directive.splitOn "=").headD "").trimAscii.toString.toLower
-    name != "public" && name != "s-maxage"
+    name != "public" && name != "s-maxage" && name != "must-revalidate"
 
 /-- ハンドラが設定した値を応答に載せてよいか。`Cache-Control` 以外は HTTP のヘッダ値としての妥当性だけ
     (`responseBuilder` が `Header.Value.ofString?` で確かめる)。 -/
@@ -66,14 +66,16 @@ def acceptable (name : ResponseHeader) (value : String) : Bool :=
   | .cacheControl => acceptableCacheControl value
   | _ => true
 
-/-- ハンドラが設定した `name` の値。最初のものを使い、`acceptable` で認められ HTTP のヘッダ値として妥当なときだけ。 -/
+/-- ハンドラが設定した `name` の最初の値。HTTP のヘッダ値として妥当でなければ捨てる。
+    `acceptable` が拒む Cache-Control は `no-store` に置き換え、元の保存禁止を弱めない。 -/
 def headerValueOf (r : Response) (name : ResponseHeader) : Option Std.Http.Header.Value :=
   (r.headers.find? (·.1 == name)).bind fun h =>
-    if acceptable name h.2 then Std.Http.Header.Value.ofString? h.2 else none
+    (Std.Http.Header.Value.ofString? h.2).map fun value =>
+      if acceptable name h.2 then value else Std.Http.Header.Value.ofString! "no-store"
 
 /-- ハンドラのレスポンスから HTTP レスポンスの行を組む。状態コードはハンドラが返したとおり。Content-Type は
     `contentTypeOf`、他の許可ヘッダは `ResponseHeader.all` の順に、各名前の最初の値が `headerValueOf` で認められた
-    ときだけ 1 つ加える(妥当でない値・認めない指示は捨て、同じ名前の 2 つめ以降は使わない)。
+    ときだけ 1 つ加える(妥当でない値は捨て、認めない Cache-Control は `no-store` に置き換え、同じ名前の 2 つめ以降は使わない)。
     `ResponseHeader` に無い名前(Set-Cookie 等)は表せない。 -/
 def responseBuilder (r : Response) : Std.Http.Response.Builder :=
   ResponseHeader.all.foldl (fun builder name =>

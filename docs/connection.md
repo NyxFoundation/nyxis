@@ -16,7 +16,7 @@
 対象: `Nyxis.Http`(`Std.Http` の上の共通部品)、`Nyxis.Internal.PostgresHttp`、`Nyxis.Internal.HttpResponse`、`Nyxis.Internal.Cors`。
 
 - ハンドラに渡す要求の要約は、メソッド・パス(問い合わせ文字列を除く)・問い合わせ文字列・`Nyxis.Http.RequestHeader` に列挙した少数の要求ヘッダ(Accept・Accept-Language・Content-Type・If-None-Match・If-Match)・本文だけで、Authorization と Cookie はその型に無い(`Http.selectHeaders`)。本文は 1 MiB まで、超過と UTF-8 でない本文は 400 でハンドラを呼ばない。
-- 応答は `Http.responseBuilder` が組む。ハンドラが設定できるのは `Nyxis.Http.ResponseHeader` に列挙した少数(Content-Type・Cache-Control・ETag・Location。Set-Cookie は型に無い)で、妥当でない値と Cache-Control の `public` / `s-maxage` は捨て、同じ名前は最初の値だけを載せる。Content-Type が無ければ `text/plain; charset=utf-8`。
+- 応答は `Http.responseBuilder` が組む。ハンドラが設定できるのは `Nyxis.Http.ResponseHeader` に列挙した少数(Content-Type・Cache-Control・ETag・Location。Set-Cookie は型に無い)で、HTTP のヘッダ値として妥当でない値は捨て、同じ名前は最初の値だけを載せる。`public` / `s-maxage` / `must-revalidate` を含む Cache-Control は `no-store` に置き換え、元の保存禁止を弱めない。これらの指示は認証付き応答の共有を許し、`must-revalidate` も応答が新鮮な間は再認可を要求しない([RFC 9111 §3.5](https://www.rfc-editor.org/rfc/rfc9111.html#section-3.5))。Content-Type が無ければ `text/plain; charset=utf-8`。
 - DB 失敗(取得が判定材料を覆わない・取得した行の形状不一致・SQL や照合の失敗を含む)は詳細無しの固定 503、読めない本文は固定 400、`GET /health` は DB に触れず固定 200。外部 API 呼び出し(`sync`)の 2xx の応答が宣言した型に合わなかった失敗だけは、トランザクションの取り消しの後に詳細無しの固定 502(`PostgresRun.gatewayResponse`)。DB 接続・JWKS・curl・JWT の診断文字列は応答にもログにも出さない。
 - CORS(`Nyxis.Internal.Cors`)は、コア設定 `NYXIS_CORS_ORIGINS`(カンマ区切りの HTTP(S) オリジンの完全一致。未設定・空は不許可、不正な設定は起動拒否)に合う Origin ヘッダ(ちょうど 1 つのとき)にだけ Allow-Origin を付け、プリフライト(OPTIONS)の応答にはさらに固定の Allow-Methods / Allow-Headers を付け、すべての応答に `Vary: Origin` を付ける。OPTIONS は本文の読み取り・認証・ハンドラ・DB より前に空の 204 を返す。cookie の credentials は許可しない。
 - 実起動 `Nyxis.Internal.ApprovedServer.serve` は、宣言から組んだ App だけを起動する(下の 7.)。

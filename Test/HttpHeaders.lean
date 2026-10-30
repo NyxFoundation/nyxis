@@ -34,7 +34,7 @@ private def echo : Authz.Principal → Authz.Generated → Request → Handler R
 
 /-- 許可外の挿入を試みる: 改行を含む Content-Type(Set-Cookie の注入)、改行を含む ETag とその 2 つめ、
     共有キャッシュへの保存を許す Cache-Control、2 つめの Content-Type。妥当な Location だけが残り、
-    Content-Type は既定に戻る。 -/
+    Content-Type は既定に戻り、Cache-Control は no-store に置き換わる。 -/
 private def inject : Authz.Principal → Authz.Generated → Request → Handler Response := fun _ _ _ =>
   pure { status := .created, body := "injected?"
          headers := [(.contentType, "text/html\r\nSet-Cookie: a=b"), (.etag, "bad\nvalue"), (.etag, "\"second\""),
@@ -46,7 +46,9 @@ private def plain : Authz.Principal → Authz.Generated → Request → Handler 
 /-- 認可層を通る読み取り(fixture の下書き)。主体が Authorization から決まることの対照。 -/
 private def readDraft : Authz.Principal → Authz.Generated → Request → Handler Response := fun _ _ _ => do
   match ← Handler.callAction (act "readPost") "draft1" with
-  | .ok (some _) => pure { status := .ok, body := "draft" }
+  | .ok (some _) =>
+    pure { status := .ok, body := "draft"
+           headers := [(.cacheControl, "max-age=60, must-revalidate")] }
   | .denied => pure { status := .forbidden, body := "forbidden" }
   | _ => pure { status := .notFound, body := "not found" }
 
@@ -68,6 +70,7 @@ def main (args : List String) : IO Unit := do
   let verify : String → IO (Option String) := fun token =>
     match token with
     | "test-alice" => pure (some "alice")
+    | "test-bob" => pure (some "bob")
     | "test-root" => pure (some "root")
     | _ => pure none
   let backend : AuthenticatedRequest → IO Response := fun r =>
