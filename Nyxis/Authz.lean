@@ -990,6 +990,15 @@ theorem Payload.outcome_isCalled (p : Payload) (external : ExternalResult)
   | mail _ _ _ => cases external <;> simp [Payload.outcome, Outcome.isCalled] at h
   | call _ _ _ _ mode => rfl
 
+/-- 署名付き URL(`signed`)は添付の署名付き URL の発行の内容(`Payload.upload` / `download`)からだけ生じる。 -/
+theorem Payload.outcome_signed (p : Payload) (external : ExternalResult) (url : String)
+    (h : p.outcome external = .signed url) : p.kind = .upload ∨ p.kind = .download := by
+  cases p with
+  | upload _ => exact Or.inl rfl
+  | download _ => exact Or.inr rfl
+  | mail _ _ _ => cases external <;> simp [Payload.outcome] at h
+  | call _ _ _ _ mode => cases mode <;> cases external <;> simp [Payload.outcome] at h
+
 /-- 外部効果の処理は DB 操作を発行せず、状態を変えない。 -/
 theorem externalStep_coherent (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
