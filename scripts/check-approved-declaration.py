@@ -90,9 +90,12 @@ def deployment : Nyxis.Internal.ApprovedServer.Deployment where
   shape_valid := by rfl
   userType := ⟨"Actor", []⟩
   user_not_anonymous := by decide
+  user_not_service := by decide
 example (router : Nyxis.Http.Router) :
     Nyxis.Internal.ApprovedServer.serve deployment 8080 "unused" "unused" router {} = (do
       Nyxis.Internal.JwksFetch.requireCurl
+      Nyxis.Internal.Jobs.start "unused" (sources.app router) shape {} none
+      Nyxis.Internal.Outbox.start "unused" sources.schema none {}
       Nyxis.Internal.PostgresHttp.serveVerifiedApp 8080 "unused" (sources.app router)
         shape ⟨"Actor", []⟩ (Nyxis.Internal.JwksFetch.verify "unused") {}) := rfl
 end DeclarationCheck
@@ -104,7 +107,7 @@ end DeclarationCheck
             '  shape := shape', '  shape := []'), error="rfl")
         replacement = startup.replace('end DeclarationCheck', """
 def replacement : Nyxis.Runtime.App :=
-  ⟨sources.schema, [], fun _ _ => none⟩
+  { schema := sources.schema, policies := [], router := fun _ _ => none }
 end DeclarationCheck
 """)
         check("replacement App fixture is well typed", text=replacement)
