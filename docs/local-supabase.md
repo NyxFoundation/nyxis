@@ -1,15 +1,31 @@
 # ローカル Supabase
 
-`scripts/local-supabase.py` はローカル Supabase を起動・確認するスクリプトです。macOS の Docker Desktop、
-Docker CLI、Supabase CLI、Python 3 が必要です（確認環境: Supabase CLI 2.90.0）。
+`scripts/local-supabase.py` はローカル Supabase を起動・確認するスクリプトです。macOS の Docker Desktop
+または Linux(WSL 2 を含む)の Docker デーモン、Docker CLI、Supabase CLI、Python 3 が必要です
+（確認環境: Supabase CLI 2.90.0。Linux は WSL 2 上の Ubuntu 24.04 と Docker Engine 29.9）。
+Windows では WSL 2 の中で Linux 版の Docker CLI と Supabase CLI を使って実行します
+(Windows 版の CLI と名前付きパイプには対応しません)。
 
 ```sh
 python3 scripts/local-supabase.py
 ```
 
-Docker Desktop が停止していれば起動し、最大 120 秒待ちます。
-ローカル専用 `desktop-linux` コンテキストの Unix ソケットを使い、
-呼出し元の `DOCKER_HOST` や別コンテキストを使いません。
+使う Docker コンテキストは、macOS では Docker Desktop の `desktop-linux`、Linux では `default`
+(`DOCKER_HOST` を除いたデーモン既定の Unix ソケット)です。rootless Docker など別のコンテキストを
+使う場合は `NYXIS_DOCKER_CONTEXT` にその名前を指定します(名前付きのコンテキストは呼出し元の Docker 設定、
+`DOCKER_CONFIG` か既定の `~/.docker` から読みます)。呼出し元の `DOCKER_HOST`・`DOCKER_CONTEXT`・
+TLS 設定(`DOCKER_TLS`・`DOCKER_TLS_VERIFY`・`DOCKER_CERT_PATH`)は使いません。
+選んだコンテキストのエンドポイントが Unix ソケット(`unix:///`)でなければ、Supabase CLI を実行せずに
+exit 75 で終わります。スクリプトと各検査は、Docker CLI には `--context`、Supabase CLI には `DOCKER_CONTEXT` で
+同じコンテキストを明示します。`--exec` の子プロセスにも同じ `DOCKER_CONTEXT` を渡し、呼出し元の上記の設定は渡しません。
+Unix ソケットであることはデーモンがローカルである証明ではありません(ssh などで転送したソケットも通ります)。
+そのようなコンテキストは指定しないでください。
+
+macOS で `desktop-linux` を使う場合、Docker Desktop が停止していれば起動し、最大 120 秒待ちます
+(`NYXIS_DOCKER_CONTEXT` で別のコンテキストを選んだ場合は起動しません)。
+Linux ではスクリプト自身はデーモンを起動せず、システムサービスの設定も変えません。
+接続できなければ exit 75 で終わります(systemd のソケット起動が有効な環境では、接続をきっかけに
+systemd がデーモンを起動することはあります)。
 `supabase start` は既存コンテナ・ボリュームを再利用します。
 初回はイメージを取得するため時間がかかります。全体の内部期限は 540 秒です。
 タイムアウト後もデータを削除せず、再実行できます。

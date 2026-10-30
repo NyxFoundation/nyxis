@@ -50,7 +50,7 @@ def quote(value):
 def bulk(statement):
     """Like db.sql on the test DB, with a longer timeout for the bulk inserts."""
     result = subprocess.run(
-        ['docker', '--context', 'desktop-linux', 'exec', '-i', 'supabase_db_nyxis',
+        ['docker', '--context', db.ENV['DOCKER_CONTEXT'], 'exec', '-i', 'supabase_db_nyxis',
          'psql', '-X', '-U', 'postgres', '-d', db.DATABASE, '-At', '-v', 'ON_ERROR_STOP=1'],
         input=statement.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=db.ENV, timeout=600)

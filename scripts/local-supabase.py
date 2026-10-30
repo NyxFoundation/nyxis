@@ -13,12 +13,13 @@ from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, build_opener
 
 ROOT = Path(__file__).resolve().parent.parent
-ENV = os.environ.copy()
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.dont_write_bytecode = True  # leave no scripts/__pycache__: this script never changes the working tree
+import nyxis_docker
+
 # Never target a remote Docker daemon, even if the caller selected one.
-ENV.pop("DOCKER_HOST", None)
-ENV.pop("DOCKER_TLS_VERIFY", None)
-ENV.pop("DOCKER_CERT_PATH", None)
-ENV["DOCKER_CONTEXT"] = "desktop-linux"
+# main() pins the checked local context (nyxis_docker) before the first Docker command.
+ENV = {name: value for name, value in os.environ.items() if name not in nyxis_docker.CALLER_SETTINGS}
 DEADLINE = time.monotonic() + 540
 
 
@@ -129,26 +130,33 @@ def main():
             os.execvpe(sys.argv[2], sys.argv[2:], child_env)
         if cloud:
             say("cloud settings loaded; use scripts/local-supabase.py --exec-cloud COMMAND for cloud checks. Values withheld; connectivity not yet verified.")
+    if sys.platform not in ("darwin", "linux"):
+        fail("this script supports macOS and Linux (on Windows, run it inside WSL 2).")
     for tool in ("docker", "supabase"):
         if not shutil.which(tool):
             fail(tool + " is missing from PATH.")
     if not (ROOT / "supabase/config.toml").is_file():
         fail("restore the committed supabase/config.toml (this script never runs supabase init).")
-    _, raw_context = run(["docker", "context", "inspect", "desktop-linux"])
     try:
-        endpoint = json.loads(raw_context)[0]["Endpoints"]["docker"]["Host"]
-        if not endpoint.startswith("unix:///"):
-            fail("desktop-linux must use a local Unix socket.")
-    except (ValueError, KeyError, IndexError, TypeError):
-        fail("cannot identify the local Docker Desktop endpoint.")
+        context = nyxis_docker.scrub(ENV)["DOCKER_CONTEXT"]
+    except ValueError:
+        fail("NYXIS_DOCKER_CONTEXT is not a Docker context name.")
+    code, raw_context = run(["docker", "context", "inspect", context], check=False)
+    if code:
+        fail("cannot inspect Docker context " + context + "; set NYXIS_DOCKER_CONTEXT to a local context.")
+    try:
+        nyxis_docker.unix_endpoint(raw_context, context)
+    except ValueError:
+        fail("Docker context " + context + " must use a local Unix socket.")
     if not execute:
-        if sys.platform != "darwin":
-            fail("this script expects macOS Docker Desktop (desktop-linux context).")
-        if run(["docker", "info"], check=False)[0]:
+        if run(["docker", "--context", context, "info"], check=False)[0]:
+            if sys.platform != "darwin" or context != nyxis_docker.DESKTOP:
+                fail("the Docker daemon of context " + context + " is not reachable; start it first "
+                     "(this script does not start or configure system services).")
             say("starting Docker Desktop...")
             run(["open", "-a", "Docker"])
             until = time.monotonic() + 120
-            while run(["docker", "info"], timeout=10, check=False)[0]:
+            while run(["docker", "--context", context, "info"], timeout=10, check=False)[0]:
                 if time.monotonic() >= until:
                     fail("Docker did not become ready within 120 seconds.")
                 time.sleep(2)
@@ -156,7 +164,9 @@ def main():
         run(["supabase", "start"], timeout=400)
     data = status()
     if execute:
-        child_env = os.environ.copy()
+        # The checked Docker settings plus the local credentials, which ENV (used for the
+        # Docker and Supabase commands) never receives.
+        child_env = ENV.copy()
         child_env["NYXIS_DATABASE_URL"] = data["DB_URL"]
         child_env["NYXIS_SUPABASE_URL"] = data["API_URL"]
         for source, target in (("ANON_KEY", "NYXIS_SUPABASE_ANON_KEY"),
@@ -167,8 +177,8 @@ def main():
         os.chdir(ROOT)
         os.execvpe(sys.argv[2], sys.argv[2:], child_env)
     # Actual SQL, rather than just a socket or container existence check.
-    _, result = run(["docker", "exec", "supabase_db_nyxis", "psql", "-U", "postgres",
-                     "-d", "postgres", "-Atqc", "SELECT 1"])
+    _, result = run(["docker", "--context", context, "exec", "supabase_db_nyxis",
+                     "psql", "-U", "postgres", "-d", "postgres", "-Atqc", "SELECT 1"])
     if result.strip() != b"1":
         fail("local PostgreSQL query failed.")
     try:

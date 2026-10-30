@@ -54,7 +54,7 @@ checks = 0
 
 def sql(statement, database='postgres'):
     result = subprocess.run(
-        ['docker', '--context', 'desktop-linux', 'exec', '-i', 'supabase_db_nyxis',
+        ['docker', '--context', ENV['DOCKER_CONTEXT'], 'exec', '-i', 'supabase_db_nyxis',
          'psql', '-X', '-U', 'postgres', '-d', database, '-At', '-v', 'ON_ERROR_STOP=1'],
         input=statement.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=ENV, timeout=30)
@@ -171,10 +171,7 @@ def main():
     assert endpoint.hostname in ('127.0.0.1', 'localhost', '::1'), 'local DB required'
     assert endpoint.port == 55322 and endpoint.path == '/postgres', 'nyxis local DB required'
     assert not endpoint.query and not endpoint.fragment, 'unexpected DB URL options'
-    context = subprocess.run(['docker', 'context', 'inspect', 'desktop-linux'], env=ENV,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-    assert context.returncode == 0, 'Docker context unavailable'
-    assert json.loads(context.stdout)[0]['Endpoints']['docker']['Host'].startswith('unix:///'), 'local Docker required'
+    nyxis_local.require_local_docker(ENV)
     assert BINARY.exists(), 'run lake build first'
     record = []
     lock = threading.Lock()
