@@ -37,7 +37,8 @@ header <ヘッダ名> <環境変数名> | none")` を添えた予約の仲間 `e
 `entity Service;` と宣言したアクションの `appliesTo` の主体にだけ書ける。
 
 解析する文法は Cedar の人間可読スキーマ(`namespace`、`entity`(`in`・`=`・`tags`・`enum`)、
-`action`(`in`・`appliesTo`)、`type`、注釈、`//` と `/* */` のコメント)。字句規則(識別子・空白・文字列の
+`action`(`in`・`appliesTo`)、`type`、注釈、`//` のコメント)。Cedar のスキーマ形式にブロックコメント
+`/* */` は無く、ポリシー形式と同じく拒否する。字句規則(識別子・空白・文字列の
 エスケープ)はポリシー形式と共通(`Nyxis.CedarLex`)。Cedar 自身によるスキーマの検証は
 `cedar validate` で別に行い、ここでは nyxis が必要とする構造と効果の宣言を検査する。
 
@@ -58,13 +59,6 @@ open Nyxis.CedarLex
 /-- 1 文字の記号。`::` は別に扱う。 -/
 def symbolChars : List Char := ['{', '}', '[', ']', '(', ')', ',', ';', ':', '?', '=', '@', '<', '>']
 
-/-- ブロックコメントの終わり `*/` まで読み飛ばす。残りと、その位置(行・列)。閉じていなければ `none`。 -/
-def skipBlock : List Char → Nat → Nat → Option (List Char × Nat × Nat)
-  | '*' :: '/' :: rest, line, col => some (rest, line, col + 2)
-  | '\n' :: rest, line, _ => skipBlock rest (line + 1) 1
-  | _ :: rest, line, col => skipBlock rest line (col + 1)
-  | [], _, _ => none
-
 /-- 字句解析の本体。燃料は残りの文字数(1 歩ごとに 1 文字以上読む)。 -/
 def tokenizeAux : Nat → List Char → Nat → Nat → Array Tok → Except CedarLex.Error (Array Tok)
   | 0, _, line, col, _ => .error ⟨⟨line, col⟩, "内部エラー: 字句解析の燃料切れ"⟩
@@ -73,10 +67,7 @@ def tokenizeAux : Nat → List Char → Nat → Nat → Array Tok → Except Ced
     | [] => .ok acc
     | '\n' :: rest => tokenizeAux fuel rest (line + 1) 1 acc
     | '/' :: '/' :: rest => tokenizeAux fuel (rest.dropWhile (fun c => c != '\n' && c != '\r')) line col acc
-    | '/' :: '*' :: rest =>
-      match skipBlock rest line (col + 2) with
-      | some (rest', line', col') => tokenizeAux fuel rest' line' col' acc
-      | none => .error ⟨⟨line, col⟩, "閉じられていないブロックコメント"⟩
+    | '/' :: '*' :: _ => .error ⟨⟨line, col⟩, "スキーマ形式にブロックコメント /* */ は無い(// を使う)"⟩
     | '"' :: rest =>
       match readRaw ⟨line, col⟩ (rest.length + 1) rest line (col + 1) [] with
       | .ok (raw, rest', line', col') =>

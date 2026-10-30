@@ -95,8 +95,8 @@ action "readPost" appliesTo { principal: [User, Anonymous], resource: [Post] };
 -- コメント、省略可の属性、集合、親、tags、アクションの親と context、1 宣言での複数の名前、修飾した効果の対象
 -- (最上位の名前空間)。
 #guard ((parse r#"
-/* ブロック
-   コメント */
+// 行
+// コメント
 entity Group;
 @parents("group")
 entity Doc in [Group] = { "group": Group, "tags": Set<String>, "note"?: String } tags String;
@@ -351,9 +351,11 @@ action "readPost" appliesTo { principal: [User], resource: [Post] };
 action "readPost" appliesTo { principal: [User], resource: [Post] };
 "#) "重複"
 
--- 文法の誤り(`;` が無い、閉じていないコメント、予期しない文字)。
+-- 文法の誤り(`;` が無い、ブロックコメント、予期しない文字)。
 #guard rejectedWith "entity User = { \"admin\": Bool }\nentity Post;" "';'"
 #guard rejectedWith "/* 閉じない" "ブロックコメント"
+-- Cedar のスキーマ形式にブロックコメントは無い(cedar-policy-cli 4.13 も `/*` で invalid token)。閉じていても拒否する。
+#guard rejectedWith "entity User;\n/* block */ entity B;" "ブロックコメント"
 #guard rejectedWith "entity User = { \"admin\": Bool }; ★" "予期しない文字"
 -- Cedar 4.13 の解析器と同じく、文字列リテラルの中の生の改行は受理し、生の CR は拒否する。
 #guard accepted "entity User = { \"a\nb\": Bool };"
