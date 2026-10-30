@@ -28,6 +28,7 @@ import Nyxis.Build
 `import Nyxis` に含まれないもの:
 
 - `Nyxis.ReadSafety` — ハンドラに渡る行の出所についての系(接続層の証明が参照する)。
+- `Nyxis.SliceSafety` — 結果タグを含む結果列と応答が、各呼び出しの判定材料だけに依ることの系。
 - `Nyxis.AppCheck` — アプリケーションの最終モジュールが呼ぶ監査 `nyxis_check_app`(`ASSUMPTIONS.md` A7)。
 - `Nyxis.Internal.*` — 接続コード(JWT の検証、PostgreSQL、HTTP の入口、CORS、実起動 `ApprovedServer`)。
   アプリケーションからの import は監査が拒む。起動処理だけが監査の後に import する。
