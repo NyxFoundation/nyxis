@@ -16,8 +16,9 @@ Creates a uniquely named local database and starts a mock HTTPS API (throwaway s
                    that the destination secret is stored nowhere.
 3. `loop` x 2    — two processes run nyxis's internal loop against the same database at the same time (interval 1 s,
                    backoff base 1 s, at most 3 attempts). The mock answers 5xx twice then 2xx for one row (resent and
-                   `sent`), 4xx for one row (immediately `failed`), 5xx always for one row (`failed` after the
-                   maximum attempts), 2xx for the rest, with a small delay so the two loops overlap. The script
+                   `sent`), 4xx for two rows (immediately `failed`, one with a non-UTF-8 body), 5xx always for one
+                   row (`failed` after the maximum attempts), 2xx for the rest (two of them with a non-UTF-8 or
+                   over-limit body that is discarded), with a small delay so the two loops overlap. The script
                    checks the rows' final states and counters, that the mock saw every row exactly once per attempt
                    (no double delivery across the two processes), that the authentication header and bodies are the
                    stored ones, and that the processes' counts add up to the mock's record.
@@ -118,6 +119,13 @@ def make_handler(record, lock):
                     return self.respond(404, b'{"error":"unknown event"}')
                 if name == 'o-max':
                     return self.respond(503, b'{"error":"down"}')
+                # The status decides, whatever the (discarded) body: not UTF-8, or over the response limit.
+                if name == 'o-binary':
+                    return self.respond(200, bytes([0xff, 0xfe]) + b' binary')
+                if name == 'o-large':
+                    return self.respond(200, b'x' * 70000)
+                if name == 'o-binary-404':
+                    return self.respond(404, bytes([0xff, 0xfe]) + b' binary')
                 if name.startswith('o-par'):
                     time.sleep(0.3)  # let the two loops overlap on the parallel rows
                 return self.respond(200, b'{"ok":true}')
@@ -184,6 +192,7 @@ def main():
         env['NYXIS_DATABASE_URL'] = urlunsplit(endpoint._replace(path='/' + DATABASE))
         env['NYXIS_CHECK_EXTERNAL_PORT'] = str(server.server_port)
         env['NYXIS_EXT_NOTIFY'] = NOTIFY_SECRET
+        env['NYXIS_CALL_MAX_RESPONSE_BYTES'] = '65536'  # pin the limit the o-large row (70000 bytes) must exceed
         env['NYXIS_OUTBOX_INTERVAL_SECONDS'] = '1'
         env['NYXIS_OUTBOX_MAX_ATTEMPTS'] = '3'
         env['NYXIS_OUTBOX_BACKOFF_BASE_SECONDS'] = str(BACKOFF_BASE)
@@ -218,7 +227,8 @@ def main():
             expect(record == [], 'an async call was sent during the request: ' + json.dumps(record))
             pending = rows()
             grouped = by_target(pending)
-            expected_targets = {'Order/' + o for o in ['o-ok', 'o-404', 'o-retry', 'o-max', 'o-hook', 'o-dead'] + PARALLEL}
+            expected_targets = {'Order/' + o for o in ['o-ok', 'o-404', 'o-retry', 'o-max', 'o-hook', 'o-dead', 'o-binary',
+                                                       'o-large', 'o-binary-404'] + PARALLEL}
             expect(set(grouped) == expected_targets | {'Order/o-twice'},
                    'unexpected outbox targets: ' + json.dumps(sorted(grouped)))
             expect(all(len(grouped[t]) == 1 for t in expected_targets) and len(grouped['Order/o-twice']) == 2,
@@ -249,7 +259,8 @@ def main():
                               FROM public."Order";''', DATABASE)
             expected_statuses = ','.join(name + '=' + status for name, status in sorted(
                 [('o-ok', 'noted'), ('o-twice', 'new'), ('o-boom', 'new'), ('o-404', 'new'), ('o-retry', 'new'),
-                 ('o-max', 'new'), ('o-hook', 'new'), ('o-dead', 'new')] + [(o, 'new') for o in PARALLEL]))
+                 ('o-max', 'new'), ('o-hook', 'new'), ('o-dead', 'new'), ('o-binary', 'new'), ('o-large', 'new'),
+                 ('o-binary-404', 'new')] + [(o, 'new') for o in PARALLEL]))
             expect(statuses == expected_statuses, 'order statuses: ' + statuses)
             # 3. two internal loops at once against the same database.
             started = time.monotonic()
@@ -276,7 +287,9 @@ def main():
                 [r['id'] for r in final if r['state'] == 'pending']))
             for target, expected in [('Order/o-retry', ('sent', 3, 200, None)), ('Order/o-404', ('failed', 1, 404, 'status')),
                                      ('Order/o-max', ('failed', 3, 503, 'attempts')), ('Order/o-ok', ('sent', 1, 200, None)),
-                                     ('Order/o-hook', ('sent', 1, 204, None)), ('Order/o-dead', ('failed', 3, None, 'attempts'))] + \
+                                     ('Order/o-hook', ('sent', 1, 204, None)), ('Order/o-dead', ('failed', 3, None, 'attempts')),
+                                     ('Order/o-binary', ('sent', 1, 200, None)), ('Order/o-large', ('sent', 1, 200, None)),
+                                     ('Order/o-binary-404', ('failed', 1, 404, 'status'))] + \
                     [('Order/' + o, ('sent', 1, 200, None)) for o in PARALLEL]:
                 (row,) = grouped[target]
                 expect((row['state'], row['attempts'], row['last_status'], row['last_error']) == expected
@@ -285,7 +298,7 @@ def main():
                 expect((row['state'], row['attempts'], row['last_status'], row['last_error'], row['sent'])
                        == ('sent', 1, 200, None, True), 'final row o-twice: ' + json.dumps(row))
             # The mock saw every pending row exactly once per attempt: no double delivery across the two processes,
-            # the 5xx row three times (two failures, one success), the 4xx row once, the always-5xx row three times.
+            # the 5xx row three times (two failures, one success), each 4xx row once, the always-5xx row three times.
             seen = {}
             times = {}
             for (method, path, auth, body, clean, at) in record:
@@ -296,7 +309,7 @@ def main():
                     expect(auth == 'none' and body == {'note': 'first'}, 'hook request: ' + json.dumps(body))
                 else:
                     expect(auth == 'bearer' and body == NOTIFY_BODY, 'notify request: %s %s %s' % (path, auth, json.dumps(body)))
-            expected_seen = {'/notify/v1/events/' + o: 1 for o in ['o-ok'] + PARALLEL}
+            expected_seen = {'/notify/v1/events/' + o: 1 for o in ['o-ok', 'o-binary', 'o-large', 'o-binary-404'] + PARALLEL}
             expected_seen.update({'/notify/v1/events/o-twice': 2, '/notify/v1/events/o-retry': 3,
                                   '/notify/v1/events/o-404': 1, '/notify/v1/events/o-max': 3, '/hooks/o-hook': 1})
             expect(seen == expected_seen, 'deliveries per path: ' + json.dumps(seen))
