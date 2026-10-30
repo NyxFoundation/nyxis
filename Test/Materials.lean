@@ -540,7 +540,7 @@ def orgStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
 
 `@unique` / `@references` を宣言した小さな正本で、認可層の判定(`step`)が、permit された操作について一意性と参照整合の
 違反を `conflict` にし、参照される行の削除を `restrict` で競合に、`cascade` で参照する行の削除(各行を宣言された
-アクションで判定。深い行から順に発行、1 行でも permit されなければ要求全体を拒否)にすることと、部分的な取得との一致を
+アクションで判定。深い行から順に発行、1 行でも permit されなければその呼び出しを拒否)にすることと、部分的な取得との一致を
 確かめる。 -/
 
 def intSchemaText : String := r#"
@@ -646,7 +646,7 @@ def issuedOps (r : StepResult) : List (String × String × String) :=
   == [("deleteNote", "Note", "zn"), ("deleteDoc", "Doc", "z1"), ("deleteOrg", "Org", "zen")]
 #guard ((intStep (.user alice) "deleteOrg" "zen").store.find? orgT "zen").isNone
 #guard ((intStep (.user alice) "deleteOrg" "zen").store.find? docT "a1").isSome
--- acme には bob の文書 a2 があり、alice には deleteDoc が permit されないので、要求全体が拒否され何も消えない
+-- acme には bob の文書 a2 があり、alice には deleteDoc が permit されないので、この削除が拒否され何も消えない
 #guard outDenied (intStep (.user alice) "deleteOrg" "acme").outcome
 #guard (intStep (.user alice) "deleteOrg" "acme").issued.isEmpty
 #guard (intStep (.user alice) "deleteOrg" "acme").store == intStore

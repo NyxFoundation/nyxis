@@ -14,7 +14,7 @@ Lean バックエンドが PostgreSQL に対して発行する DB 操作と、�
   更新では列、メールでは宛先の列と件名・本文の列、外部 API 呼び出しでは送り先・メソッド・パス(または URL の列)・
   本文の列・実行時機を定める。
   一覧は、対象テーブルの各行についてそのアクションの判定を行い、permit された行だけを返す。DB 操作としては
-  permit された行ごとの読み取りを発行する(`Nyxis.Authz.step`)。外部効果は DB 操作を発行せず、
+  返す行(ページ)ごとの読み取りを発行する(`Nyxis.Authz.step`)。外部効果は DB 操作を発行せず、
   対象の行について permit されたときだけ外部効果(Supabase Storage への署名付き URL の発行、その行の宣言された列の
   値を宛先・内容とするメールの送信、正本で宣言した送り先への HTTP の呼び出し)を記録する
   (`Nyxis.Authz.External`)。オブジェクトのパスは nyxis が決め(`objectPath`)、宛先・内容・送り先・本文は正本の
@@ -149,7 +149,7 @@ structure Effect where
   deriving Repr, DecidableEq
 
 /-- DB 操作。Lean バックエンドが PostgreSQL に対して発行する読み取り・挿入・更新・削除。
-    一覧は、permit された行ごとの読み取りとして発行される(一覧だけの操作は無い)。 -/
+    一覧は、返す行ごとの読み取りとして発行される(一覧だけの操作は無い)。 -/
 inductive Operation where
   | read (table : Table) (key : Key)
   | insert (table : Table) (key : Key) (row : Row)
@@ -364,9 +364,9 @@ def Filter.matchesAll (filters : List Filter) (row : Row) : Bool :=
 正本が宣言する DB の制約。`@unique("列, …")` は列の組の一意性(組のどれかの列が無い行は比べない。PostgreSQL の
 `UNIQUE` の NULL と同じ)、`@references("列 restrict, 列 cascade アクション, …")` は実体参照の列の参照整合
 (参照先の行が無い挿入・更新は競合。参照される行の削除は、`restrict` なら参照する行があれば競合、`cascade` なら
-参照する行も消える — その各行はそのテーブルの削除効果を持つ宣言済みアクションで判定され、1 行でも permit され
-なければ要求全体が拒否される)。nyxis は同じ制約を DB にも設定し(`PostgresSql.createTable`)、判定はモデル
-(`Nyxis.Authz.step`)が先に行う(違反は `Outcome.conflict`)。DB 側の制約は判定が外れたときの裏付けで、
+参照する行も消える — その各行はそのテーブルの削除効果を持つ宣言済みアクションで判定され、競合が無く 1 行でも
+permit されなければその呼び出しが拒否される)。nyxis は同じ制約を DB にも設定し(`PostgresSql.createTable`)、
+判定はモデル(`Nyxis.Authz.step`)が先に行う(違反は `Outcome.conflict`)。DB 側の制約は判定が外れたときの裏付けで、
 そのときは要求全体が閉じる。 -/
 
 /-- 列の組の一意性の宣言。 -/
@@ -405,13 +405,16 @@ def Reference.filterOf (column : Column) (uid : EntityUID) : List Filter :=
 
 end Db
 
-/-- アクション呼び出しの結果。`denied` は認可層が、`notFound` / `conflict` / `ok` は DB 層が決める。 -/
+/-- アクション呼び出しの結果。`denied` と制約の違反の `conflict` は認可層が、行の操作の `notFound` / 主キーの
+    `conflict` / `ok` は DB 層が決める(一覧の `list` と外部効果の結果は `Nyxis.Authz.step`)。 -/
 inductive Outcome where
-  /-- 認可層が拒否した(効果の宣言が無い・操作が効果の範囲外・Cedar が deny)。DB 操作は発行されていない。 -/
+  /-- 認可層が拒否した(効果の宣言が無い・操作が効果の範囲外・Cedar が deny・連鎖で消える行のどれかが deny)。DB 操作は
+      発行されていない。 -/
   | denied
   /-- 行が無い(読み取り・更新・削除)。 -/
   | notFound
-  /-- 行が既にある(挿入)。 -/
+  /-- 行が既にある(挿入)か、permit された操作が正本の一意性・参照整合の制約に違反する(このときは DB 操作を
+      発行しない)。 -/
   | conflict
   /-- 成功。読み取りではその行、書き込み(挿入・更新・削除)では `none`。
       書き込みの効果で行を返すと、宣言された効果(更新では列)を超えた読み取りになるので返さない。 -/

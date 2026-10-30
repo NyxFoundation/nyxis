@@ -478,8 +478,8 @@ theorem call_recorded (schema : Schema) (policies : Policies) (e : External)
 structure StepResult where
   /-- 処理後の DB の状態。 -/
   store : Store
-  /-- 発行した DB 操作の記録(発行順)。発行しなければ空。行の操作では 1 つ、一覧では permit された行ごとの
-      読み取り。 -/
+  /-- 発行した DB 操作の記録(発行順)。発行しなければ空。行の操作では 1 つ(連鎖の削除ではその各行の削除も)、
+      一覧では返す行ごとの読み取り。 -/
   issued : List Issued
   /-- 発行した外部効果の記録。外部効果の宣言で permit され内容が決まったときだけ 1 つ、それ以外は空。 -/
   external : List External
@@ -522,8 +522,9 @@ theorem permittedRows_authorized (schema : Schema) (policies : Policies) (princi
 - 参照整合(`Reference`)の挿入・更新: 置く行の参照の列の値が宣言された型の実体でないか、その行が無ければ競合。
 - 参照される行の削除: 削除する行(と連鎖で消える各行)を参照する行が `restrict` の列にあれば競合。`cascade` の列に
   あれば、その行も消える(`cascadePlan`: 深い行から順)。消える各行は、宣言されたアクション(そのテーブルの削除効果を
-  持つこと)で、その時点の状態について Cedar の判定を行い(`cascadeRun`)、1 行でも permit されなければ要求全体を
-  拒否して何も発行しない。発行する記録の `action` はその宣言されたアクションになる(主定理の (5))。 -/
+  持つこと)で、その時点の状態について Cedar の判定を行い(`cascadeRun`)、1 行でも permit されなければその呼び出しを
+  拒否して(`denied`)何も発行しない(競合の判定が先で、競合があれば `conflict`)。発行する記録の `action` はその宣言された
+  アクションになる(主定理の (5))。 -/
 
 /-- 操作が置く行: 挿入では提案される行、更新では現在の行に変更を重ねた行(行が無ければ無し)、それ以外は無し。 -/
 def _root_.Nyxis.Db.Operation.newRow (store : Store) : Operation → Option (Table × Key × Row)
@@ -622,7 +623,7 @@ def integrityFilters (schema : Schema) (store : Store) (op : Operation) : List (
   uniqueFilters schema store op ++ deleteFilters schema store op
 
 /-- 連鎖の削除を順に判定して適用する: 各行について、宣言されたアクションがそのテーブルの削除効果を持ち、その時点の
-    状態について permit されれば削除を発行して次へ。1 行でも通らなければ `none`(要求全体を拒否)。 -/
+    状態について permit されれば削除を発行して次へ。1 行でも通らなければ `none`(その呼び出しを拒否)。 -/
 def cascadeRun (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated) :
     Store → List (EntityUID × Table × Key) → Option (Store × List Issued)
   | store, [] => some (store, [])
