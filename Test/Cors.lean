@@ -3,7 +3,8 @@ import Nyxis.Internal.Cors
 /-!
 # Test.Cors — CORS 設定の単体検査
 
-`Nyxis.Internal.Cors` の純粋関数(オリジンの妥当性、設定の解析、要求の Origin の照合)を `#guard` で検査する。
+`Nyxis.Internal.Cors` の純粋関数(オリジンの妥当性、設定の解析、要求の Origin の照合、応答ヘッダの装飾)を
+`#guard` で検査する。
 実サンプルに対する統合検査は `scripts/check-cors.py`。
 -/
 
@@ -66,5 +67,33 @@ private def granted (values : List String) : Option String :=
 #guard granted ["https://example.test", "http://127.0.0.1:3000"] == none
 -- 許可一覧が空なら、どの Origin にも返さない。
 #guard (allowed {} (origins ["https://example.test"])).isNone
+
+/-- ETag と Location を設定したハンドラの応答(本文なし)。 -/
+private def handlerResponse : Std.Http.Response Std.Http.Body.Any :=
+  ((Nyxis.Http.responseBuilder ⟨.created, "x", [(.etag, "\"v1\""), (.location, "/docs/1")]⟩).body
+    ({} : Std.Http.Body.Empty) : Std.Http.Response Std.Http.Body.Empty)
+
+/-- `decorate` した応答の `name` ヘッダの値(すべて)。 -/
+private def decorated (values : List String) (preflight : Bool) (name : String) : Option (List String) :=
+  ((decorate config (origins values) preflight handlerResponse).line.headers.getAll?
+    (Std.Http.Header.Name.ofString! name)).map (·.toList.map (·.value))
+
+-- 許可したオリジンにだけ、プリフライトには固定の Allow-Methods / Allow-Headers(Authorization とハンドラに渡す
+-- 要求ヘッダ)を、それ以外の応答には固定の Expose-Headers(ハンドラが設定できる ETag・Location)を 1 つずつ付ける。
+#guard decorated ["https://example.test"] true "Access-Control-Allow-Headers" ==
+  some ["Authorization, Content-Type, Accept, Accept-Language, If-Match, If-None-Match"]
+#guard decorated ["https://example.test"] true "Access-Control-Expose-Headers" == none
+#guard decorated ["https://example.test"] false "Access-Control-Expose-Headers" == some ["ETag, Location"]
+#guard decorated ["https://example.test"] false "Access-Control-Allow-Headers" == none
+#guard decorated ["https://example.test"] false "Access-Control-Allow-Origin" == some ["https://example.test"]
+-- 許可しない・無い Origin には CORS のヘッダを付けず、Vary だけを付ける。
+#guard decorated ["https://other.test"] false "Access-Control-Allow-Origin" == none
+#guard decorated ["https://other.test"] false "Access-Control-Expose-Headers" == none
+#guard decorated ["https://other.test"] true "Access-Control-Allow-Headers" == none
+#guard decorated ["https://other.test"] false "Vary" == some ["Origin"]
+#guard decorated [] false "Access-Control-Allow-Origin" == none
+#guard decorated [] false "Access-Control-Expose-Headers" == none
+#guard decorated [] true "Access-Control-Allow-Headers" == none
+#guard decorated [] false "Vary" == some ["Origin"]
 
 end Test.Cors

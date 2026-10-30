@@ -41,9 +41,15 @@ def decorate (config : Config) (headers : Std.Http.Headers) (preflight : Bool)
   if let some origin := allowed config headers then
     result := { result with line.headers := result.line.headers.insert (Std.Http.Header.Name.ofString! "Access-Control-Allow-Origin") origin }
     if preflight then
+      -- Authorization と、ハンドラに渡す要求ヘッダ(`Http.RequestHeader`)をすべて許す。If-Match・If-None-Match は
+      -- いつも、Content-Type・Accept・Accept-Language は値によって、送るのにプリフライトの許可が要る。
       result := { result with line.headers := (result.line.headers
         |>.insert! "Access-Control-Allow-Methods" "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        |>.insert! "Access-Control-Allow-Headers" "Authorization, Content-Type") }
+        |>.insert! "Access-Control-Allow-Headers"
+          "Authorization, Content-Type, Accept, Accept-Language, If-Match, If-None-Match") }
+    else
+      -- ハンドラが設定できる応答ヘッダのうち、ページから読むのに許可が要る ETag・Location を見せる。
+      result := { result with line.headers := result.line.headers.insert! "Access-Control-Expose-Headers" "ETag, Location" }
   return result
 
 /-- すべての OPTIONS は、本文の読み取り・認証・ルーティング・DB の IO の前で終わる。
