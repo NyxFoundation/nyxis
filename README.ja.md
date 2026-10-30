@@ -3,7 +3,7 @@
 [English](README.md) | 日本語
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.4-orange.svg)](https://github.com/NyxFoundation/nyxis)
+[![Version](https://img.shields.io/badge/version-v0.1.5-orange.svg)](https://github.com/NyxFoundation/nyxis)
 [![Status](https://img.shields.io/badge/status-under%20development-yellow.svg)](ASSUMPTIONS.ja.md)
 [![Lean](https://img.shields.io/badge/Lean-v4.34.1-0052cc.svg?logo=lean&logoColor=white)](lean-toolchain)
 [![Cedar](https://img.shields.io/badge/policies-Cedar-6f42c1.svg)](https://www.cedarpolicy.com/)
@@ -23,7 +23,7 @@ Nyxis は、AI エージェントにコードを書かせて Web アプリケー
 この性質は `lake build` のたびに Lean のカーネルが検査します。認可のレビューと監査は、スキーマとポリシーを読み、証明が通っていることを確かめれば済みます。
 
 > [!NOTE]
-> Nyxis は開発中(v0.1.4)です。保証が届く範囲と、証明の外側で信頼する仮定は [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) に明記しています。本番で使う前に必ず読んでください。
+> Nyxis は開発中(v0.1.5)です。保証が届く範囲と、証明の外側で信頼する仮定は [ASSUMPTIONS.ja.md](ASSUMPTIONS.ja.md) に明記しています。本番で使う前に必ず読んでください。
 
 ## 仕組み
 
@@ -80,7 +80,7 @@ Nyxis は Lake の `require` で取り込む独立したパッケージです。
 require nyxis from "<clone した Nyxis へのパス>"
 ```
 
-libpq のリンク引数は require する側に伝わらないため、ルートの `lakefile.lean` にある `postgresLinkArgs` と同じ定義をアプリケーションの `lakefile.lean` にも置いてください。承認する正本は `nyxis_approved` で宣言し、全モジュールを import した最終モジュールの末尾に `nyxis_check_app` を置きます。具体的な形は公式サンプルを参照してください。
+リンク引数は require する側に伝わらないため、ルートの `lakefile.lean` にある `postgresLinkArgs` と `cryptoShimLinkArgs` と同じ定義をアプリケーションの `lakefile.lean` にも置き、`moreLinkArgs := postgresLinkArgs ++ cryptoShimLinkArgs <Nyxis のクローンへのパス>` としてください(Linux では libpq をフルパスでリンクし、lean-libcrypto の `libcrypto_shim.so` の場所を実行ファイルに埋め込むため、ビルドした実行ファイルをそのまま起動できます)。承認する正本は `nyxis_approved` で宣言し、全モジュールを import した最終モジュールの末尾に `nyxis_check_app` を置きます。具体的な形は公式サンプルを参照してください。
 
 ## 公式サンプル
 

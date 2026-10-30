@@ -3,7 +3,7 @@
 English | [日本語](README.ja.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.4-orange.svg)](https://github.com/NyxFoundation/nyxis)
+[![Version](https://img.shields.io/badge/version-v0.1.5-orange.svg)](https://github.com/NyxFoundation/nyxis)
 [![Status](https://img.shields.io/badge/status-under%20development-yellow.svg)](ASSUMPTIONS.md)
 [![Lean](https://img.shields.io/badge/Lean-v4.34.1-0052cc.svg?logo=lean&logoColor=white)](lean-toolchain)
 [![Cedar](https://img.shields.io/badge/policies-Cedar-6f42c1.svg)](https://www.cedarpolicy.com/)
@@ -23,7 +23,7 @@ Every backend built on Nyxis comes with a formal proof of the following:
 The Lean kernel checks this property on every `lake build`. Reviewing and auditing authorization comes down to reading the schema and policies and confirming that the proof checks.
 
 > [!NOTE]
-> Nyxis is under active development (v0.1.4). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
+> Nyxis is under active development (v0.1.5). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
 
 ## How it works
 
@@ -80,7 +80,7 @@ Nyxis is a standalone package you pull in with Lake's `require`. Your applicatio
 require nyxis from "<path to your Nyxis clone>"
 ```
 
-Link arguments for libpq do not propagate to the requiring package, so copy the `postgresLinkArgs` definition from the root `lakefile.lean` into your application's `lakefile.lean`. Declare the approved sources with `nyxis_approved`, and put `nyxis_check_app` at the end of a final module that imports every application module. See the official samples for the concrete layout.
+Link arguments do not propagate to the requiring package, so copy the `postgresLinkArgs` and `cryptoShimLinkArgs` definitions from the root `lakefile.lean` into your application's `lakefile.lean` and set `moreLinkArgs := postgresLinkArgs ++ cryptoShimLinkArgs <path to your Nyxis clone>` (on Linux they link libpq by its full path and embed the location of lean-libcrypto's `libcrypto_shim.so`, so the executables run directly). Declare the approved sources with `nyxis_approved`, and put `nyxis_check_app` at the end of a final module that imports every application module. See the official samples for the concrete layout.
 
 ## Official samples
 
