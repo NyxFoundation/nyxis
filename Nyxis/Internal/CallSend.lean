@@ -96,11 +96,17 @@ structure Config where
   maxTime : Nat := 10
   maxResponseBytes : Nat := 65536
 
-/-- 環境変数の秘密(印字可能な ASCII、空でない)。無ければ例外(起動を拒む)。値は返すだけで表示しない。 -/
-def secret (env : String) : IO String := do
+/-- 秘密の値として使えるか: 空でなく 4096 文字以下の、印字可能な ASCII で空白を含まない。`spaces` なら途中の空白
+    (SP)だけは含んでよい(`header` の値。例: `Authorization: Basic …`)。`bearer` のトークンは空白を含まない。 -/
+def validSecret (spaces : Bool) (v : String) : Bool :=
+  !v.isEmpty && v.length ≤ 4096 && v.front != ' ' && v.back != ' ' &&
+    v.toList.all fun c => (33 ≤ c.toNat && c.toNat ≤ 126) || (spaces && c == ' ')
+
+/-- 環境変数の秘密(前後の空白を除いて `validSecret`)。無ければ例外(起動を拒む)。値は返すだけで表示しない。 -/
+def secret (env : String) (spaces : Bool := false) : IO String := do
   let some raw ← IO.getEnv env | throw (IO.userError s!"{env} is required for an @external destination")
   let v := raw.trimAscii.toString
-  if v.isEmpty || v.length > 4096 || v.toList.any (fun c => c.toNat < 33 || c.toNat > 126) then
+  unless validSecret spaces v do
     throw (IO.userError s!"{env} is invalid")
   pure v
 
@@ -124,7 +130,7 @@ def Config.load (destinations : List (String × Destination)) : IO Config := do
         let v ← secret env
         pure (some s!"Authorization: Bearer {v}")
       | .header h env => do
-        let v ← secret env
+        let v ← secret env (spaces := true)
         pure (some s!"{h}: {v}")
     auth := auth ++ [(name, header)]
   let connectTimeout ← natEnv "NYXIS_CALL_CONNECT_TIMEOUT" 3
