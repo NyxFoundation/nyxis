@@ -49,7 +49,10 @@ instance : Monad Handler where
   pure := .pure
   bind := Handler.bind
 
-/-- アクションを呼ぶ。ハンドラが持てる唯一の効果。 -/
+/-- アクションを呼ぶ。ハンドラが持てる唯一の効果。提案する値の集合・レコードは `Cedar.Data.Set.make` /
+    `Map.make` で作る(`Set.mk` / `Map.mk` で作った整列していない・重複のある値は保存形式にできず、
+    実 DB の接続層はその書き込みを拒み要求を閉じる。純粋なモデル `Runtime.handleRequest` はそのまま
+    受け入れるので、モデルの検査では気づけない)。 -/
 def callAction (action : EntityUID) (key : Db.Key) (values : Db.Row := Cedar.Data.Map.empty) :
     Handler Outcome :=
   .call action key values {} .pure

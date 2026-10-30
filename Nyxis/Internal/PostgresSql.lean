@@ -120,9 +120,9 @@ def selectTable (schema : Authz.Schema) (table : Table) : Except String Command 
   タグを先に見るので、種類の違う列の本文を数値に変換しない)。整数・decimal・日時・期間は数値、文字列は "C" 照合
   (コードポイントの順)、真偽値は boolean。集合・レコード・実体参照の大小は拒む。
 - 列が NULL(属性の欠落)なら合わない(どちらの条件も NULL / false になる)。
-- 等値の定数が保存形式にできない値(NUL を含む文字列、`ipaddr`、入れ子の集合など)なら、保存された行がその値に
-  等しいことはない(保存形式は nyxis の符号化を通った値だけ。A3)ので、条件は定数 `false`(モデルの `v == f.value`
-  も偽)。大小の定数が NUL を含めば拒む(モデルでは比べられるので、閉じる側に倒す)。
+- 等値の定数が保存形式にできない値(NUL を含む文字列、`ipaddr`、入れ子の集合、正規形でない集合・レコードなど)
+  なら、保存された行がその値に等しいことはない(保存形式は nyxis の符号化を通った値だけ。A3)ので、条件は定数
+  `false`(モデルの `v == f.value` も偽)。大小の定数が NUL を含めば拒む(モデルでは比べられるので、閉じる側に倒す)。
 識別子は正本の列から、値はパラメータからだけ来る。`index` は次に使うパラメータの番号。 -/
 private def filterSql (columns : List Column) (index : Nat) (f : Filter) :
     Except String (String × List String) := do

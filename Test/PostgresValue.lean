@@ -53,6 +53,20 @@ private def user (id : String) : Value := .prim (.entityUID ⟨⟨"User", []⟩,
 #guard (encode (.record (Cedar.Data.Map.make [("b", .prim (.bool true)), ("a", .prim (.int 1))]))).toOption ==
   some "[\"record\",[[\"a\",[\"int\",\"1\"]],[\"b\",[\"bool\",true]]]]"
 
+-- 正規形でない集合・レコード(整列していない・重複のある値。`Set.mk` / `Map.mk` で直接作ると起こりうる)は
+-- 保存しない。そうした集合と並びの違うレコードは復号すると別の値になり、属性名の重複したレコードは復号できない。
+#guard (encode (.set (Cedar.Data.Set.mk [user "b", user "a"]))).toOption == none
+#guard (encode (.set (Cedar.Data.Set.mk [user "a", user "a"]))).toOption == none
+#guard (encode (.record (Cedar.Data.Map.mk [("b", .prim (.bool true)), ("a", .prim (.int 1))]))).toOption == none
+#guard (encode (.record (Cedar.Data.Map.mk [("a", .prim (.int 1)), ("a", .prim (.int 2))]))).toOption == none
+-- 整列済みで重複の無い値は、`Set.mk` / `Map.mk` で作っても正規形として保存する。
+#guard (encode (.set (Cedar.Data.Set.mk [user "a", user "b"]))).toOption ==
+  some "[\"set\",[[\"entity\",[],\"User\",\"a\"],[\"entity\",[],\"User\",\"b\"]]]"
+#guard (encode (.record (Cedar.Data.Map.mk [("a", .prim (.int 1)), ("b", .prim (.bool true))]))).toOption ==
+  some "[\"record\",[[\"a\",[\"int\",\"1\"]],[\"b\",[\"bool\",true]]]]"
+#guard (encode (.set (Cedar.Data.Set.mk []))).toOption == some "[\"set\",[]]"
+#guard (encode (.record (Cedar.Data.Map.mk []))).toOption == some "[\"record\",[]]"
+
 -- fixture の全プリミティブ値が保存形式を往復して元の Cedar 値に戻る。
 #guard Test.Fixture.store.toList.all (fun (_, row) => row.toList.all (fun (_, v) => roundtrip v))
 

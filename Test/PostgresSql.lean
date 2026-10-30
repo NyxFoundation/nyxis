@@ -56,6 +56,11 @@ private def params (result : Except String Command) := result.toOption.map (·.p
   some "SELECT \"_nyxis_id\", \"author\", \"title\", \"body\", \"published\" FROM \"public\".\"Post\" WHERE false AND \"title\" = $1::jsonb"
 #guard params (selectFiltered Test.Fixture.schema post [⟨"title", .eq, str "a\x00b"⟩, ⟨"title", .eq, str "x"⟩]) ==
   some #["[\"string\",\"x\"]"]
+-- 正規形でない集合の定数も同じ(保存された集合はいつも正規形)。正規形でない集合を書く操作は SQL にならない。
+#guard sql (selectFiltered Test.Fixture.schema post [⟨"title", .eq, .set (Cedar.Data.Set.mk [str "b", str "a"])⟩]) ==
+  some "SELECT \"_nyxis_id\", \"author\", \"title\", \"body\", \"published\" FROM \"public\".\"Post\" WHERE false"
+#guard (operation Test.Fixture.schema
+  (.insert post "p" (Cedar.Data.Map.make [("title", .set (Cedar.Data.Set.mk [str "b", str "a"]))]))).toOption.isNone
 #guard sql (operation Test.Fixture.schema (.delete post "p")) ==
   some "DELETE FROM \"public\".\"Post\" WHERE \"_nyxis_id\" = $1::text"
 #guard sql (operation Test.Fixture.schema (.insert post "p" row)) ==

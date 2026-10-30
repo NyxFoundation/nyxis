@@ -4,7 +4,8 @@ import Lean.Data.Json
 /-! アプリケーションの Cedar の値のための内部の JSONB セル形式。SQL の実行でも認可でもない。
 スカラー(プリミティブ `Bool` / `Long` / `String` / 実体参照と、拡張値 `decimal` / `datetime` / `duration`)、
 スカラーの集合、スカラーを属性に持つレコードを保存する。集合やレコードの入れ子(集合の集合、集合を持つ
-レコード)と `ipaddr` は拒む。型のタグが文字列と実体参照、整数と拡張値を区別して保つ。
+レコード)と `ipaddr`、正規形でない集合・レコード(整列していない・重複のある値)は拒む。
+型のタグが文字列と実体参照、整数と拡張値を区別して保つ。
 PostgreSQL の JSONB は NUL を保存できないので拒む。エラーに入力を含めない。
 
 形式(JSON 配列): `["bool", b]` / `["int", "十進"]` / `["string", s]` / `["entity", [名前空間…], 型名, ID]` /
@@ -40,11 +41,16 @@ def scalarFields (value : Value) : Except String (Array Json) :=
 def scalar (value : Value) : Except String Json := do
   return .arr (← scalarFields value)
 
-/-- セル全体のタグつき配列の要素。集合とレコードの要素はスカラーに限る。 -/
+/-- セル全体のタグつき配列の要素。集合とレコードの要素はスカラーに限る。集合とレコードは正規形(`Set.make` /
+    `Map.make` の形: 整列済みで重複が無い)に限る。整列していない・重複のある値(`Set.mk` / `Map.mk` で直接作ると
+    起こりうる)は、復号すると別の値になるか(集合・属性の並び)、復号できない(属性名の重複)ので拒む。 -/
 def fields (value : Value) : Except String (Array Json) :=
   match value with
-  | .set s => do pure #[.str "set", .arr (← s.toList.toArray.mapM scalar)]
+  | .set s => do
+    unless s.wellFormed do invalid
+    pure #[.str "set", .arr (← s.toList.toArray.mapM scalar)]
   | .record m => do
+    unless m.wellFormed do invalid
     let pairs ← m.toList.toArray.mapM fun (k, v) => do pure (Json.arr #[← text k, ← scalar v])
     pure #[.str "record", .arr pairs]
   | v => scalarFields v
