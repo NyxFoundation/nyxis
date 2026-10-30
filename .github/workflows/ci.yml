@@ -1,8 +1,10 @@
-# Continuous integration for Nyxis: build, proofs, static checks, and the DCO sign-off check.
+# Continuous integration for Nyxis: build, proofs, static checks, the checks that need no
+# database (injected drivers, fixtures, libpq refusal), and the DCO sign-off check.
 #
 # Runs on GitHub-hosted runners (`ubuntu-latest`) unless the repository defines the Actions
-# variable NYXIS_RUNS_ON. Integration tests that need Docker and a local Supabase are not part
-# of this workflow; run them locally (see docs/local-supabase.md). No secrets are used.
+# variable NYXIS_RUNS_ON; a calling workflow may pass `runs-on` to run the same jobs on another
+# runner as well. Integration tests that need Docker and a local Supabase are not part of this
+# workflow; run them locally (see docs/local-supabase.md). No secrets are used.
 name: CI
 
 on:
@@ -10,6 +12,12 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+    inputs:
+      runs-on:
+        description: "Runner label for every job (default: the Actions variable NYXIS_RUNS_ON, else ubuntu-latest)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -20,7 +28,7 @@ env:
 jobs:
   build:
     name: Build, proofs, and static checks
-    runs-on: ${{ vars.NYXIS_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runs-on || vars.NYXIS_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +88,9 @@ jobs:
       - name: Build the team-docs sample
         run: lake build --dir examples/team-docs/backend
 
+      - name: Check that the samples carry the same link-argument definitions as the root lakefile
+        run: python3 scripts/check-link-args.py
+
       - name: Validate the Cedar schema and policies of the samples
         run: |
           cedar validate --schema examples/bulletin-board/backend/schema.cedarschema --policies examples/bulletin-board/backend/policies.cedar --deny-warnings
@@ -97,10 +108,53 @@ jobs:
       - name: Check that handlers cannot have effects other than action calls
         run: sh scripts/check-handler-effects.sh
 
+      - name: Check that the approved declaration and binding cannot be replaced
+        run: |
+          python3 scripts/check-approved-declaration.py
+          python3 scripts/check-approved-binding.py
+
+      - name: Run the core checks that need no database (injected drivers and fixtures)
+        run: |
+          .lake/build/bin/checkPostgresDependency
+          .lake/build/bin/checkPostgresTransaction
+          .lake/build/bin/checkPostgresResult
+          .lake/build/bin/checkPostgresWrite
+          .lake/build/bin/checkPostgresLoad
+          .lake/build/bin/checkPostgresInit
+          .lake/build/bin/checkPostgresStaged
+          .lake/build/bin/checkHttpAuth
+
+      - name: Replay the bulletin-board sample against the model (injected drivers, no database)
+        run: examples/bulletin-board/backend/.lake/build/bin/checkPostgresRun
+
+      - name: Check the HTTP boundary without a database (query string, headers, injected backend)
+        run: |
+          sh scripts/check-http.sh
+          python3 scripts/check-http-headers.py
+          python3 scripts/check-postgres-http.py
+
+      - name: Check the sample's startup, JWKS refresh, and initialization (libpq refusal, no Supabase)
+        run: |
+          python3 scripts/check-sample-startup.py
+          python3 scripts/check-sample-jwks.py
+          python3 scripts/check-sample-init.py
+
+      - name: Check JWKS fetching through curl against an isolated TLS endpoint
+        run: python3 scripts/check-jwks-fetch.py
+
+      - name: Check that the installed lean-pq reproduces the locked archive plus the approved patch
+        run: python3 scripts/check-pq-patch.py
+
+      - name: Check the approved JWT dependencies from a disposable Lake project
+        run: sh scripts/check-jwt-dependency.sh
+
+      - name: Check the DCO checker against its own fixtures
+        run: python3 scripts/check-dco.py --self-test
+
   dco:
     name: DCO sign-off
     if: github.event_name == 'pull_request'
-    runs-on: ${{ vars.NYXIS_RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runs-on || vars.NYXIS_RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
