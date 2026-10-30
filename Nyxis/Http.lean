@@ -2,79 +2,84 @@ import Std.Http
 import Nyxis.Runtime
 
 /-!
-# Nyxis.Http — HTTP サーバの共通部分
+# Nyxis.Http — shared parts of the HTTP server
 
-Lean 標準ライブラリの `Std.Http`(HTTP/1.1 サーバ)でランタイムを公開するための、接続層が共有する小さな部品:
-リクエスト行からのパスと問い合わせ文字列の取り出し、要求ヘッダの選別、本文の上限、モデルのレスポンスの
-HTTP レスポンスへの変換、サーバの起動。
-ここは定理の外側にある接続コードで、当面は信頼する(`ASSUMPTIONS.md` A4 (b))。
+Small pieces shared by the connection layer for exposing the runtime over the Lean standard library's `Std.Http` (an
+HTTP/1.1 server): extracting the path and query string from the request line, selecting request headers, the body limit,
+converting the model's response into an HTTP response, and starting the server. This is connection code outside the
+theorem and is trusted for now (`ASSUMPTIONS.md` A4 (b)).
 
-リクエストを主体つきの `AuthenticatedRequest` に変えてモデルを駆動し、PostgreSQL の現在の行で認可する本体は
-`Nyxis.Internal.PostgresHttp`(アプリケーションからは import できない。起動は `Nyxis.Internal.ApprovedServer`)。
-`import Nyxis` で見えるのはこのモジュールの部品だけで、App を受け取る起動の口は `Nyxis.Internal.ApprovedServer.serve` のほかに無い。
+The main part, which turns a request into an `AuthenticatedRequest` with its principal, drives the model and authorizes
+against the current PostgreSQL rows, is `Nyxis.Internal.PostgresHttp` (applications cannot import it; startup is
+`Nyxis.Internal.ApprovedServer`). `import Nyxis` exposes only the pieces in this module, and there is no startup entry
+point that accepts an App other than `Nyxis.Internal.ApprovedServer.serve`.
 -/
 
 namespace Nyxis.Http
 
 open Std.Async
 
-/-- リクエスト行からパスを取り出す。問い合わせ文字列は含めず、パスの要素はパーセント符号化のまま
-    (`/` を含む要素が復号で増えないように)。origin-form と absolute-form 以外は `*` や authority の文字列で、
-    ルーティングには掛からない。 -/
+/-- Extract the path from the request line. The query string is not included, and path segments stay percent-encoded (so
+    that decoding does not create extra segments from a `/`). Anything other than origin-form and absolute-form is a `*`
+    or authority string and does not match any route. -/
 def pathOf : Std.Http.RequestTarget → String
   | .originForm path _ => toString path
   | .absoluteForm uri => toString uri.path
   | other => toString other
 
-/-- リクエスト行から生の問い合わせ文字列(`?` の後ろ。パーセント符号化のまま)を取り出す。無ければ空。 -/
+/-- Extract the raw query string (after `?`, still percent-encoded) from the request line. Empty if absent. -/
 def queryOf (target : Std.Http.RequestTarget) : String :=
   target.query.toRawString
 
-/-- 要求ヘッダのうち `RequestHeader` に列挙した名前だけを、受け取った順に取り出す。名前は Std.Http が
-    小文字に正規化している。Authorization・Cookie を含む他のヘッダはここで落ち、ハンドラには届かない。 -/
+/-- Extract, in the order received, only the request headers whose names are listed in `RequestHeader`. Std.Http has
+    already normalized the names to lowercase. Other headers, including Authorization and Cookie, are dropped here and
+    never reach the handler. -/
 def selectHeaders (headers : Std.Http.Headers) : List (RequestHeader × String) :=
   headers.toList.filterMap fun (name, value) =>
     (RequestHeader.ofName? name.value).map fun header => (header, value.value)
 
-/-- 読み取る本文の上限(バイト)。超えたリクエストは 400 で、ハンドラは呼ばれない。 -/
+/-- The limit on the body that is read (bytes). A request exceeding it gets 400, and the handler is not called. -/
 def maxBodyBytes : UInt64 := 1024 * 1024
 
-/-- 応答の Content-Type。ハンドラが最初に設定した妥当な値、無ければ `text/plain; charset=utf-8`。 -/
+/-- The response's Content-Type. The first valid value the handler set, or `text/plain; charset=utf-8` if none. -/
 def contentTypeOf (r : Response) : Std.Http.Header.Value :=
   ((r.headers.find? (·.1 == .contentType)).bind fun h => Std.Http.Header.Value.ofString? h.2).getD
     (Std.Http.Header.Value.ofString! "text/plain; charset=utf-8")
 
-/-- 応答ヘッダの名前(HTTP の名前)。 -/
+/-- The name of a response header (its HTTP name). -/
 def headerName : ResponseHeader → Std.Http.Header.Name
   | .contentType => .contentType
   | .cacheControl => .mk "cache-control"
   | .etag => .mk "etag"
   | .location => .mk "location"
 
-/-- Cache-Control の指示のうち、認証済みの主体に許可された応答を共有キャッシュが別の主体へ再送することを
-    許す `public` と `s-maxage` は認めない(RFC 9111 §3.5: Authorization 付き要求の応答はこれらが無い限り
-    共有キャッシュに保存されない)。指示はカンマ区切り、名前は大小を区別しない。 -/
+/-- Of the Cache-Control directives, `public` and `s-maxage`, which let a shared cache resend a response permitted for
+    an authenticated principal to another principal, are not accepted (RFC 9111 §3.5: a response to a request with
+    Authorization is not stored in a shared cache unless one of these is present). Directives are comma-separated, and
+    names are case-insensitive. -/
 def acceptableCacheControl (value : String) : Bool :=
   (value.splitOn ",").all fun directive =>
     let name := ((directive.splitOn "=").headD "").trimAscii.toString.toLower
     name != "public" && name != "s-maxage"
 
-/-- ハンドラが設定した値を応答に載せてよいか。`Cache-Control` 以外は HTTP のヘッダ値としての妥当性だけ
-    (`responseBuilder` が `Header.Value.ofString?` で確かめる)。 -/
+/-- Whether a value set by the handler may be put on the response. For anything other than `Cache-Control`, only
+    validity as an HTTP header value is required (checked by `responseBuilder` with `Header.Value.ofString?`). -/
 def acceptable (name : ResponseHeader) (value : String) : Bool :=
   match name with
   | .cacheControl => acceptableCacheControl value
   | _ => true
 
-/-- ハンドラが設定した `name` の値。最初のものを使い、`acceptable` で認められ HTTP のヘッダ値として妥当なときだけ。 -/
+/-- The value of `name` set by the handler. The first one is used, and only when it is accepted by `acceptable` and
+    valid as an HTTP header value. -/
 def headerValueOf (r : Response) (name : ResponseHeader) : Option Std.Http.Header.Value :=
   (r.headers.find? (·.1 == name)).bind fun h =>
     if acceptable name h.2 then Std.Http.Header.Value.ofString? h.2 else none
 
-/-- ハンドラのレスポンスから HTTP レスポンスの行を組む。状態コードはハンドラが返したとおり。Content-Type は
-    `contentTypeOf`、他の許可ヘッダは `ResponseHeader.all` の順に、各名前の最初の値が `headerValueOf` で認められた
-    ときだけ 1 つ加える(妥当でない値・認めない指示は捨て、同じ名前の 2 つめ以降は使わない)。
-    `ResponseHeader` に無い名前(Set-Cookie 等)は表せない。 -/
+/-- Build the HTTP response line from the handler's response. The status code is exactly what the handler returned.
+    Content-Type comes from `contentTypeOf`; each other allowed header is added once, in the order of
+    `ResponseHeader.all`, only when the first value for that name is accepted by `headerValueOf` (invalid values and
+    disallowed directives are dropped, and second and later values of the same name are not used). Names not in
+    `ResponseHeader` (Set-Cookie etc.) cannot be represented. -/
 def responseBuilder (r : Response) : Std.Http.Response.Builder :=
   ResponseHeader.all.foldl (fun builder name =>
       if name == .contentType then builder
@@ -83,12 +88,13 @@ def responseBuilder (r : Response) : Std.Http.Response.Builder :=
         | none => builder)
     ((Std.Http.Response.withStatus r.status).header Std.Http.Header.Name.contentType (contentTypeOf r))
 
-/-- ハンドラのレスポンスを HTTP のレスポンスにする。状態コード・許可ヘッダ・本文はハンドラが返したとおり。 -/
+/-- Turn the handler's response into an HTTP response. The status code, allowed headers and body are exactly what the
+    handler returned. -/
 def toHttpResponse (r : Response) : Async (Std.Http.Response Std.Http.Body.Full) := do
   let full ← Std.Http.Body.Full.ofByteArray r.body.toUTF8
   pure ((responseBuilder r).body full)
 
-/-- すべてのインターフェースの `port` で HTTP サーバを起動し、停止まで待つ。 -/
+/-- Start the HTTP server on `port` on all interfaces and wait until it stops. -/
 def serve (port : UInt16) (handler : Std.Http.Server.StatelessHandler) : IO Unit := do
   let addr : Std.Net.SocketAddress := .v4 ⟨Std.Net.IPv4Addr.ofParts 0 0 0 0, port⟩
   Async.block do

@@ -1,10 +1,10 @@
 import Nyxis
 
 /-!
-アプリケーションの宣言の監査。アプリケーションの全モジュールの後に最終モジュールから import し、
-`nyxis_check_app` を呼ぶ。これはエラボレーション後の監査であり、ビルド時のサンドボックスではない。
-信頼するモジュールの集合は、この検査器のコンパイル時(アプリケーションのコードを import する前)に固定する。
-それ以外のモジュールは、宣言の名前空間やルータからの到達可能性によらず、すべて検査する。
+Audit of the application's declarations. Import it from the final module after all of the application's modules, and
+call `nyxis_check_app`. This is a post-elaboration audit, not a build-time sandbox. The set of trusted modules is fixed
+when this checker is compiled (before the application's code is imported). All other modules are checked, regardless of
+the declarations' namespaces or their reachability from the router.
 -/
 namespace Nyxis.AppCheck
 open Lean Elab Command
@@ -25,6 +25,11 @@ private def forbidden (n : Name) : Bool :=
     `dbgSleep, `panic, `panicCore, `panicWithPos, `panicWithPosWithDecl,
     `ptrAddrUnsafe, `unsafeCast, `sorryAx, `Lean.Compiler.setImplementedBy,
     `Lean.setImplementedBy].contains n
+
+/-- The axioms that application constants may depend on (Lean's standard three). Depending on any other axiom (an
+    `axiom` declared by the application, `Lean.ofReduceBool`, etc.) would allow proofs of false propositions (such as
+    array bounds proofs), leading to memory reads and writes without bounds checks. -/
+private def allowedAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
 
 private def moduleOf (env : Environment) (n : Name) : Name :=
   match env.getModuleIdxFor? n with
@@ -51,5 +56,7 @@ elab "nyxis_check_app" : command => do
     if isMetaDeclaration env n then reject "macro/elaborator attribute"
     for used in info.getUsedConstantsAsSet do
       if forbidden used then reject s!"forbidden reference {used}"
+    for ax in ← liftCoreM (collectAxioms n) do
+      unless allowedAxioms.contains ax do reject s!"depends on axiom {ax}"
 
 end Nyxis.AppCheck

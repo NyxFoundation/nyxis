@@ -3,23 +3,25 @@ import TeamDocs.Handlers
 import TeamDocs.Jobs
 
 /-!
-# TeamDocs.App — 2 つめの公式サンプルの組み立て
+# TeamDocs.App — assembly of the second official sample
 
-承認済み正本の宣言 `TeamDocs.Approved.sources`(`schema.cedarschema` と `policies.cedar` からビルド時に構成)に
-ハンドラのルーティング `TeamDocs.router` と定期処理 `TeamDocs.jobs` を組み合わせた `Nyxis.Runtime.App`。スキーマと
-ポリシーは宣言から定義的に決まり、アプリケーション側が別の値を渡す口は無い。実起動(`TeamDocs.Server`)も同じ宣言から
-`Deployment` を組み、ルータと定期処理だけを受け取る。この値はモデル検査(`TeamDocsTest`)で使う。
+The `Nyxis.Runtime.App` combining the approved declaration `TeamDocs.Approved.sources` (built at build time from
+`schema.cedarschema` and `policies.cedar`) with the handler routing `TeamDocs.router` and the periodic jobs
+`TeamDocs.jobs`. The schema and policies are determined definitionally by the declaration; the application side has no
+way to pass other values. The real startup (`TeamDocs.Server`) also builds its `Deployment` from the same declaration
+and accepts only the router and periodic jobs. This value is used by the model checks (`TeamDocsTest`).
 -/
 
 namespace TeamDocs
 
-/-- 宣言から構成したスキーマ。 -/
+/-- The schema built from the declaration. -/
 abbrev schema := Approved.schema
 
-/-- 宣言から構成したポリシー。 -/
+/-- The policies built from the declaration. -/
 abbrev policies := Approved.policies
 
-/-- 2 つめの公式サンプル。認可の入力は宣言そのもので、アプリケーション側はルータと定期処理だけを供給する。 -/
+/-- The second official sample. The authorization inputs are the declaration itself; the application side supplies only
+    the router and periodic jobs. -/
 def app : Nyxis.Runtime.App := Approved.app router jobs
 
 end TeamDocs

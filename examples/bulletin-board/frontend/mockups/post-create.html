@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>投稿</title>
+<title>New post</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -39,38 +39,38 @@ textarea.input{min-height:220px;resize:vertical;line-height:1.9;border-bottom:0;
 <body>
 <div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
 <header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
-  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
-  <nav class="nav" aria-label="メニュー">
-    <a href="post-list-anonymous.html">ホーム</a>
-    <a class="on" href="post-create.html">投稿</a>
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis Board</a>
+  <nav class="nav" aria-label="Menu">
+    <a href="post-list-anonymous.html">Home</a>
+    <a class="on" href="post-create.html">New post</a>
   </nav>
   <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
-    <a class="who" href="me.html" aria-label="いまは 3f2a9c1e としてログイン中です"><span class="avatar">3f</span>ログイン中</a>
-    <button class="btn plain sm" type="button">ログアウト</button>
+    <a class="who" href="me.html" aria-label="Signed in as 3f2a9c1e"><span class="avatar">3f</span>Signed in</a>
+    <button class="btn plain sm" type="button">Sign out</button>
   </div>
 </header>
 <div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
 <main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 24px; padding-top: 36px; padding-bottom: 56px">
-  <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">投稿</h1>
+  <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">New post</h1>
   <form class="sheet" style="display: flex; flex-direction: column; gap: 20px">
-    <label class="sr" for="post-title">題名</label>
-    <input class="input big" id="post-title" type="text" placeholder="題名">
-    <label class="sr" for="post-body">本文</label>
-    <textarea class="input" id="post-body" placeholder="本文"></textarea>
+    <label class="sr" for="post-title">Title</label>
+    <input class="input big" id="post-title" type="text" placeholder="Title">
+    <label class="sr" for="post-body">Body</label>
+    <textarea class="input" id="post-body" placeholder="Body"></textarea>
     <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-top: 1px solid #D6D4CC; padding-top: 20px">
-      <div class="seg" role="group" aria-label="公開するかどうか">
-        <button type="button" class="on" aria-pressed="true">下書き</button>
-        <button type="button" aria-pressed="false">公開する</button>
+      <div class="seg" role="group" aria-label="Publish or not">
+        <button type="button" class="on" aria-pressed="true">Draft</button>
+        <button type="button" aria-pressed="false">Publish</button>
       </div>
       <div style="margin-left: auto; display: flex; gap: 8px">
-        <a class="btn plain" href="post-list-anonymous.html">やめる</a>
-        <button class="btn" type="button">保存</button>
+        <a class="btn plain" href="post-list-anonymous.html">Cancel</a>
+        <button class="btn" type="button">Save</button>
       </div>
     </div>
     <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; color: #6E7177">
       <span style="font-weight: 700; letter-spacing: .1em">ID</span>
       <span class="mono">4c9e2a7b-1d3f-4e85-b6a0-9f8e7d6c5b4a</span>
-      <button class="btn plain sm" type="button" style="min-height: 28px; font-size: 12px; padding: 0 6px">新しいIDに</button>
+      <button class="btn plain sm" type="button" style="min-height: 28px; font-size: 12px; padding: 0 6px">New ID</button>
     </div>
   </form>
 </main>

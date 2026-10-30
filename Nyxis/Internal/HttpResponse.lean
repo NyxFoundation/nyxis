@@ -1,6 +1,6 @@
 import Nyxis.Http
 
-/-! HTTP 応答の構築の対応。ハンドラ向けの API には含まれない。 -/
+/-! Correspondence for building HTTP responses. Not part of the handler-facing API. -/
 namespace Nyxis.Internal.HttpResponse
 open Std.Async
 
@@ -30,11 +30,11 @@ private theorem bytes_immediate (bytes : ByteArray) (w : Void IO.RealWorld) :
   obtain ⟨state, w', hs⟩ := baseIO_immediate _ w
   exact ⟨_, w', (bind_immediate _ _ w w' state hs)⟩
 
-/-- 日本語: 標準text変換の成功値は、同じ開始状態でcontentのUTF-8バイト列から
-構築したFull本文を持ち、指定builderの状態コード・固定Content-Typeを保つ。
-本文構築直後と応答変換終了のIO状態は等しい。例外の内容やDBの行を追加しない。
-Full本文の消費・Mutexの外界動作・ネットワーク送信は含まない。
-本番の固定503/400/health本文にも同じ定理を適用できる。 -/
+/-- The success value of the standard text conversion has the Full body built, from the same starting state, from the
+UTF-8 bytes of `content`, and keeps the given builder's status code and the fixed Content-Type. The IO state right after
+building the body equals the IO state at the end of the response conversion. No exception contents or DB rows are added.
+Consumption of the Full body, the external behavior of the Mutex and network sending are not covered. The same theorem
+also applies to the fixed production 503/400/health bodies. -/
 theorem text_success (builder : Std.Http.Response.Builder) (content : String)
     (w w' : Void IO.RealWorld)
     (pending : MaybeTask (Except IO.Error (Std.Http.Response Std.Http.Body.Full)))
@@ -57,8 +57,9 @@ theorem text_success (builder : Std.Http.Response.Builder) (content : String)
   cases hv
   exact ⟨rfl, full, hf, rfl⟩
 
-/-- 日本語: `Nyxis.Http.responseBuilder` が組む応答の行の状態コードはモデル応答のもの。
-許可ヘッダの追加(Content-Type と、妥当な値だけを順に加える少数のヘッダ)は状態コードを変えない。 -/
+/-- The status code of the response line built by `Nyxis.Http.responseBuilder` is that of the model response. Adding the
+allowed headers (Content-Type, and the few headers added in order with only valid values) does not change the status
+code. -/
 theorem responseBuilder_status (r : Nyxis.Http.Response) :
     (Nyxis.Http.responseBuilder r).line.status = r.status := by
   unfold Nyxis.Http.responseBuilder
@@ -80,12 +81,12 @@ theorem responseBuilder_status (r : Nyxis.Http.Response) :
       · exact hbase
       · exact hbase
 
-/-- 日本語: 実toHttpResponseの成功値は、モデル応答と同じ状態コードを持ち、
-同じ本文のUTF-8バイト列から構築したFull本文をそのまま持つ。
-同じIO状態での本文構築結果と、応答の行(状態コード・モデル応答の許可ヘッダの妥当な値だけから
-`Nyxis.Http.responseBuilder` が組む Content-Type と少数のヘッダ)の構造まで一致し、
-モデル応答に無いヘッダや本文を加えない。
-この定理単体は本文取得前からの到達性・dispatchの返却値との合成・Anyへの型消去・送信を含まない。 -/
+/-- The success value of the real toHttpResponse has the same status code as the model response, and holds as-is the
+Full body built from the UTF-8 bytes of the same body. It matches down to the structure of the body-building result in
+the same IO state and of the response line (the status code, plus the Content-Type and few headers that
+`Nyxis.Http.responseBuilder` builds only from the valid values of the model response's allowed headers), and adds no
+headers or body that are not in the model response. This theorem alone does not cover reachability from before the body
+is read, composition with dispatch's return value, type erasure to Any, or sending. -/
 theorem toHttpResponse_success (r : Nyxis.Http.Response) (w w' : Void IO.RealWorld)
     (pending : MaybeTask (Except IO.Error (Std.Http.Response Std.Http.Body.Full)))
     (response : Std.Http.Response Std.Http.Body.Full)
@@ -105,11 +106,11 @@ theorem toHttpResponse_success (r : Nyxis.Http.Response) (w w' : Void IO.RealWor
   cases hv
   exact ⟨responseBuilder_status r, full, hf, rfl⟩
 
-/-- 日本語: 実ハンドラと同じreturnによるFull→Any変換の成功応答は、指定builderの
-行・extensionsと固定Content-Typeを設定したヘッダを持ち、同じUTF-8バイト列から構築したFull本文を
-ofReplayableBodyで包んだものに等しい。recv/close/サイズ/再生操作はそのFullへ
-委譲され、別の本文やIO処理を追加しない。構築直後と終了のIO状態も同じ。
-Fullの消費の意味論、dispatchとの合成、ネットワーク送信は含まない。 -/
+/-- The success response of the Full→Any conversion by the same `return` as a real handler has the given builder's line
+and extensions, headers with the fixed Content-Type set, and equals the Full body built from the same UTF-8 bytes
+wrapped with ofReplayableBody. recv/close/size/replay operations are delegated to that Full, and no other body or IO
+processing is added. The IO state right after building equals the IO state at the end. The semantics of consuming the
+Full, composition with dispatch, and network sending are not covered. -/
 theorem text_any_success (builder : Std.Http.Response.Builder) (content : String)
     (ctx : Std.CancellationContext) (w w' : Void IO.RealWorld)
     (pending : MaybeTask (Except IO.Error (Std.Http.Response Std.Http.Body.Any)))
@@ -139,10 +140,11 @@ theorem text_any_success (builder : Std.Http.Response.Builder) (content : String
   cases hv
   exact ⟨rfl, full, hf, rfl⟩
 
-/-- 日本語: モデル応答の実HTTP変換にハンドラと同じFull→Any変換を続けても、
-モデルの状態コードと本文UTF-8バイト列による構築結果と、`Nyxis.Http.responseBuilder` が
-モデル応答の許可ヘッダの妥当な値だけから組む行(Content-Type と少数のヘッダ)を保存する。
-Any本文は同じFullの全操作と再生操作を保持する。消費・輸送とdispatchとの合成は含まない。 -/
+/-- Following the real HTTP conversion of a model response with the same Full→Any conversion as a handler preserves the
+result built from the model's status code and the UTF-8 bytes of its body, and the line (Content-Type and a few headers)
+that `Nyxis.Http.responseBuilder` builds only from the valid values of the model response's allowed headers. The Any
+body keeps all operations and the replay operation of the same Full. Consumption, transport and composition with
+dispatch are not covered. -/
 theorem toHttpResponse_any_success (r : Nyxis.Http.Response)
     (ctx : Std.CancellationContext) (w w' : Void IO.RealWorld)
     (pending : MaybeTask (Except IO.Error (Std.Http.Response Std.Http.Body.Any)))

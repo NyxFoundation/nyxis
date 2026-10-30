@@ -1,10 +1,10 @@
 import Nyxis.Authz
 import Nyxis.Internal.PostgresValue
 
-/-! アプリケーションのための内部の SQL の計画(A4。定理の外)。ここでは SQL を実行しない。
-識別子はスキーマから、値はパラメータからだけ来る。エンティティ型は名前空間の無いものを使う。
-名前空間つきの型は、その DB の配置が定まるまで拒む。
-NULL を許す JSONB の列が属性の欠落を表す。SQL の NULL は Cedar のセルではない。
+/-! Internal SQL planning for applications (A4; outside the theorems). No SQL is executed here. Identifiers come only
+from the schema, and values only from parameters. Entity types without a namespace are used. Namespaced types are
+rejected until their DB layout is settled. A nullable JSONB column represents a missing attribute. SQL NULL is not a
+Cedar cell.
 -/
 namespace Nyxis.Internal.PostgresSql
 open Nyxis Db Cedar.Spec
@@ -16,14 +16,14 @@ structure Command where
 
 private def invalid : Except String α := .error "Unsupported PostgreSQL schema or operation"
 
-/-- PostgreSQL は 63 バイトを超える識別子を切り詰める。2 つの名前が同じになるより拒む。 -/
+/-- PostgreSQL truncates identifiers longer than 63 bytes. Reject rather than let two names become the same. -/
 private def identifier (s : String) : Except String String :=
   if s.isEmpty || s.contains '\x00' || s.utf8ByteSize > 63 then invalid
   else .ok ("\"" ++ s.replace "\"" "\"\"" ++ "\"")
 
 private def keyColumn := "_nyxis_id"
 
-/-- nyxis の予約テーブルの名前(アウトボックス)。正本のテーブルにはこの名前を使えない。 -/
+/-- The name of nyxis's reserved table (the outbox). A table of the approved sources cannot use this name. -/
 def outboxTable : String := "_nyxis_outbox"
 
 private def layout (schema : Authz.Schema) (table : Table) :
@@ -34,7 +34,7 @@ private def layout (schema : Authz.Schema) (table : Table) :
     if columns.contains keyColumn || columns.eraseDups != columns then invalid else do
       let _ ← columns.mapM identifier
       let name ← identifier table.id
-      -- 明示的に修飾して、接続の search_path に依存しない。
+      -- Qualify explicitly so as not to depend on the connection's search_path.
       return ("\"public\"." ++ name, columns)
 
 private def keyParam (key : Key) : Except String String :=
@@ -49,13 +49,15 @@ private def cells (columns : List Column) (row : Row) :
 private def join (parts : List String) := String.intercalate ", " parts
 private def keySql := "\"_nyxis_id\""
 
-/-- 参照の列の保存形式の ID を持つ生成列の名前。 -/
+/-- The name of the generated column holding the ID from a reference column's storage format. -/
 def refColumn (column : Column) : String := "_nyxis_ref_" ++ column
 
-/-- 用意のための計画だけ。IF NOT EXISTS は使わず、一致しない既存のテーブルを黙って受け入れない。
-制約: 一意性の組は `UNIQUE (列, …)`(NULL = 属性の欠落は比べない。モデル `Authz.uniqueViolation` と同じ)。
-参照整合の列には保存形式 `["entity", 名前空間, 型, ID]` の ID(`列 ->> 3`)を持つ生成列を置き、外部キーは
-`foreignKeys` が全テーブルの後に付ける。これらは判定(モデル)の裏付けで、判定が外れていれば SQL が失敗して要求全体が閉じる。 -/
+/-- Planning for provisioning only. IF NOT EXISTS is not used, and a mismatching existing table is never silently
+accepted. Constraints: a uniqueness tuple is `UNIQUE (column, …)` (NULL = a missing attribute is not compared; the same
+as the model's `Authz.uniqueViolation`). A referential-integrity column gets a generated column holding the ID
+(`column ->> 3`) of the storage format `["entity", namespace, type, ID]`, and `foreignKeys` adds the foreign keys after
+all tables. These back up the decision (the model): if the decision is wrong, the SQL fails and the whole request is
+closed. -/
 def createTable (schema : Authz.Schema) (table : Table) : Except String Command := do
   let (name, columns) ← layout schema table
   let fields ← columns.mapM fun c => return (← identifier c) ++ " jsonb"
@@ -70,10 +72,11 @@ def createTable (schema : Authz.Schema) (table : Table) : Except String Command 
   return ⟨"CREATE TABLE " ++ name ++ " (" ++
     join ((keySql ++ " text COLLATE \"C\" PRIMARY KEY") :: fields ++ refs ++ uniques) ++ ")", #[]⟩
 
-/-- 参照整合の外部キー: 生成列から参照先の主キーへ、削除は RESTRICT(連鎖はモデルが判定して明示的に発行する。
-DB の制約はその裏付け)。参照する側の生成列には索引を作る(参照する行の取得 — 削除の restrict / cascade の判定材料 — が
-参照する側のテーブル全体の大きさに依存しないため)。全テーブルの `createTable` の後に発行する。
-各コマンドに期待するコマンドタグを添える。 -/
+/-- Referential-integrity foreign keys: from the generated column to the referenced primary key, with RESTRICT on delete
+(cascades are decided by the model and issued explicitly; the DB constraint backs that up). An index is created on the
+referencing side's generated column (so that fetching referencing rows — the decision materials for restrict / cascade
+on delete — does not depend on the size of the whole referencing table). Issued after `createTable` for all tables. Each
+command is paired with its expected command tag. -/
 def foreignKeys (schema : Authz.Schema) : Except String (List (Command × String)) := do
   let commands ← schema.constraints.references.mapM fun r => do
     let (name, columns) ← layout schema r.table
@@ -87,14 +90,16 @@ def foreignKeys (schema : Authz.Schema) : Except String (List (Command × String
       , (⟨"CREATE INDEX " ++ index ++ " ON " ++ name ++ " (" ++ ref ++ ")", #[]⟩, "CREATE INDEX") ]
   return commands.flatten
 
-/-- 予約テーブル `_nyxis_outbox` の修飾名。 -/
+/-- The qualified name of the reserved table `_nyxis_outbox`. -/
 def outboxName : String := "\"public\".\"" ++ outboxTable ++ "\""
 
-/-- nyxis の予約テーブル `_nyxis_outbox`(アウトボックス)の用意。形は `docs/external-calls.md` §4.3 に固定
-(列と状態 `pending` / `sent` / `failed`)。正本のテーブルではなく、`Authz.Schema.tables`
-に無いのでアプリのハンドラ・ポリシーからは到達できない。`async` の呼び出しの記録(`Nyxis.Internal.Outbox.enqueue`)が要求の
-トランザクションで 1 行書き、内部ループ(`Outbox.loop`)が `pending` の行を送る。期限の来た `pending` の行だけを引く部分索引で、
-ループの各回のコストは送信済み・失敗の行の数に依存しない。全テーブルの後に、各コマンドに期待するタグを添えて出す。 -/
+/-- Provisioning of nyxis's reserved table `_nyxis_outbox` (the outbox). Its shape is fixed by `docs/external-calls.md`
+§4.3 (the columns and the states `pending` / `sent` / `failed`). It is not a table of the approved sources and is not in
+`Authz.Schema.tables`, so it is unreachable from the app's handlers and policies. Recording an `async` call
+(`Nyxis.Internal.Outbox.enqueue`) writes one row in the request's transaction, and the internal loop (`Outbox.loop`)
+sends the `pending` rows. With a partial index that picks only `pending` rows that are due, the cost of each loop
+iteration does not depend on the number of sent or failed rows. Emitted after all tables, each command paired with its
+expected tag. -/
 def outbox : List (Command × String) :=
   [ (⟨"CREATE TABLE " ++ outboxName ++ " (" ++ join
         [ keySql ++ " text COLLATE \"C\" PRIMARY KEY"
@@ -107,23 +112,26 @@ def outbox : List (Command × String) :=
   , (⟨"CREATE INDEX \"" ++ outboxTable ++ "_pending_idx\" ON " ++ outboxName ++
         " (\"next_at\") WHERE \"state\" = 'pending'", #[]⟩, "CREATE INDEX") ]
 
-/-- SERIALIZABLE トランザクションの中で現在の Cedar の実体を構成するための、スナップショットの計画。
-これは内部の認可の材料であり、ハンドラへの未選別の応答ではない。 -/
+/-- The snapshot plan for constructing the current Cedar entities inside a SERIALIZABLE transaction. This is an internal
+authorization material, not an unfiltered response to a handler. -/
 def selectTable (schema : Authz.Schema) (table : Table) : Except String Command := do
   let (name, columns) ← layout schema table
   let fields ← columns.mapM identifier
   return ⟨"SELECT " ++ join (keySql :: fields) ++ " FROM " ++ name, #[]⟩
 
-/-- 一覧の絞り込み 1 つの SQL の条件。モデル `Nyxis.Db.Filter.matches` と同じ規則:
-- 等値は保存形式(正規形の JSONB)の値そのものの一致 `列 = $n::jsonb`。
-- 大小は、保存形式のタグ(`列->>0`)が問い合わせの値の種類と一致するときだけ本文(`列->>1`)を比べる(`CASE` で
-  タグを先に見るので、種類の違う列の本文を数値に変換しない)。整数・decimal・日時・期間は数値、文字列は "C" 照合
-  (コードポイントの順)、真偽値は boolean。集合・レコード・実体参照の大小は拒む。
-- 列が NULL(属性の欠落)なら合わない(どちらの条件も NULL / false になる)。
-- 等値の定数が保存形式にできない値(NUL を含む文字列、`ipaddr`、入れ子の集合など)なら、保存された行がその値に
-  等しいことはない(保存形式は nyxis の符号化を通った値だけ。A3)ので、条件は定数 `false`(モデルの `v == f.value`
-  も偽)。大小の定数が NUL を含めば拒む(モデルでは比べられるので、閉じる側に倒す)。
-識別子は正本の列から、値はパラメータからだけ来る。`index` は次に使うパラメータの番号。 -/
+/-- The SQL condition for one list filter. The same rules as the model's `Nyxis.Db.Filter.matches`:
+- Equality is an exact match on the storage-format value (canonical JSONB): `column = $n::jsonb`.
+- An ordering comparison compares the body (`column->>1`) only when the storage-format tag (`column->>0`) matches the
+  kind of the query value (`CASE` looks at the tag first, so the body of a column of a different kind is never converted
+  to a number). Integers, decimal, datetimes and durations compare as numbers, strings with "C" collation (code-point
+  order), and booleans as boolean. Ordering on sets, records and entity references is rejected.
+- If the column is NULL (a missing attribute), it does not match (both conditions become NULL / false).
+- If an equality constant is a value that cannot be put into storage format (a string containing NUL, `ipaddr`, nested
+  sets, etc.), no stored row can equal that value (the storage format holds only values that went through nyxis's
+  encoding; A3), so the condition is the constant `false` (the model's `v == f.value` is also false). An ordering
+  constant containing NUL is rejected (the model can compare it, so this errs on the closed side).
+Identifiers come only from the columns of the approved sources, and values only from parameters. `index` is the number
+of the next parameter to use. -/
 private def filterSql (columns : List Column) (index : Nat) (f : Filter) :
     Except String (String × List String) := do
   if !columns.contains f.column then invalid
@@ -155,9 +163,9 @@ private def filterSql (columns : List Column) (index : Nat) (f : Filter) :
     return ("CASE WHEN " ++ column ++ "->>0 = $" ++ toString index ++ "::text THEN " ++
       lhs ++ " " ++ op ++ " " ++ rhs ++ " ELSE false END", [tag, text])
 
-/-- 一覧の対象テーブルの行のうち、問い合わせの絞り込みに合う行の取得(絞り込みは DB 側で行う)。
-絞り込みが無ければ `selectTable` と同じ全行。これも内部の認可の材料であり、permit の判定・並べ替え・ページは
-取得した後に Lean で行う。 -/
+/-- Fetches the rows of a list's target table that match the query filters (filtering is done on the DB side). With no
+filters, all rows, the same as `selectTable`. This is also an internal authorization material; the permit decision,
+sorting and paging are done in Lean after fetching. -/
 def selectFiltered (schema : Authz.Schema) (table : Table) (filters : List Filter) :
     Except String Command := do
   let (name, columns) ← layout schema table
@@ -169,9 +177,9 @@ def selectFiltered (schema : Authz.Schema) (table : Table) (filters : List Filte
   let predicate := if conditions.isEmpty then "" else " WHERE " ++ " AND ".intercalate conditions
   return ⟨"SELECT " ++ join (keySql :: fields) ++ " FROM " ++ name ++ predicate, parameters.toArray⟩
 
-/-- 既に認可されたモデルの操作だけを SQL にする。これを呼ぶことは認可ではない。
-ランタイムは操作を Authz/Runtime から得て、すべての処理を 1 つのトランザクションに収めなければならない。
-空の更新は今のところ拒む。無制限の書き込みになってはならない。
+/-- Turns only already-authorized model operations into SQL. Calling this is not authorization. The runtime must obtain
+operations from Authz/Runtime and keep all processing within one transaction. Empty updates are rejected for now. This
+must never become an unrestricted write.
 -/
 def operation (schema : Authz.Schema) (op : Operation) : Except String Command := do
   let (name, columns) ← layout schema op.target.ty

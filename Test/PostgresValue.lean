@@ -13,20 +13,21 @@ private def user (id : String) : Value := .prim (.entityUID ⟨⟨"User", []⟩,
 #guard roundtrip (.prim (.int (Int64.ofInt (-9223372036854775808))))
 #guard roundtrip (.prim (.int (Int64.ofInt 9223372036854775807)))
 #guard roundtrip (.prim (.int 0))
-#guard roundtrip (.prim (.string "日本語🌍\n\"\\'; DROP TABLE Post;--"))
+#guard roundtrip (.prim (.string "\u65E5\u672C\u8A9E🌍\n\"\\'; DROP TABLE Post;--"))
 #guard roundtrip (.prim (.string ""))
 #guard roundtrip (.prim (.entityUID ⟨⟨"User", ["a", "b"]⟩, "u'\"::1"⟩))
 #guard encode (.prim (.string "User::\"u\"")) !=
   encode (.prim (.entityUID ⟨⟨"User", []⟩, "u"⟩))
 
--- 拡張値: decimal(内部表現は 10^4 倍の Int64)、datetime / duration(ミリ秒の Int64)。
+-- Extension values: decimal (internally an Int64 scaled by 10^4), datetime / duration (an Int64 of milliseconds).
 #guard roundtrip (.ext (.decimal (Int64.ofInt (-12345))))
 #guard roundtrip (.ext (.decimal ((Ext.Decimal.parse "1234.5678").getD 0)))
 #guard roundtrip (.ext (.datetime ⟨Int64.ofInt 1700000000000⟩))
 #guard roundtrip (.ext (.datetime ((Ext.Datetime.parse "2026-10-22T05:39:36.123Z").getD ⟨0⟩)))
 #guard roundtrip (.ext (.datetime ⟨Int64.ofInt (-9223372036854775808)⟩))
 #guard roundtrip (.ext (.duration ⟨Int64.ofInt (-86400000)⟩))
--- タグが型を区別する: 同じ内部表現でも int / decimal / datetime / duration は別のセル。
+-- The tag distinguishes types: with the same internal representation, int / decimal / datetime / duration are different
+-- cells.
 #guard encode (.prim (.int 1700)) != encode (.ext (.decimal (Int64.ofInt 1700)))
 #guard encode (.ext (.datetime ⟨Int64.ofInt 1700⟩)) != encode (.ext (.duration ⟨Int64.ofInt 1700⟩))
 #guard encode (.ext (.decimal (Int64.ofInt 1700))) != encode (.ext (.datetime ⟨Int64.ofInt 1700⟩))
@@ -34,18 +35,18 @@ private def user (id : String) : Value := .prim (.entityUID ⟨⟨"User", []⟩,
   some "[\"datetime\",\"1700000000000\"]"
 #guard (encode (.ext (.decimal (Int64.ofInt (-12345))))).toOption == some "[\"decimal\",\"-12345\"]"
 
--- 集合: スカラーの集合は正規化された集合に戻る。空集合も往復する。
+-- Sets: a set of scalars comes back as the normalized set. The empty set also round-trips.
 #guard roundtrip (.set (Cedar.Data.Set.make [user "b", user "a", user "b"]))
 #guard roundtrip (.set (Cedar.Data.Set.make [.prim (.string "x"), .prim (.string "y")]))
 #guard roundtrip (.set (Cedar.Data.Set.make [.ext (.datetime ⟨Int64.ofInt 1⟩), .ext (.datetime ⟨Int64.ofInt 2⟩)]))
 #guard roundtrip (.set Cedar.Data.Set.empty)
 #guard (encode (.set (Cedar.Data.Set.make [user "a"]))).toOption ==
   some "[\"set\",[[\"entity\",[],\"User\",\"a\"]]]"
--- 順序の違う要素列を復号しても同じ集合になる。
+-- Decoding element lists in a different order yields the same set.
 #guard decode "[\"set\",[[\"int\",\"2\"],[\"int\",\"1\"],[\"int\",\"2\"]]]" ==
   .ok (.set (Cedar.Data.Set.make [.prim (.int 1), .prim (.int 2)]))
 
--- レコード: スカラーの属性を持つレコード。空のレコードも往復する。
+-- Records: records with scalar attributes. The empty record also round-trips.
 #guard roundtrip (.record (Cedar.Data.Map.make
   [("title", .prim (.string "t")), ("pinned", .prim (.bool true)), ("owner", user "a"),
    ("at", .ext (.datetime ⟨Int64.ofInt 5⟩)), ("price", .ext (.decimal (Int64.ofInt 10000)))]))
@@ -53,7 +54,7 @@ private def user (id : String) : Value := .prim (.entityUID ⟨⟨"User", []⟩,
 #guard (encode (.record (Cedar.Data.Map.make [("b", .prim (.bool true)), ("a", .prim (.int 1))]))).toOption ==
   some "[\"record\",[[\"a\",[\"int\",\"1\"]],[\"b\",[\"bool\",true]]]]"
 
--- fixture の全プリミティブ値が保存形式を往復して元の Cedar 値に戻る。
+-- Every primitive value in the fixture round-trips through the storage format back to the original Cedar value.
 #guard Test.Fixture.store.toList.all (fun (_, row) => row.toList.all (fun (_, v) => roundtrip v))
 
 private def refused (s : String) : Bool := !(decode s).isOk
@@ -77,7 +78,8 @@ private def refused (s : String) : Bool := !(decode s).isOk
 #guard refused "[\"datetime\",\"9223372036854775808\"]"
 #guard refused "[\"duration\",\"+1\"]"
 #guard refused "[\"ipaddr\",\"127.0.0.1\"]"
--- 入れ子の集合・レコード、集合でない要素列、重複する属性名、NUL を含む属性名は拒む。
+-- Nested sets/records, element lists that are not sets, duplicate attribute names, and attribute names containing NUL
+-- are rejected.
 #guard refused "[\"set\",[[\"set\",[]]]]"
 #guard refused "[\"set\",[[\"record\",[]]]]"
 #guard refused "[\"set\",[\"int\",\"1\"]]"

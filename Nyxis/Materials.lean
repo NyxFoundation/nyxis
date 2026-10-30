@@ -5,52 +5,64 @@ import Cedar.Thm.Validation.RequestEntityValidation
 import Cedar.Thm.Validation.Slice
 
 /-!
-# Nyxis.Materials — 判定材料
+# Nyxis.Materials — decision materials
 
-認可層(`Nyxis.Authz`)は、DB の現在の行を Cedar の実体にして判定する。一覧以外の要求では判定に必要な
-実体(主体の行・対象の行・ポリシーが参照する実体)だけを DB から取得する。取得した実体だけで行った判定は
-全テーブルを取得した場合の判定と一致しなければならない。このモジュールは、その一致を cedar-lean の既存定理に結ぶ
-(評価器も検証器も自前で再実装しない)。
+The authorization layer (`Nyxis.Authz`) turns the DB's current rows into Cedar entities and makes decisions on them. For
+requests other than lists, only the entities the decision needs (the principal's row, the target row, and the entities
+the policies reference) are fetched from the DB. A decision made using only the fetched entities must agree with the
+decision made had all tables been fetched. This module ties that agreement to existing cedar-lean theorems
+(reimplementing neither the evaluator nor the validator).
 
-- cedar-lean の **level 検証**(`Cedar.Validation.validateWithLevel policies ts n`)は、各ポリシーが実体の属性を
-  最大 `n` 段しか辿らないことを型検査で確かめる。`levelOf` は正本のポリシーが通る最小の level を探す。
-- cedar-lean の **slicing 定理**(`Cedar.Thm.validate_with_level_is_sound_wf`)は、level `n` で検証に通った
-  ポリシー集合について、`isAuthorized` の結果が全実体と `Entities.sliceAtLevel req n`(要求の主体・アクション・
-  対象・文脈に現れる実体から `n` 段で到達できる実体だけ)で一致することを述べる。
-- その前提は、型環境が well-formed(`Schema.validateWellFormed`)、要求がある環境のインスタンス
-  (`validateRequest`)、**全実体がスキーマのインスタンス**(`Cedar.Thm.InstanceOfSchema`)の 3 つ。前 2 つは
-  `Authz.step` が判定ごとに実行可能な検査として確かめる(通らなければ拒否する)。3 つめは、判定の実体
-  (`entities`)を「DB の行のうちスキーマに適合する行(`conforms`)+ スキーマの全アクションの実体」として
-  組み立てることで、どんな DB の状態についても構成から成り立つ(`instanceOfSchema_entities`)。主定理に新しい
-  仮定は置かない。
-- **部分的な取得**(`Known`): 実 DB から主キーの点検索で取得した行と、引いたが無かった実体の記録。取得が全体の
-  状態と整合し(`Known.Consistent`)、要求から到達できる実体をすべて取得済みなら(`closedAt`: 実行可能な検査)、
-  取得した行だけから組んだ判定材料の slice は全体から組んだ slice と等しい(`sliceAtLevel_eq`)。
-  `Nyxis.Authz.permits_eq_of_covers` / `step_eq_of_covers` がこれを認可層の判定と `step` の結果の一致に結ぶ。
-  接続層(PostgreSQL の点検索)はこの `Known` を組み立て、この検査を通してから判定する(未実装)。
+- cedar-lean's **level validation** (`Cedar.Validation.validateWithLevel policies ts n`) checks by type checking that
+  each policy traverses entity attributes at most `n` levels deep. `levelOf` searches for the smallest level at which
+  the approved schema's policies pass.
+- cedar-lean's **slicing theorem** (`Cedar.Thm.validate_with_level_is_sound_wf`) states that, for a policy set that
+  passes validation at level `n`, the result of `isAuthorized` is the same with all entities and with
+  `Entities.sliceAtLevel req n` (only the entities reachable within `n` levels from the entities appearing in the
+  request's principal, action, resource, and context).
+- Its premises are three: the type environment is well-formed (`Schema.validateWellFormed`), the request is an instance
+  of some environment (`validateRequest`), and **all entities are instances of the schema**
+  (`Cedar.Thm.InstanceOfSchema`). The first two are checked by `Authz.step` as executable checks for every decision
+  (rejecting if they fail). The third holds by construction for every DB state, by assembling the decision's entities
+  (`entities`) as "the rows of the DB that conform to the schema (`conforms`) + the entities of all the schema's
+  actions" (`instanceOfSchema_entities`). No new assumption is added to the main theorem.
+- **Partial fetch** (`Known`): the rows fetched from the real DB by primary key point lookups, and a record of the
+  entities that were looked up but did not exist. If the fetch is consistent with the whole state (`Known.Consistent`)
+  and every entity reachable from the request has been fetched (`closedAt`: an executable check), the slice of the
+  decision materials built only from the fetched rows equals the slice built from the whole (`sliceAtLevel_eq`).
+  `Nyxis.Authz.permits_eq_of_covers` / `step_eq_of_covers` tie this to the agreement of the authorization layer's
+  decision and of `step`'s result. The connection layer (PostgreSQL point lookups) assembles this `Known` and makes the
+  decision only after passing this check (not implemented).
 
-適合しない行(列の型や必須の列がスキーマと合わない行)は判定の実体に現れない。そのような行は、nyxis が正本から
-DDL を作り、書き込みを形状検査で拒み、DB へは nyxis 専用ロール以外から到達できない(`ASSUMPTIONS.md` A3)ことから
-実際には生じず、実 DB の接続層(`PostgresRun`)は取得した行の形状検査に失敗すれば要求全体を 503 で閉じる。
-アクションの実体は属性・tag を持たず祖先は宣言どおりで、cedar-lean の実体の整合(`Entities.HasAllActions`)が
-全アクションの存在を要求するために加える。アクション群(`action "a" in [Action::"g"]`)の `in` はこの祖先で判定される。
+Rows that do not conform (rows whose column types or required columns do not match the schema) do not appear among the
+decision's entities. Such rows do not arise in practice, because nyxis generates the DDL from the approved schema,
+rejects writes by shape checks, and the DB is reachable only by the dedicated nyxis role (`ASSUMPTIONS.md` A3); the
+real-DB connection layer (`PostgresRun`) closes the whole request with 503 if the shape check of a fetched row fails.
+Action entities have no attributes or tags, their ancestors are as declared, and they are added because cedar-lean's
+entity consistency (`Entities.HasAllActions`) requires all actions to exist. `in` for action groups
+(`action "a" in [Action::"g"]`) is decided by these ancestors.
 
-行の実体の祖先(実体の親): 正本が `entity T in [P]` と宣言し `@parents("列, …")` で親を指す列を添えたテーブルでは、
-行の実体はその列の値(実体、または実体の集合の要素)のうち宣言された親の型のものを祖先として持つ
-(`rowAncestors`)。ポリシーの `principal in resource.org`(主体が対象の組織のメンバーなら)はこの祖先で判定される。
-祖先の型が宣言どおりであることは構成から成り立つ(`rowAncestors_ty`)。cedar-lean の slicing は祖先を辿らない
-(`EntityData.sliceEUIDs` は属性と tag だけ)ので、`in` の判定に親の行は要らない。Cedar の `in`(評価 `inₑ`・型付け
-`descendentOf`)は祖先の集合が推移的に閉じていることを前提にするので、正本の検査は親の型がさらに親を持つ(多段)ことと
-自己参照を拒む(`Nyxis.CedarSchema.entityEntry`): 直接の親だけなら推移閉包と一致する。
+Ancestors of row entities (entity parents): in a table that the approved schema declares as `entity T in [P]` with the
+columns pointing to parents given by `@parents("column, …")`, the row's entity has as ancestors those values of these
+columns (entities, or elements of entity sets) whose type is a declared parent type (`rowAncestors`). A policy's
+`principal in resource.org` (if the principal is a member of the target's organization) is decided by these ancestors.
+That the ancestors' types are as declared holds by construction (`rowAncestors_ty`). cedar-lean's slicing does not
+traverse ancestors (`EntityData.sliceEUIDs` covers only attributes and tags), so deciding `in` needs no parent rows.
+Cedar's `in` (evaluation `inₑ`, typing `descendentOf`) assumes that the ancestor set is transitively closed, so the
+approved schema check rejects a parent type having further parents (multiple levels) and self-reference
+(`Nyxis.CedarSchema.entityEntry`): with direct parents only, it coincides with the transitive closure.
 
-所属行(多対多の所属を別テーブルの行で表す): 正本が `entity T in [P]` に `@memberships("M: 列 -> 列, …")` を
-添えると、テーブル `M`(所属行のテーブル)の行のうち列 `M.列`(所属する側)の値が `T::"k"` である行の、親を指す列の値
-(`P` か `Set<P>`)も、行 `T::"k"` の実体の祖先になる(`membershipRefs`)。この祖先は他の行(所属行)に依るので、判定の
-実体の一致(`entities_find?_eq`)には、その実体の所属行の全部(所属行のテーブルの行のうち所属する側の列がその実体である
-行。`matchingRows`: 絞り込みに合う行)が両方の状態で同じ(行の集合として同じ: 順序は `Set.make` が吸収する)ことが要る。
-部分的な取得 `Known` は「絞り込みに合う行をすべて取得した」記録 `fetched` を持ち(接続層では WHERE 句つきの SELECT)、
-`Known.knows` は型に所属行の宣言があるテーブルの実体について、行の有無に加えてその所属行の取得(`coversMemberships`)を
-要求する。
+Membership rows (many-to-many membership represented by rows of a separate table): when the approved schema attaches
+`@memberships("M: column -> column, …")` to `entity T in [P]`, then for the rows of table `M` (the membership-row table)
+whose column `M.column` (the member side) has the value `T::"k"`, the values of their columns pointing to parents (`P`
+or `Set<P>`) also become ancestors of the entity of row `T::"k"` (`membershipRefs`). These ancestors depend on other
+rows (the membership rows), so the agreement of the decision's entities (`entities_find?_eq`) requires all of that
+entity's membership rows (the rows of the membership-row table whose member-side column is that entity; `matchingRows`:
+the rows that match the filters) to be the same in both states (the same as sets of rows: `Set.make` absorbs the order).
+The partial fetch `Known` carries a record `fetched` of "all rows matching the filters were fetched" (in the connection
+layer, a SELECT with a WHERE clause), and `Known.knows` requires, for entities of tables whose type has a membership-row
+declaration, not only knowing whether the row exists but also that its membership rows were fetched
+(`coversMemberships`).
 -/
 
 deriving instance DecidableEq for Cedar.Validation.ActionSchemaEntry
@@ -62,9 +74,9 @@ open Cedar.Spec
 open Cedar.Data
 open Nyxis.Db
 
-/-! ## `Map` と `Store` の補題 -/
+/-! ## Lemmas on `Map` and `Store` -/
 
-/-- `find?` は、鍵が一致する最初の組の値。 -/
+/-- `find?` is the value of the first pair whose key matches. -/
 theorem map_find?_eq_list_find? {α β : Type} [BEq α] (m : Map α β) (k : α) :
     m.find? k = (m.toList.find? (fun x => x.fst == k)).map Prod.snd := by
   simp only [Map.find?]
@@ -96,7 +108,7 @@ private theorem find?_filter_ne {l : List (EntityUID × Row)} {u tk : EntityUID}
       · have ht' : (kv.1 != tk) = true := by simpa using ht
         rw [ite_eq_left ht', List.find?_cons_of_neg (p := fun x : EntityUID × Row => x.1 == u) (a := kv) hk, ih]
 
-/-- 行を置いた後の `find?`: 置いた主キーならその行、それ以外は元のまま。 -/
+/-- `find?` after putting a row: that row for the primary key that was put, otherwise unchanged. -/
 theorem find?_put (s : Store) (t : Table) (k : Key) (row : Row) (u : EntityUID) :
     Map.find? (s.put t k row) u = if u = ⟨t, k⟩ then some row else Map.find? s u := by
   unfold Store.put
@@ -109,7 +121,7 @@ theorem find?_put (s : Store) (t : Table) (k : Key) (row : Row) (u : EntityUID) 
     have h : ((⟨t, k⟩ : EntityUID) == u) = false := by simpa using Ne.symm hne
     rw [List.find?_cons_of_neg (by simp [h]), find?_filter_ne hne]
 
-/-! ## `Map.make` は鍵を落とさない -/
+/-! ## `Map.make` does not drop keys -/
 
 theorem insertCanonical_key {α β : Type} [LT α] [StrictLT α] [DecidableLT α] (x : α × β) :
     ∀ (ys : List (α × β)) (k : α) (v : β), (k, v) ∈ ys →
@@ -148,7 +160,7 @@ theorem canonicalize_key {α β : Type} [LT α] [StrictLT α] [DecidableLT α] :
     · obtain ⟨v', hv'⟩ := canonicalize_key xs k v hxs
       exact insertCanonical_key x _ k v' hv'
 
-/-- リストにある鍵は `Map.make` の後も引ける(値はそのうちの 1 つ)。 -/
+/-- A key in the list can still be looked up after `Map.make` (the value is one of its values). -/
 theorem find?_make_of_mem {α β : Type} [LT α] [StrictLT α] [DecidableLT α] [DecidableEq α]
     {xs : List (α × β)} {k : α} {v : β} (h : (k, v) ∈ xs) :
     ∃ v', (Map.make xs).find? k = some v' := by
@@ -157,7 +169,7 @@ theorem find?_make_of_mem {α β : Type} [LT α] [StrictLT α] [DecidableLT α] 
   rw [Map.toList_make_eq_canonicalize]
   exact hv'
 
-/-- 鍵ごとに値が一意なリストでは、`Map.make` の `find?` はリストの組そのもの。 -/
+/-- For a list whose values are unique per key, `find?` of `Map.make` is exactly the pairs of the list. -/
 theorem find?_make_iff_mem {α β : Type} [LT α] [StrictLT α] [DecidableLT α] [DecidableEq α]
     {xs : List (α × β)} (hfun : ∀ k v v', (k, v) ∈ xs → (k, v') ∈ xs → v = v') (k : α) (v : β) :
     (Map.make xs).find? k = some v ↔ (k, v) ∈ xs := by
@@ -170,12 +182,13 @@ theorem find?_make_iff_mem {α β : Type} [LT α] [StrictLT α] [DecidableLT α]
     rw [hfun k v v' h hmem]
     exact hv'
 
-/-! ## 判定の実体 -/
+/-! ## The decision's entities -/
 
-/-- 行がスキーマに適合するか: 主キーがアクションの UID ではなく、テーブル(エンティティ型)が型環境にあり、
-    主キーがその型の ID として有効で、列の値が宣言された属性の型のインスタンスである(cedar-lean の
-    `instanceOfType`)。アクションの実体は `actionEntries` が別に与えるので、行とアクションが同じ UID を持つ
-    ことはない(well-formed な型環境ではアクションの型はエンティティ型にならないので、この除外は判定を変えない)。 -/
+/-- Whether the row conforms to the schema: the primary key is not an action UID, the table (entity type) is in the type
+    environment, the primary key is a valid ID for that type, and the column values are instances of the declared
+    attribute types (cedar-lean's `instanceOfType`). Action entities are given separately by `actionEntries`, so a row
+    and an action never share a UID (in a well-formed type environment action types are not entity types, so this
+    exclusion does not change decisions). -/
 def conforms (ts : Cedar.Validation.Schema) (uid : EntityUID) (row : Row) : Bool :=
   (ts.acts.find? uid).isNone &&
   match ts.ets.find? uid.ty with
@@ -184,12 +197,14 @@ def conforms (ts : Cedar.Validation.Schema) (uid : EntityUID) (row : Row) : Bool
       Cedar.Validation.instanceOfType (.record row) (.record entry.attrs) ts
   | none => false
 
-/-- 親を指す列: テーブルごとの、その行の親(Cedar の実体の祖先。ポリシーの `in` で判定する)を指す列の名前。
-    正本の `entity T in [P]` に添えた `@parents("列, …")` から構成する(`Nyxis.CedarSchema`)。 -/
+/-- Columns pointing to parents: per table, the names of the columns pointing to that row's parents (ancestors of the
+    Cedar entity; decided by `in` in policies). Built from `@parents("column, …")` attached to `entity T in [P]` in the
+    approved schema (`Nyxis.CedarSchema`). -/
 abbrev ParentColumns := List (EntityType × List Attr)
 
-/-- 値に現れる実体の参照: 実体そのもの(`P` 型の列)か、集合の要素(`Set<P>` 型の列)。親を指す列の型は正本の検査で
-    この 2 つに限る(`Nyxis.CedarSchema`)。 -/
+/-- The entity references appearing in a value: the entity itself (a column of type `P`) or the elements of a set (a
+    column of type `Set<P>`). The approved schema check limits the types of columns pointing to parents to these two
+    (`Nyxis.CedarSchema`). -/
 def entityRefs : Value → List EntityUID
   | .prim (.entityUID uid) => [uid]
   | .set s => s.toList.filterMap fun
@@ -197,40 +212,44 @@ def entityRefs : Value → List EntityUID
     | _ => none
   | _ => []
 
-/-- 所属行の宣言: テーブル `table` の行のうち列 `member` の値がある実体を指す行が、その実体の所属行。
-    所属行の列 `parents`(親の型 `P` か `Set<P>`)の値が、その実体の祖先になる。正本の `entity T in [P]` に添えた
-    `@memberships("M: 列 -> 列, …")` から構成する(`Nyxis.CedarSchema`)。 -/
+/-- A membership-row declaration: the rows of table `table` whose column `member` points to an entity are that entity's
+    membership rows. The values of the membership rows' columns `parents` (of the parent type `P` or `Set<P>`) become
+    ancestors of that entity. Built from `@memberships("M: column -> column, …")` attached to `entity T in [P]` in the
+    approved schema (`Nyxis.CedarSchema`). -/
 structure Membership where
-  /-- 所属行のテーブル。 -/
+  /-- The membership-row table. -/
   table : Table
-  /-- 所属する側(祖先を得る実体)を指す列。型はその実体の型。 -/
+  /-- The column pointing to the member side (the entity that gets the ancestors). Its type is that entity's type. -/
   member : Attr
-  /-- 親を指す列。型は親の型 `P` か `Set<P>`。 -/
+  /-- The columns pointing to parents. Their type is the parent type `P` or `Set<P>`. -/
   parents : List Attr
   deriving Repr, DecidableEq
 
-/-- 所属行の宣言: 所属する側のテーブル(エンティティ型)ごと。 -/
+/-- Membership-row declarations, per member-side table (entity type). -/
 abbrev MembershipColumns := List (EntityType × List Membership)
 
-/-- テーブル `table` の現在の行のうち絞り込みに合う行。一覧の候補、一意性・参照整合の判定、所属行が
-    この経路で行を見る(実 DB では WHERE 句つきの SELECT)。 -/
+/-- The current rows of table `table` that match the filters. List candidates, uniqueness and referential integrity
+    decisions, and membership rows see rows through this path (in the real DB, a SELECT with a WHERE clause). -/
 def matchingRows (store : Store) (table : Table) (filters : List Filter) : List (Key × Row) :=
   (store.rows table).filter fun kv => Filter.matchesAll filters kv.2
 
-/-- 実体 `uid` の所属行の絞り込み: 所属する側の列が `uid` である行。 -/
+/-- The filter for entity `uid`'s membership rows: rows whose member-side column is `uid`. -/
 def Membership.filterOf (m : Membership) (uid : EntityUID) : List Filter :=
   [⟨m.member, .eq, .prim (.entityUID uid)⟩]
 
-/-- 実体 `uid` の所属行から得る親の参照: 型の各宣言について、その所属行の親を指す列の値に現れる実体。 -/
+/-- The parent references obtained from entity `uid`'s membership rows: for each declaration of the type, the entities
+    appearing in the values of the columns of those membership rows that point to parents. -/
 def membershipRefs (mc : MembershipColumns) (store : Store) (uid : EntityUID) : List EntityUID :=
   ((mc.lookup uid.ty).getD []).flatMap fun m =>
     (matchingRows store m.table (m.filterOf uid)).flatMap fun kv =>
       m.parents.flatMap fun c => ((Map.find? kv.2 c).map entityRefs).getD []
 
-/-- 行の親(実体の祖先): 親を指す列の値に現れる実体と、所属行の親を指す列の値に現れる実体のうち、型環境がその型の
-    祖先の型として宣言しているもの。行の実体はこの集合を祖先として持ち、ポリシーの `principal in resource.org` の
-    ような判定はこれを見る。親を指す列も所属行も無いテーブル(1 つめの公式サンプル)では空。祖先の祖先は辿らない
-    (`in` は正本に宣言した直接の親についてだけ成り立つ)。 -/
+/-- A row's parents (entity ancestors): the entities appearing in the values of the columns pointing to parents and in
+    the values of the membership rows' columns pointing to parents, restricted to those the type environment declares as
+    ancestor types of that type. The row's entity has this set as its ancestors, and decisions such as a policy's
+    `principal in resource.org` look at it. Empty for tables with neither columns pointing to parents nor membership
+    rows (the first official example). Ancestors of ancestors are not traversed (`in` holds only for the direct parents
+    declared in the approved schema). -/
 def rowAncestors (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store)
     (uid : EntityUID) (row : Row) : Set EntityUID :=
   match ts.ets.find? uid.ty with
@@ -240,13 +259,15 @@ def rowAncestors (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Membe
       fun p => entry.ancestors.contains p.ty)
   | none => Set.empty
 
-/-- 行の実体。列が属性になり、親を指す列と所属行の値が祖先になり、tag は持たない。 -/
+/-- A row's entity. Columns become attributes, the values of the columns pointing to parents and of membership rows
+    become ancestors, and it has no tags. -/
 def rowData (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store)
     (uid : EntityUID) (row : Row) : EntityData :=
   { attrs := row, ancestors := rowAncestors ts pc mc store uid row, tags := Map.empty }
 
-/-- DB の状態のうち、スキーマに適合する行の実体(主キー順は `Store` のまま)。行はその主キーで `find?` を引き直す
-    (`Store.rows` と同じ経路。同じ主キーが重複していても `find?` の行だけが実体になる)。 -/
+/-- The entities of the rows of the DB state that conform to the schema (in the primary key order of `Store`). Each row
+    is looked up again with `find?` by its primary key (the same path as `Store.rows`; even if the same primary key is
+    duplicated, only the row from `find?` becomes the entity). -/
 def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) :
     List (EntityUID × EntityData) :=
   store.toList.filterMap fun kv =>
@@ -254,13 +275,15 @@ def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Members
     | some row => if conforms ts kv.1 row then some (kv.1, rowData ts pc mc store kv.1 row) else none
     | none => none
 
-/-- スキーマの全アクションの実体。属性・tag は無く、祖先は宣言どおり(`actionSchemaEntryToEntityData`)。
-    各アクションの項目は型環境の `find?` で引く(重複した宣言があっても `find?` と同じ項目になる)。 -/
+/-- The entities of all the schema's actions. No attributes or tags; ancestors are as declared
+    (`actionSchemaEntryToEntityData`). Each action's entry is looked up with `find?` in the type environment (even if
+    there are duplicate declarations, it is the same entry as `find?`). -/
 def actionEntries (ts : Cedar.Validation.Schema) : List (EntityUID × EntityData) :=
   ts.acts.toList.filterMap fun kv =>
     (ts.acts.find? kv.1).map fun entry => (kv.1, Cedar.Validation.actionSchemaEntryToEntityData entry)
 
-/-- 判定の実体: DB の状態のうちスキーマに適合する行(親を指す列と所属行の値を祖先に持つ)と、スキーマの全アクション。 -/
+/-- The decision's entities: the rows of the DB state that conform to the schema (with the values of the columns
+    pointing to parents and of membership rows as ancestors) and all the schema's actions. -/
 def entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) : Entities :=
   Map.make (rowEntries ts pc mc store ++ actionEntries ts)
 
@@ -295,7 +318,8 @@ theorem mem_actionEntries (ts : Cedar.Validation.Schema) (u : EntityUID) (d : En
   · rintro ⟨entry, hfind, rfl⟩
     exact ⟨(u, entry), Map.find?_mem_toList hfind, by simp [hfind]⟩
 
-/-- 判定の実体の組は鍵ごとに一意(行は `find?` の行、アクションは `find?` の項目、両者の UID は重ならない)。 -/
+/-- The pairs of the decision's entities are unique per key (rows are the rows from `find?`, actions are the entries
+    from `find?`, and their UIDs do not overlap). -/
 theorem entries_functional (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
     (store : Store) :
     ∀ k v v', (k, v) ∈ rowEntries ts pc mc store ++ actionEntries ts →
@@ -319,7 +343,7 @@ theorem entries_functional (ts : Cedar.Validation.Schema) (pc : ParentColumns) (
     cases he'
     rfl
 
-/-- 判定の実体の `find?`: 適合する現在の行か、スキーマのアクション。 -/
+/-- `find?` on the decision's entities: a conforming current row, or an action of the schema. -/
 theorem entities_find?_iff (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
     (store : Store) (u : EntityUID) (d : EntityData) :
     (entities ts pc mc store).find? u = some d ↔
@@ -329,8 +353,8 @@ theorem entities_find?_iff (ts : Cedar.Validation.Schema) (pc : ParentColumns) (
   rw [find?_make_iff_mem (entries_functional ts pc mc store)]
   simp only [List.mem_append, mem_rowEntries, mem_actionEntries]
 
-/-- `(key, row)` がテーブルの現在の行列にあるのは、その主キーで `find?` を引いた現在の行がそれであるとき、
-    そのときに限る(`Store.rows` は主キーを `toList` から取り、行は `find?` で引き直す)。 -/
+/-- `(key, row)` is in the table's current sequence of rows if and only if it is the current row looked up with `find?`
+    by that primary key (`Store.rows` takes primary keys from `toList` and looks the rows up again with `find?`). -/
 theorem mem_rows_iff (s : Store) (table : Table) (key : Key) (row : Row) :
     (key, row) ∈ s.rows table ↔ Map.find? s ⟨table, key⟩ = some row := by
   constructor
@@ -340,18 +364,20 @@ theorem mem_rows_iff (s : Store) (table : Table) (key : Key) (row : Row) :
     refine ⟨key, ?_, by simp [Store.find?, hfind]⟩
     exact ⟨(⟨table, key⟩, row), Map.find?_mem_toList hfind, by simp⟩
 
-/-- 絞り込みに合う行列の要素: その主キーの現在の行で、絞り込みに合うもの。 -/
+/-- An element of the sequence of rows matching the filters: the current row of its primary key that matches the
+    filters. -/
 theorem mem_matchingRows_iff (s : Store) (table : Table) (filters : List Filter) (kv : Key × Row) :
     kv ∈ matchingRows s table filters ↔
       Map.find? s ⟨table, kv.1⟩ = some kv.2 ∧ Filter.matchesAll filters kv.2 = true := by
   obtain ⟨key, row⟩ := kv
   simp only [matchingRows, List.mem_filter, mem_rows_iff]
 
-/-- 2 つの状態で、絞り込みに合う行列が集合として同じであること。 -/
+/-- That the sequences of rows matching the filters are the same as sets in two states. -/
 def RowsAgree (s₁ s₂ : Store) (table : Table) (filters : List Filter) : Prop :=
   ∀ kv, kv ∈ matchingRows s₁ table filters ↔ kv ∈ matchingRows s₂ table filters
 
-/-- 実体の所属行が 2 つの状態で集合として同じなら、所属行から得る親の参照も集合として同じ。 -/
+/-- If an entity's membership rows are the same as sets in two states, the parent references obtained from the
+    membership rows are also the same as sets. -/
 theorem membershipRefs_mem (mc : MembershipColumns) (s₁ s₂ : Store) (u : EntityUID)
     (hm : ∀ m ∈ (mc.lookup u.ty).getD [], RowsAgree s₁ s₂ m.table (m.filterOf u)) (x : EntityUID) :
     x ∈ membershipRefs mc s₁ u ↔ x ∈ membershipRefs mc s₂ u := by
@@ -362,7 +388,8 @@ theorem membershipRefs_mem (mc : MembershipColumns) (s₁ s₂ : Store) (u : Ent
   · rintro ⟨m, hmem, kv, hkv, hx⟩
     exact ⟨m, hmem, kv, (hm m hmem kv).mpr hkv, hx⟩
 
-/-- 実体の所属行が 2 つの状態で集合として同じなら、行の実体は同じ(祖先は `Set.make` なので順序に依らない)。 -/
+/-- If an entity's membership rows are the same as sets in two states, the row's entity is the same (the ancestors use
+    `Set.make`, so they do not depend on order). -/
 theorem rowData_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (s₁ s₂ : Store)
     (u : EntityUID) (row : Row)
     (hm : ∀ m ∈ (mc.lookup u.ty).getD [], RowsAgree s₁ s₂ m.table (m.filterOf u)) :
@@ -381,8 +408,9 @@ theorem rowData_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Mem
       · exact Or.inr ((membershipRefs_mem mc s₁ s₂ u hm x).mpr h)
   · rfl
 
-/-- 型環境のテーブルの UID について 2 つの状態の `find?` が一致し、その実体の所属行が集合として同じなら、
-    判定の実体の `find?` も一致する(テーブルでない型の UID は行の実体にならないので、状態に依らない)。 -/
+/-- If, for a UID of a table in the type environment, `find?` agrees in two states and that entity's membership rows are
+    the same as sets, then `find?` on the decision's entities also agrees (UIDs of types that are not tables do not
+    become row entities, so they do not depend on the state). -/
 theorem entities_find?_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
     (s₁ s₂ : Store) (u : EntityUID)
     (h : (ts.ets.find? u.ty).isSome = true → Map.find? s₁ u = Map.find? s₂ u)
@@ -405,21 +433,23 @@ theorem entities_find?_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (m
     rw [h htab]
     simp only [rowData_eq ts pc mc s₁ s₂ u _ (hm htab)]
 
-/-! ## 判定ごとの前提の検査 -/
+/-! ## Per-decision premise checks -/
 
-/-- 探す level の上限。判定材料は要求に現れる実体から高々この段数で到達できる実体に限られる。 -/
+/-- The upper bound of the levels searched. Decision materials are limited to entities reachable within at most this
+    many levels from the entities appearing in the request. -/
 def maxLevel : Nat := 4
 
-/-- 正本のポリシーが cedar-lean の level 検証に通る最小の level(0 〜 `maxLevel`)。無ければ `none`
-    (`Authz.step` はそのとき拒否する)。 -/
+/-- The smallest level (0 to `maxLevel`) at which the approved schema's policies pass cedar-lean's level validation.
+    `none` if there is none (`Authz.step` then rejects). -/
 def levelOf (policies : Policies) (ts : Cedar.Validation.Schema) : Option Nat :=
   (List.range (maxLevel + 1)).find? fun level =>
     match Cedar.Validation.validateWithLevel policies ts level with
     | .ok _ => true
     | .error _ => false
 
-/-- 判定ごとに実行可能な前提: 型環境が well-formed で、要求(主体・アクション・対象・文脈)がスキーマのある環境の
-    インスタンスである。実体の適合性は `entities` の構成で保証されるので検査しない。 -/
+/-- The executable premises for each decision: the type environment is well-formed, and the request (principal, action,
+    resource, context) is an instance of some environment of the schema. Entity conformance is guaranteed by the
+    construction of `entities`, so it is not checked. -/
 def premisesHold (ts : Cedar.Validation.Schema) (req : Request) : Bool :=
   (match ts.validateWellFormed with | .ok _ => true | .error _ => false) &&
   (match Cedar.Validation.validateRequest ts req with | .ok _ => true | .error _ => false)
@@ -445,10 +475,10 @@ theorem premisesHold_spec {ts : Cedar.Validation.Schema} {req : Request} (h : pr
     · rename_i u heq; cases u; exact fun _ => heq
     · intro h; cases h
 
-/-! ## 構成による実体の適合性 -/
+/-! ## Entity conformance by construction -/
 
-/-- 行の祖先の型は、型環境がその型の祖先として宣言した型である(構成による: `rowAncestors` はそれ以外を落とす。
-    所属行から得た参照も同じ)。 -/
+/-- The types of a row's ancestors are types the type environment declares as ancestors of that type (by construction:
+    `rowAncestors` drops the others; the same goes for references obtained from membership rows). -/
 theorem rowAncestors_ty (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store)
     (uid : EntityUID) (row : Row)
     (entry : Cedar.Validation.EntitySchemaEntry) (hentry : ts.ets.find? uid.ty = some entry)
@@ -458,9 +488,9 @@ theorem rowAncestors_ty (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc 
   simp only [Set.mem_make, List.mem_filter] at hanc
   exact Set.contains_prop_bool_equiv.mp hanc.2
 
-/-- 判定の実体 `entities ts pc mc store` は、どんな DB の状態についても、型環境 `ts` の各環境のインスタンスである
-    (cedar-lean の `InstanceOfSchema`): 各実体は適合する行(祖先の型は宣言どおり)かスキーマのアクションで、
-    全アクションが存在する。 -/
+/-- The decision's entities `entities ts pc mc store` are, for every DB state, instances of each environment of type
+    environment `ts` (cedar-lean's `InstanceOfSchema`): each entity is a conforming row (with ancestor types as
+    declared) or an action of the schema, and all actions exist. -/
 theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
     (env : Cedar.Validation.TypeEnv) (store : Store) (hets : env.ets = ts.ets) (hacts : env.acts = ts.acts) :
     Cedar.Thm.InstanceOfSchema (entities ts pc mc store) env := by
@@ -505,8 +535,8 @@ theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentCol
       exact ⟨(uid, entry), Map.find?_mem_toList hfind, by simp [hfind]⟩
     exact find?_make_of_mem (List.mem_append_right _ hmem)
 
-/-- 型環境が well-formed で要求がある環境のインスタンスなら、判定の実体はその環境のもとで cedar-lean の
-    slicing 定理の前提(`InstanceOfWellFormedSchema`)を満たす。 -/
+/-- If the type environment is well-formed and the request is an instance of some environment, the decision's entities
+    satisfy, under that environment, the premise of cedar-lean's slicing theorem (`InstanceOfWellFormedSchema`). -/
 theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
     (store : Store) (req : Request)
     (hwf : ts.validateWellFormed = .ok ())
@@ -526,12 +556,13 @@ theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentCo
       exact instanceOfSchema_entities ts pc mc _ store rfl rfl
   · cases hreq
 
-/-! ## 一致の定理 -/
+/-! ## The agreement theorem -/
 
-/-- 限定した判定材料(要求に現れる実体から `level` 段で到達できる実体だけ)での Cedar の判定は、判定の実体全体
-    での判定と一致する。前提は、型環境が well-formed、要求がある環境のインスタンス、ポリシーが `level` で
-    cedar-lean の level 検証に通ること(いずれも実行可能な検査の成功)。証明は cedar-lean の slicing 定理に委ね、
-    評価器の中身には触れない。 -/
+/-- Cedar's decision on the restricted decision materials (only the entities reachable within `level` levels from the
+    entities appearing in the request) agrees with the decision on all of the decision's entities. The premises are that
+    the type environment is well-formed, that the request is an instance of some environment, and that the policies pass
+    cedar-lean's level validation at `level` (each the success of an executable check). The proof is delegated to
+    cedar-lean's slicing theorem and does not touch the evaluator's internals. -/
 theorem isAuthorized_slice (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
     (policies : Policies) (store : Store) (req : Request) (level : Nat)
     (hwf : ts.validateWellFormed = .ok ())
@@ -541,40 +572,44 @@ theorem isAuthorized_slice (ts : Cedar.Validation.Schema) (pc : ParentColumns) (
       = isAuthorized req (entities ts pc mc store) policies :=
   (Cedar.Thm.validate_with_level_is_sound_wf (instanceOfWellFormedSchema ts pc mc store req hwf hreq) hlevel).symm
 
-/-! ## 部分的な取得 -/
+/-! ## Partial fetch -/
 
-/-- 実 DB から部分的に取得した判定材料: 取得できた行(`rows`)、引いたが無かった実体(`absent`)、そして絞り込みに
-    合う行をすべて取得したテーブルと絞り込み(`fetched`。所属行の取得の記録)。接続層はこれを主キーの点検索と
-    WHERE 句つきの SELECT(一覧の対象テーブル・制約の判定が見る行・所属行)で組み立てる。 -/
+/-- Decision materials partially fetched from the real DB: the rows that could be fetched (`rows`), the entities that
+    were looked up but did not exist (`absent`), and the tables and filters for which all rows matching the filters were
+    fetched (`fetched`; the record of fetching membership rows). The connection layer assembles this with primary key
+    point lookups and SELECTs with WHERE clauses (the list's target table, the rows constraint decisions look at, and
+    membership rows). -/
 structure Known where
   rows : Store
   absent : List EntityUID
   fetched : List (Table × List Filter)
 
-/-- 実体 `uid` の行の有無が分かっているか: 行を取得済みか、無いと分かっている。 -/
+/-- Whether it is known whether entity `uid`'s row exists: the row has been fetched, or it is known not to exist. -/
 def Known.decided (k : Known) (uid : EntityUID) : Bool :=
   (Map.find? k.rows uid).isSome || k.absent.contains uid
 
-/-- 実体 `uid` の所属行(型の各宣言について、所属する側の列が `uid` である行)をすべて取得したと記録しているか。
-    所属行の宣言が無い型では真。 -/
+/-- Whether it records having fetched all of entity `uid`'s membership rows (for each declaration of the type, the rows
+    whose member-side column is `uid`). True for types without membership-row declarations. -/
 def Known.coversMemberships (mc : MembershipColumns) (k : Known) (uid : EntityUID) : Bool :=
   ((mc.lookup uid.ty).getD []).all fun m => k.fetched.contains (m.table, m.filterOf uid)
 
-/-- 実体 `uid` について部分的な取得が答えを持っているか: 型環境のテーブルでない型(匿名・アクション等。
-    行の実体にならない)か、行の有無が分かっていてその所属行を取得済みである。 -/
+/-- Whether the partial fetch has an answer for entity `uid`: its type is not a table of the type environment
+    (anonymous, actions, etc.; these do not become row entities), or whether its row exists is known and its membership
+    rows have been fetched. -/
 def Known.knows (ts : Cedar.Validation.Schema) (mc : MembershipColumns) (k : Known) (uid : EntityUID) : Bool :=
   !(ts.ets.find? uid.ty).isSome || (k.decided uid && k.coversMemberships mc uid)
 
-/-- 部分的な取得が全体の状態 `full` と整合すること: 取得した行は `full` のその行であり、無いと分かった実体は
-    `full` にも無く、すべて取得したと記録した絞り込みについては、絞り込みに合う行が全体と集合として同じ。
-    接続層ではこれが「点検索(絞り込みでは WHERE 句つきの SELECT)の結果は DB の現在の行である」という信頼
-    (`ASSUMPTIONS.md` A4)に当たる。 -/
+/-- That the partial fetch is consistent with the whole state `full`: the fetched rows are those rows of `full`, the
+    entities known not to exist are not in `full` either, and for the filters recorded as fully fetched, the rows
+    matching the filters are the same as sets as in the whole. In the connection layer this corresponds to the trust
+    that "the results of point lookups (for filters, SELECTs with WHERE clauses) are the DB's current rows"
+    (`ASSUMPTIONS.md` A4). -/
 def Known.Consistent (k : Known) (full : Store) : Prop :=
   (∀ uid row, Map.find? k.rows uid = some row → Map.find? full uid = some row) ∧
   (∀ uid ∈ k.absent, Map.find? full uid = none) ∧
   (∀ tf ∈ k.fetched, RowsAgree k.rows full tf.1 tf.2)
 
-/-- 整合する部分的な取得は、行の有無が分かっている UID について全体と同じ `find?` を返す。 -/
+/-- A consistent partial fetch returns the same `find?` as the whole for UIDs whose row existence is known. -/
 theorem Known.find?_eq_of_decided {k : Known} {full : Store} (hc : k.Consistent full) {uid : EntityUID}
     (hd : k.decided uid = true) : Map.find? k.rows uid = Map.find? full uid := by
   simp only [Known.decided, Bool.or_eq_true, List.contains_iff_mem] at hd
@@ -587,7 +622,7 @@ theorem Known.find?_eq_of_decided {k : Known} {full : Store} (hc : k.Consistent 
     | none => rw [hnone]
     | some row => rw [hc.1 uid row hr] at hnone; cases hnone
 
-/-- 整合する部分的な取得は、答えを持つテーブルの UID について全体と同じ `find?` を返す。 -/
+/-- A consistent partial fetch returns the same `find?` as the whole for UIDs of tables it has an answer for. -/
 theorem Known.find?_eq_of_knows {ts : Cedar.Validation.Schema} {mc : MembershipColumns} {k : Known} {full : Store}
     (hc : k.Consistent full) {uid : EntityUID}
     (hk : k.knows ts mc uid = true) (htable : (ts.ets.find? uid.ty).isSome = true) :
@@ -599,7 +634,8 @@ theorem Known.find?_eq_of_knows {ts : Cedar.Validation.Schema} {mc : MembershipC
     cases htable
   · exact Known.find?_eq_of_decided hc hd
 
-/-- 整合する部分的な取得は、答えを持つテーブルの UID について、その所属行が全体と集合として同じ。 -/
+/-- For UIDs of tables a consistent partial fetch has an answer for, their membership rows are the same as sets as in
+    the whole. -/
 theorem Known.memberships_eq_of_knows {ts : Cedar.Validation.Schema} {mc : MembershipColumns} {k : Known}
     {full : Store} (hc : k.Consistent full) {uid : EntityUID}
     (hk : k.knows ts mc uid = true) (htable : (ts.ets.find? uid.ty).isSome = true) :
@@ -613,8 +649,8 @@ theorem Known.memberships_eq_of_knows {ts : Cedar.Validation.Schema} {mc : Membe
     simp only [Known.coversMemberships, List.all_eq_true, List.contains_iff_mem] at hm
     exact hc.2.2 _ (hm m hmem)
 
-/-- 閉包の検査(実行可能): 判定の実体 `es` について、要求から `level` 段で到達できる実体(cedar-lean の slicing
-    が辿る集合 `Entities.sliceAtLevel.sliceAtLevel`)がすべて `knows` を満たす。 -/
+/-- The closure check (executable): for the decision's entities `es`, every entity reachable within `level` levels from
+    the request (the set cedar-lean's slicing traverses, `Entities.sliceAtLevel.sliceAtLevel`) satisfies `knows`. -/
 def closedAt (es : Entities) (knows : EntityUID → Bool) (req : Request) (level : Nat) : Bool :=
   (Entities.sliceAtLevel.sliceAtLevel es req.sliceEUIDs level).all knows
 
@@ -625,7 +661,8 @@ private theorem filterMap_congr {α β : Type} {f g : α → Option β} :
     simp only [List.filterMap_cons, h a List.mem_cons_self]
     rw [filterMap_congr fun x hx => h x (List.mem_cons_of_mem a hx)]
 
-/-- 要求から到達できる実体の集合は、その集合の各実体で `find?` が一致する 2 つの判定の実体について等しい。 -/
+/-- The set of entities reachable from the request is equal for two sets of decision entities whose `find?` agrees on
+    each entity of that set. -/
 theorem reach_eq (e₁ e₂ : Entities) (work : Set EntityUID) :
     ∀ n, (∀ u ∈ Entities.sliceAtLevel.sliceAtLevel e₁ work n, e₁.find? u = e₂.find? u) →
       Entities.sliceAtLevel.sliceAtLevel e₁ work n = Entities.sliceAtLevel.sliceAtLevel e₂ work n
@@ -649,7 +686,8 @@ theorem reach_eq (e₁ e₂ : Entities) (work : Set EntityUID) :
     rw [← heds] at hed
     exact List.mem_mem_implies_mem_mapUnion hu hed
 
-/-- 限定した判定材料(slice)は、到達できる各実体で `find?` が一致する 2 つの判定の実体について等しい。 -/
+/-- The restricted decision materials (slice) are equal for two sets of decision entities whose `find?` agrees on each
+    reachable entity. -/
 theorem sliceAtLevel_eq (e₁ e₂ : Entities) (req : Request) (level : Nat)
     (h : ∀ u ∈ Entities.sliceAtLevel.sliceAtLevel e₁ req.sliceEUIDs level, e₁.find? u = e₂.find? u) :
     e₁.sliceAtLevel req level = e₂.sliceAtLevel req level := by
@@ -660,7 +698,7 @@ theorem sliceAtLevel_eq (e₁ e₂ : Entities) (req : Request) (level : Nat)
   intro u hu
   rw [h u (by rw [reach_eq e₁ e₂ req.sliceEUIDs level h]; exact (Set.mem_elts_iff_mem_set u _).mp hu)]
 
-/-- 閉包の検査に通れば、到達できる各実体は `knows` を満たす。 -/
+/-- If the closure check passes, every reachable entity satisfies `knows`. -/
 theorem closedAt_spec {es : Entities} {knows : EntityUID → Bool} {req : Request} {level : Nat}
     (h : closedAt es knows req level = true) :
     ∀ u ∈ Entities.sliceAtLevel.sliceAtLevel es req.sliceEUIDs level, knows u = true :=

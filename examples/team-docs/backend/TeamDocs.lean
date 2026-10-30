@@ -5,21 +5,26 @@ import TeamDocs.App
 import Nyxis.AppCheck
 
 /-!
-# TeamDocs — 2 つめの公式サンプル(team-docs)のバックエンド
+# TeamDocs — backend of the second official sample (team-docs)
 
-組織(ワークスペース)に複数の利用者が owner / editor / viewer として属し、文書を組織内で共有し、個別の利用者にも
-共有できる。文書は作成日時と更新日時を持ち、その値は nyxis が要求ごとに決める現在時刻である。
-画面は `../frontend/` の公式フロントエンド(人間のデザイン提供後に作る)が担い、このパッケージは HTTP API だけを持つ。
+Several users belong to an org (workspace) as owner / editor / viewer; documents are shared within the org and can also
+be shared with individual users. Documents have creation and update times, whose values are the current time nyxis
+determines per request. The screens are handled by the official frontend in `../frontend/` (built after a human provides
+the design); this package has only the HTTP API.
 
-- `TeamDocs.Approved` — 人間が承認する正本 `schema.cedarschema` と `policies.cedar` の宣言 `TeamDocs.Approved.sources`。
-- `TeamDocs.Handlers` — 各エンドポイントのハンドラ(`Nyxis.Handler` で書く)とルーティング `TeamDocs.router`。
-- `TeamDocs.Jobs` — 定期処理 `TeamDocs.jobs`(`Nyxis.Runtime.Job` で書く。送信済みでない通知の送信)。
-- `TeamDocs.App` — 宣言とルーティングと定期処理を組んだアプリケーション `TeamDocs.app`(`TeamDocs.schema` / `policies` は宣言の別名)。
-- 起動処理は監査済みのこのモジュールを読み込む `Main.lean` に置く。
+- `TeamDocs.Approved` — the declaration `TeamDocs.Approved.sources` of the human-approved sources `schema.cedarschema`
+  and `policies.cedar`.
+- `TeamDocs.Handlers` — the handlers for each endpoint (written with `Nyxis.Handler`) and the routing `TeamDocs.router`.
+- `TeamDocs.Jobs` — the periodic jobs `TeamDocs.jobs` (written with `Nyxis.Runtime.Job`; sending notifications not yet
+  sent).
+- `TeamDocs.App` — the application `TeamDocs.app` assembled from the declaration, routing and periodic jobs
+  (`TeamDocs.schema` / `policies` are aliases of the declaration).
+- Startup lives in `Main.lean`, which loads this audited module.
 
-アプリケーション側のコードは `TeamDocs/` の Lean ファイルで、型の外へ出る語(`scripts/check-handler-effects.sh` の grep が探す 4 語)を
-含まない。末尾の `nyxis_check_app` は、全アプリモジュールの定義と属性をビルド時に監査する。
-新しいアプリモジュールは必ずこのファイルから import し、検査の後には宣言を置かない。
+Application-side code is the Lean files under `TeamDocs/`, and it contains none of the words that escape the type (the 4
+words the grep in `scripts/check-handler-effects.sh` looks for). The trailing `nyxis_check_app` audits the definitions
+and attributes of all application modules at build time. Always import new application modules from this file, and place
+no declarations after the check.
 -/
 
 nyxis_check_app

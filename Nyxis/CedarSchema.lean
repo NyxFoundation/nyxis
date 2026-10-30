@@ -2,49 +2,57 @@ import Nyxis.Authz
 import Nyxis.CedarLex
 
 /-!
-# Nyxis.CedarSchema — Cedar スキーマ(人間可読形式)からの `Authz.Schema` の構成
+# Nyxis.CedarSchema — building `Authz.Schema` from a Cedar schema (human-readable format)
 
-`.cedarschema`(Cedar の人間可読なスキーマ形式)の文書を読み、nyxis の `Nyxis.Authz.Schema`
-(テーブルと列、アクションごとの効果の宣言)を構成する。ビルド時に `Nyxis.Build` の `nyxis_schema`
-コマンドから呼ばれ、次の文書を拒む(構成に失敗し、ビルドが失敗する):
+Reads a `.cedarschema` document (Cedar's human-readable schema format) and builds nyxis's `Nyxis.Authz.Schema` (tables
+and columns, and the effect declaration of each action). It is called at build time from the `nyxis_schema` command of
+`Nyxis.Build`, and rejects the following documents (construction fails, so the build fails):
 
-- 効果の宣言(`@effect("…")` 注釈)が無いアクション、効果が 2 つ以上あるアクション。
-- 効果が参照するテーブル(エンティティ型)がスキーマに無い、または予約型 `Anonymous` や enum 型である。
-- `update` の効果が参照する列がそのテーブルに無い、列が空、または重複している。
-- 効果の対象のテーブルが、そのアクションの `appliesTo` の `resource` に無い。
-- アクション以外(エンティティ・共通型・属性)に付けられた `@effect`。
-- 名前空間・共通型(`type`)・enum 型の宣言、アクションの `context` の宣言が nyxis の決める文脈の型と
-  一致しない文書(cedar-lean の型環境 `Authz.Schema.types` を構成できない)。
-- 文法に従わない文書。
+- An action without an effect declaration (`@effect("…")` annotation), or with two or more effects.
+- An effect whose referenced table (entity type) is not in the schema, or is the reserved type `Anonymous` or an enum
+  type.
+- An `update` effect whose referenced columns are not in that table, are empty, or are duplicated.
+- An effect whose target table is not in the `resource` of that action's `appliesTo`.
+- An `@effect` attached to something other than an action (an entity, a common type, an attribute).
+- A document with namespace, common type (`type`) or enum type declarations, or an action whose `context` declaration
+  does not match the context type nyxis determines (the cedar-lean type environment `Authz.Schema.types` cannot be
+  built).
+- A document that does not follow the grammar.
 
-効果の文法は `@effect("read T")` / `@effect("list T")` / `@effect("insert T")` /
+The effect grammar is `@effect("read T")` / `@effect("list T")` / `@effect("insert T")` /
 `@effect("update T(c1, c2, …)")` / `@effect("delete T")` / `@effect("upload T")` / `@effect("download T")` /
-`@effect("mail T(宛先列; 件名列, 本文列…)")` /
-`@effect("call <送り先> <メソッド> <パス | url: 列> T(列, …) (sync [<秒>s] -> <レコード型> | async)")`。`T` は
-エンティティ型。`list` は一覧(テーブルの各行について判定し、permit された行だけを返す)。`upload` / `download`は
-添付の署名付き URL の発行(宣言された外部効果)で、テーブル `T` に添付の列の宣言 `@attachment("列")`(String 型の列。
-添付のオブジェクトの名を保存する)が無ければ拒む。`@attachment` は 1 テーブルに 1 つ、テーブルでないエンティティには
-添えられない。`mail` はメール送信(宣言された外部効果)で、宛先の列(メールアドレス)と件名・本文の列は `T` の
-String 型(省略不可)の列でなければならず、空・重複・無い列は拒む。
-`call` は外部 API 呼び出し(宣言された外部効果)。送り先は `@external("base: https://…; auth: bearer <環境変数名> |
-header <ヘッダ名> <環境変数名> | none")` を添えた予約の仲間 `entity Stripe;`(テーブルではなく、属性・親・tags を持てず、
-`appliesTo` の主体・対象・属性の型・親にも書けない)。拒むもの(`docs/external-calls.md` §3.4): `@external` の無い型の
-名指し、`https://` でない `base`、形の違う `auth`、`{key}` 以外のプレースホルダや `?` / `#` を含むパス、`base` の無い送り先への
-固定のパス(`url: 列` で書く)と `base` のある送り先への `url: 列`、`GET` / `DELETE` の本文の列、無い列・重複・`context.values`
-と同名の列、レコード型として構成できない応答型、`async` の `->`(と `sync` の `->` の欠落)、String でない `url:` の列。
-`context.values` を宣言した `call` のアクションでは、提案値が判定の文脈と本文に入る(`EffectKind.call` の `proposes`)。
-予約型 `Service`(サービス主体)は `Anonymous` と同じくテーブルではなく、属性・親・tags を持てない。正本が
-`entity Service;` と宣言したアクションの `appliesTo` の主体にだけ書ける。
+`@effect("mail T(recipientColumn; subjectColumn, bodyColumn…)")` /
+`@effect("call <destination> <method> <path | url: column> T(column, …) (sync [<seconds>s] -> <record type> | async)")`.
+`T` is an entity type. `list` is a listing (each row of the table is judged and only the permitted rows are returned).
+`upload` / `download` issue signed URLs for an attachment (declared external effects) and are rejected unless table `T`
+has an attachment column declaration `@attachment("column")` (a String column that stores the name of the attached
+object). `@attachment` is at most one per table and cannot be attached to an entity that is not a table. `mail` sends
+mail (a declared external effect); the recipient column (an email address) and the subject and body columns must be
+String (required) columns of `T`, and empty, duplicated or missing columns are rejected. `call` is an external API call
+(a declared external effect). The destination is a reserved-style `entity Stripe;` carrying
+`@external("base: https://…; auth: bearer <ENV_VAR_NAME> | header <header-name> <ENV_VAR_NAME> | none")` (not a table;
+it cannot have attributes, parents or tags, and cannot appear as a principal, resource, attribute type or parent in
+`appliesTo`). Rejected (`docs/external-calls.md` §3.4): naming a type without `@external`, a `base` that is not
+`https://`, a malformed `auth`, a path containing placeholders other than `{key}` or `?` / `#`, a fixed path for a
+destination without `base` (use `url: column`) and `url: column` for a destination with `base`, body columns for `GET` /
+`DELETE`, missing or duplicated columns or columns named like a `context.values` attribute, a response type that cannot
+be built as a record type, `->` with `async` (and a missing `->` with `sync`), and a non-String `url:` column. For a
+`call` action that declares `context.values`, the proposed values go into the decision context and the body (`proposes`
+of `EffectKind.call`). The reserved type `Service` (the service principal) is, like `Anonymous`, not a table and cannot
+have attributes, parents or tags. It may be written only as a principal in `appliesTo` of actions in a source schema
+that declares `entity Service;`.
 
-解析する文法は Cedar の人間可読スキーマ(`namespace`、`entity`(`in`・`=`・`tags`・`enum`)、
-`action`(`in`・`appliesTo`)、`type`、注釈、`//` と `/* */` のコメント)。字句規則(識別子・空白・文字列の
-エスケープ)はポリシー形式と共通(`Nyxis.CedarLex`)。Cedar 自身によるスキーマの検証は
-`cedar validate` で別に行い、ここでは nyxis が必要とする構造と効果の宣言を検査する。
+The parsed grammar is Cedar's human-readable schema (`namespace`, `entity` (`in`, `=`, `tags`, `enum`), `action` (`in`,
+`appliesTo`), `type`, annotations, `//` comments). Cedar's schema format has no block comments `/* */`; they are
+rejected, as in the policy format. The lexical rules (identifiers, whitespace, string escapes) are shared with the
+policy format (`Nyxis.CedarLex`). Cedar's own validation of the schema is done separately with `cedar validate`; here
+nyxis checks the structure and effect declarations it needs.
 
-cedar-lean の `Cedar.Validation.Schema` は注釈を持たないので、解析は nyxis が行い、同じ文書から型環境
-(属性の型・`appliesTo`・祖先・文脈の型)を構成して `Authz.Schema.types` に置く(判定材料の限定の前提検査に使う。
-`Nyxis.Materials`)。この構成コードは証明の対象ではなく、`Test/Schema.lean` と `Test/Smoke.lean` の検査で
-振る舞いを確かめる(`ASSUMPTIONS.md` の A6)。
+cedar-lean's `Cedar.Validation.Schema` has no annotations, so nyxis does the parsing and builds the type environment
+(attribute types, `appliesTo`, ancestors, context types) from the same document, storing it in `Authz.Schema.types`
+(used by the precondition check for restricting decision materials; `Nyxis.Materials`). This construction code is not
+covered by proofs; its behavior is checked by the tests in `Test/Schema.lean` and `Test/Smoke.lean` (A6 in
+`ASSUMPTIONS.md`).
 -/
 
 namespace Nyxis.CedarSchema
@@ -53,36 +61,26 @@ open Cedar.Spec
 open Nyxis.Db
 open Nyxis.CedarLex
 
-/-! ## 字句解析 -/
+/-! ## Lexing -/
 
-/-- 1 文字の記号。`::` は別に扱う。 -/
+/-- Single-character symbols. `::` is handled separately. -/
 def symbolChars : List Char := ['{', '}', '[', ']', '(', ')', ',', ';', ':', '?', '=', '@', '<', '>']
 
-/-- ブロックコメントの終わり `*/` まで読み飛ばす。残りと、その位置(行・列)。閉じていなければ `none`。 -/
-def skipBlock : List Char → Nat → Nat → Option (List Char × Nat × Nat)
-  | '*' :: '/' :: rest, line, col => some (rest, line, col + 2)
-  | '\n' :: rest, line, _ => skipBlock rest (line + 1) 1
-  | _ :: rest, line, col => skipBlock rest line (col + 1)
-  | [], _, _ => none
-
-/-- 字句解析の本体。燃料は残りの文字数(1 歩ごとに 1 文字以上読む)。 -/
+/-- The lexer proper. Fuel is the remaining character count (each step reads at least one character). -/
 def tokenizeAux : Nat → List Char → Nat → Nat → Array Tok → Except CedarLex.Error (Array Tok)
-  | 0, _, line, col, _ => .error ⟨⟨line, col⟩, "内部エラー: 字句解析の燃料切れ"⟩
+  | 0, _, line, col, _ => .error ⟨⟨line, col⟩, "internal error: lexer ran out of fuel"⟩
   | fuel + 1, cs, line, col, acc =>
     match cs with
     | [] => .ok acc
     | '\n' :: rest => tokenizeAux fuel rest (line + 1) 1 acc
     | '/' :: '/' :: rest => tokenizeAux fuel (rest.dropWhile (fun c => c != '\n' && c != '\r')) line col acc
-    | '/' :: '*' :: rest =>
-      match skipBlock rest line (col + 2) with
-      | some (rest', line', col') => tokenizeAux fuel rest' line' col' acc
-      | none => .error ⟨⟨line, col⟩, "閉じられていないブロックコメント"⟩
+    | '/' :: '*' :: _ => .error ⟨⟨line, col⟩, "the schema format has no block comments /* */ (use //)"⟩
     | '"' :: rest =>
       match readRaw ⟨line, col⟩ (rest.length + 1) rest line (col + 1) [] with
       | .ok (raw, rest', line', col') =>
         match unescape raw with
         | .ok s => tokenizeAux fuel rest' line' col' (acc.push ⟨.str s, ⟨line, col⟩⟩)
-        | .error msg => .error ⟨⟨line, col⟩, s!"文字列リテラルのエスケープ: {msg}"⟩
+        | .error msg => .error ⟨⟨line, col⟩, s!"string literal escape: {msg}"⟩
       | .error e => .error e
     | ':' :: ':' :: rest => tokenizeAux fuel rest line (col + 2) (acc.push ⟨.sym "::", ⟨line, col⟩⟩)
     | c :: rest =>
@@ -93,43 +91,44 @@ def tokenizeAux : Nat → List Char → Nat → Nat → Array Tok → Except Ced
         tokenizeAux fuel r line (col + s.length) (acc.push ⟨.ident s, ⟨line, col⟩⟩)
       else if symbolChars.contains c then
         tokenizeAux fuel rest line (col + 1) (acc.push ⟨.sym c.toString, ⟨line, col⟩⟩)
-      else .error ⟨⟨line, col⟩, s!"予期しない文字 '{c}'"⟩
+      else .error ⟨⟨line, col⟩, s!"unexpected character '{c}'"⟩
 
-/-- 文書を字句の列にする。 -/
+/-- Turns a document into a token sequence. -/
 def tokenize (s : String) : Except CedarLex.Error (Array Tok) :=
   let cs := s.toList
   tokenizeAux (cs.length + 1) cs 1 1 #[]
 
-/-! ## 構文木 -/
+/-! ## Syntax tree -/
 
-/-- 注釈 `@key("value")`。値の無い `@key` は空文字列。 -/
+/-- An annotation `@key("value")`. A `@key` without a value has the empty string. -/
 structure Annotation where
   key : String
   value : String
   pos : Pos
   deriving Repr, Inhabited
 
-/-- 型。パス(エンティティ型・共通型・プリミティブ)、集合、レコード(属性は 名前・省略可か・型)。 -/
+/-- A type: a path (entity type, common type, primitive), a set, or a record (attributes are name, whether optional,
+    type). -/
 inductive Ty where
   | path (p : List String)
   | set (elem : Ty)
   | record (attrs : List (String × Bool × Ty))
   deriving Repr, Inhabited
 
-/-- `entity` 宣言。 -/
+/-- An `entity` declaration. -/
 structure Entity where
   annotations : List Annotation
   names : List String
   parents : List (List String)
-  /-- `= Type`(`=` は省略可)。無ければ `none`。 -/
+  /-- `= Type` (the `=` is optional). `none` if absent. -/
   shape : Option Ty
   tags : Option Ty
-  /-- `enum ["a", "b"]` の選択肢。enum でなければ `none`。 -/
+  /-- The choices of `enum ["a", "b"]`. `none` if not an enum. -/
   enum : Option (List String)
   pos : Pos
   deriving Repr, Inhabited
 
-/-- `action` 宣言。 -/
+/-- An `action` declaration. -/
 structure Action where
   annotations : List Annotation
   names : List String
@@ -140,7 +139,7 @@ structure Action where
   pos : Pos
   deriving Repr, Inhabited
 
-/-- `type` 宣言(共通型)。 -/
+/-- A `type` declaration (common type). -/
 structure TypeAlias where
   annotations : List Annotation
   name : String
@@ -154,7 +153,7 @@ inductive Decl where
   | typeAlias (t : TypeAlias)
   deriving Repr, Inhabited
 
-/-- 名前空間とその宣言。最上位の宣言は空のパスの名前空間に入る。 -/
+/-- A namespace and its declarations. Top-level declarations go into the namespace with the empty path. -/
 structure Namespace where
   path : List String
   decls : List Decl
@@ -162,32 +161,32 @@ structure Namespace where
 
 abbrev Document := List Namespace
 
-/-! ## 構文解析 -/
+/-! ## Parsing -/
 
 def expectStr : P String := do
   match ← cur with
   | some ⟨.str s, _⟩ => advance; return s
-  | _ => failUnexpected "文字列"
+  | _ => failUnexpected "a string"
 
-/-- 名前(識別子または文字列)。 -/
+/-- A name (identifier or string). -/
 def expectName : P String := do
   match ← cur with
   | some ⟨.ident s, _⟩ | some ⟨.str s, _⟩ => advance; return s
-  | _ => failUnexpected "名前(識別子または文字列)"
+  | _ => failUnexpected "a name (identifier or string)"
 
-/-- `,` 区切りの 1 つ以上の並び。 -/
+/-- One or more items separated by `,`. -/
 def sepByComma (item : P α) : P (List α) := do
   let first ← item
   let rest ← manyWhile (atSym ",") (do advance; item)
   return first :: rest
 
-/-- パス `A::B::C`。 -/
+/-- A path `A::B::C`. -/
 def parsePath : P (List String) := do
   let first ← expectIdent
   let rest ← manyWhile (atSym "::") (do advance; expectIdent)
   return first :: rest
 
-/-- 注釈の並び `@key("value")` / `@key`。 -/
+/-- A sequence of annotations `@key("value")` / `@key`. -/
 def parseAnnotations : P (List Annotation) :=
   manyWhile (atSym "@") do
     let pos ← curPos
@@ -201,22 +200,22 @@ def parseAnnotations : P (List Annotation) :=
       else pure ""
     return ⟨key, value, pos⟩
 
-/-- 型。`{ … }` のレコード、`Set<…>`、またはパス。燃料は字句の数。 -/
+/-- A type: a `{ … }` record, `Set<…>`, or a path. Fuel is the number of tokens. -/
 def parseType : Nat → P Ty
-  | 0 => fail "内部エラー: 型の構文解析の燃料切れ"
+  | 0 => fail "internal error: type parser ran out of fuel"
   | fuel + 1 => do
     if ← atSym "{" then
       advance
       let attrs ← manyWhile (do return !(← atSym "}")) do
         let annots ← parseAnnotations
         if let some a := annots.find? (·.key == "effect") then
-          throw ⟨a.pos, "@effect はアクションにだけ添える(属性に付いている)"⟩
+          throw ⟨a.pos, "@effect may be attached only to actions (found on an attribute)"⟩
         let name ← expectName
         let optional ← if ← atSym "?" then advance; pure true else pure false
         expectSym ":"
         let ty ← parseType fuel
         if ← atSym "," then advance
-        else unless ← atSym "}" do failUnexpected "',' または '}'"
+        else unless ← atSym "}" do failUnexpected "',' or '}'"
         return (name, optional, ty)
       expectSym "}"
       return .record attrs
@@ -231,7 +230,7 @@ def parseType : Nat → P Ty
 
 def parseTypeTop : P Ty := do parseType ((← get).toks.size + 1)
 
-/-- エンティティ型の並び。`T` または `[T1, T2, …]`(空も可)。 -/
+/-- A list of entity types: `T` or `[T1, T2, …]` (may be empty). -/
 def parseTypeList : P (List (List String)) := do
   if ← atSym "[" then
     advance
@@ -243,7 +242,7 @@ def parseTypeList : P (List (List String)) := do
     return tys
   else return [← parsePath]
 
-/-- 修飾されうる名前。`"name"`、`name`、`NS::Action::"name"`、`NS::name`。パスと名前。 -/
+/-- A possibly qualified name: `"name"`, `name`, `NS::Action::"name"`, `NS::name`. Returns the path and the name. -/
 def parseQualName : P (List String × String) := do
   match ← cur with
   | some ⟨.str s, _⟩ => advance; return ([], s)
@@ -252,18 +251,18 @@ def parseQualName : P (List String × String) := do
     go ((← get).toks.size + 1) [first]
 where
   go : Nat → List String → P (List String × String)
-    | 0, _ => fail "内部エラー: 構文解析の燃料切れ"
+    | 0, _ => fail "internal error: parser ran out of fuel"
     | fuel + 1, acc => do
       if ← atSym "::" then
         advance
         match ← cur with
         | some ⟨.ident s, _⟩ => advance; go fuel (s :: acc)
         | some ⟨.str s, _⟩ => advance; return (acc.reverse, s)
-        | _ => failUnexpected "識別子または文字列"
+        | _ => failUnexpected "an identifier or a string"
       else
         match acc with
         | name :: path => return (path.reverse, name)
-        | [] => fail "内部エラー: 空の名前"
+        | [] => fail "internal error: empty name"
 
 def parseQualNameList : P (List (List String × String)) := do
   if ← atSym "[" then
@@ -276,7 +275,7 @@ def parseQualNameList : P (List (List String × String)) := do
     return ns
   else return [← parseQualName]
 
-/-- `entity` 宣言(`entity` は読まれた後)。 -/
+/-- An `entity` declaration (after `entity` has been read). -/
 def parseEntity (annotations : List Annotation) (pos : Pos) : P Entity := do
   let names ← sepByComma expectIdent
   if ← atIdent "enum" then
@@ -301,7 +300,7 @@ inductive AppDecl where
   | resource (tys : List (List String))
   | context (ty : Ty)
 
-/-- `action` 宣言(`action` は読まれた後)。 -/
+/-- An `action` declaration (after `action` has been read). -/
 def parseAction (annotations : List Annotation) (pos : Pos) : P Action := do
   let names ← sepByComma expectName
   let parents ← if ← atIdent "in" then advance; parseQualNameList else pure []
@@ -319,26 +318,26 @@ def parseAction (annotations : List Annotation) (pos : Pos) : P Action := do
         | "principal" => AppDecl.principal <$> parseTypeList
         | "resource" => AppDecl.resource <$> parseTypeList
         | "context" => AppDecl.context <$> parseTypeTop
-        | other => throw ⟨keyPos, s!"appliesTo の中で予期しないキー {other}(principal / resource / context)"⟩
+        | other => throw ⟨keyPos, s!"unexpected key {other} in appliesTo (principal / resource / context)"⟩
       if ← atSym "," then advance
-      else unless ← atSym "}" do failUnexpected "',' または '}'"
+      else unless ← atSym "}" do failUnexpected "',' or '}'"
       return (keyPos, d)
     expectSym "}"
     for (keyPos, d) in decls do
       match d with
       | .principal tys =>
-        if principals.isSome then throw ⟨keyPos, "appliesTo に principal が 2 回ある"⟩
+        if principals.isSome then throw ⟨keyPos, "appliesTo has principal twice"⟩
         principals := some tys
       | .resource tys =>
-        if resources.isSome then throw ⟨keyPos, "appliesTo に resource が 2 回ある"⟩
+        if resources.isSome then throw ⟨keyPos, "appliesTo has resource twice"⟩
         resources := some tys
       | .context ty =>
-        if context.isSome then throw ⟨keyPos, "appliesTo に context が 2 回ある"⟩
+        if context.isSome then throw ⟨keyPos, "appliesTo has context twice"⟩
         context := some ty
   expectSym ";"
   return { annotations, names, parents, principals, resources, context, pos }
 
-/-- `type` 宣言(`type` は読まれた後)。 -/
+/-- A `type` declaration (after `type` has been read). -/
 def parseTypeAlias (annotations : List Annotation) (pos : Pos) : P TypeAlias := do
   let name ← expectIdent
   expectSym "="
@@ -346,7 +345,7 @@ def parseTypeAlias (annotations : List Annotation) (pos : Pos) : P TypeAlias := 
   expectSym ";"
   return { annotations, name, ty, pos }
 
-/-- 1 つの宣言(注釈は読まれた後)。 -/
+/-- One declaration (after its annotations have been read). -/
 def parseDecl (annotations : List Annotation) (pos : Pos) : P Decl := do
   match ← cur with
   | some ⟨.ident "entity", _⟩ => advance; Decl.entity <$> parseEntity annotations pos
@@ -354,22 +353,23 @@ def parseDecl (annotations : List Annotation) (pos : Pos) : P Decl := do
   | some ⟨.ident "type", _⟩ => advance; Decl.typeAlias <$> parseTypeAlias annotations pos
   | _ => failUnexpected "entity / action / type"
 
-/-- 名前空間の中の宣言の並び(`}` の手前まで)。 -/
+/-- The declarations inside a namespace (up to just before `}`). -/
 def parseNamespaceBody : P (List Decl) :=
   manyWhile (do return !(← atSym "}")) do
     let pos ← curPos
     let annotations ← parseAnnotations
     parseDecl annotations pos
 
-/-- 文書全体。`namespace` ブロックと最上位の宣言(最上位の宣言はそれぞれ空のパスの名前空間として並べる。
-    名前空間自体の注釈は効果ではないので読み飛ばし、`@effect` は拒む)。 -/
+/-- The whole document: `namespace` blocks and top-level declarations (each top-level declaration is listed as a
+    namespace with the empty path. Annotations on a namespace itself are not effects, so they are skipped, and `@effect`
+    is rejected). -/
 def parseDocument : P Document :=
   manyWhile (do return !(← atEnd)) do
     let pos ← curPos
     let annotations ← parseAnnotations
     if ← atIdent "namespace" then
       if let some a := annotations.find? (·.key == "effect") then
-        throw ⟨a.pos, "@effect はアクションにだけ添える(namespace に付いている)"⟩
+        throw ⟨a.pos, "@effect may be attached only to actions (found on a namespace)"⟩
       advance
       let path ← parsePath
       expectSym "{"
@@ -380,14 +380,14 @@ def parseDocument : P Document :=
       let d ← parseDecl annotations pos
       return ⟨[], [d]⟩
 
-/-- 文書を構文解析する。 -/
+/-- Parses a document. -/
 def parseDocumentString (s : String) : Except CedarLex.Error Document := do
-  runToEnd parseDocument (← tokenize s) s "文書"
+  runToEnd parseDocument (← tokenize s) s "document"
 
-/-! ## 効果の宣言 -/
+/-! ## Effect declarations -/
 
-/-- `call` の効果の宣言(解析済み)。送り先の名前、メソッド、固定のパス(`path`)か `url: 列`(`urlColumn`)、実行時機
-    (`sync` / `async`)、`sync` の上限の上書き(秒)と応答の型。 -/
+/-- A `call` effect declaration (parsed): the destination name, the method, a fixed path (`path`) or `url: column`
+    (`urlColumn`), the timing (`sync` / `async`), the overridden `sync` limit (seconds), and the response type. -/
 structure CallSpec where
   destination : String
   method : String
@@ -398,8 +398,8 @@ structure CallSpec where
   response : Option Ty := none
   deriving Repr, Inhabited
 
-/-- `@effect("…")` の中身。種類、テーブルのパス、`update` の列(`mail` では内容の列、`call` では本文の列)、`mail` の宛先の列
-    (`target`)、`call` の宣言(`call`)。 -/
+/-- The contents of `@effect("…")`: the kind, the table path, the `update` columns (the content columns for `mail`, the
+    body columns for `call`), the `mail` recipient column (`target`), and the `call` declaration (`call`). -/
 structure EffectSpec where
   kind : String
   table : List String
@@ -410,86 +410,87 @@ structure EffectSpec where
 
 def effectKinds : List String := ["read", "list", "insert", "update", "delete", "upload", "download", "mail", "call"]
 
-/-- 空白で区切った語(空の語は除く)。 -/
+/-- Whitespace-separated words (empty words dropped). -/
 def wordsOf (s : String) : List String :=
   (((s.replace "\t" " ").replace "\n" " ").splitOn " ").filter (· != "")
 
-/-- 前後の空白を除く。 -/
+/-- Strips leading and trailing whitespace. -/
 def trimmed (s : String) : String := s.trimAscii.toString
 
-/-- 列の名前(引用符つきでもよい)。 -/
+/-- A column name (may be quoted). -/
 def columnName (s : String) : String :=
   let t := trimmed s
   if t.length ≥ 2 && t.startsWith "\"" && t.endsWith "\"" then ((t.drop 1).toString.dropEnd 1).toString else t
 
-/-- `call` のパスの埋め込みは `{key}` だけか(`{` はすべて `{key}` の始まりで、他に `}` は無い)。 -/
+/-- Whether the only placeholder in a `call` path is `{key}` (every `{` starts a `{key}` and there is no other `}`). -/
 def placeholdersOk (path : String) : Bool :=
   match path.splitOn "{" with
   | [] => true
   | first :: rest => !first.contains '}' && rest.all fun part => part.startsWith "key}" && !(part.drop 4).toString.contains '}'
 
-/-- `call` の固定のパスとして使える文字列か: `/` で始まる印字可能な ASCII で、`?`・`#`・`"`・`\`・空白を含まず
-    (〜2048 文字)、埋め込みは `{key}` だけ。 -/
+/-- Whether a string can be used as a fixed `call` path: printable ASCII starting with `/`, without `?`, `#`, `"`, `\`
+    or whitespace (up to 2048 characters), whose only placeholder is `{key}`. -/
 def validCallPath (path : String) : Bool :=
   path.startsWith "/" && path.length ≤ 2048 &&
     path.toList.all (fun c => 33 ≤ c.toNat && c.toNat ≤ 126 && c != '?' && c != '#' && c != '"' && c != '\\') &&
     placeholdersOk path
 
-/-- `call <送り先> <メソッド> <パス | url: 列> <T>(<列>, …) (sync [<秒>s] -> <レコード型> | async)` を解析する。
-    文字列の形で読む(パスには字句解析器が扱わない `/` や `{` が入る)。 -/
+/-- Parses
+    `call <destination> <method> <path | url: column> <T>(<column>, …) (sync [<seconds>s] -> <record type> | async)`. It
+    is read as a string (the path contains `/` and `{`, which the lexer does not handle). -/
 def parseCallEffect (text : String) (pos : Pos) : Except CedarLex.Error EffectSpec := do
-  let form := "call <送り先> <GET|POST|PUT|PATCH|DELETE> <パス | url: 列> <T>(<列>, …) (sync [<秒>s] -> <レコード型> | async)"
-  let err {α} (msg : String) : Except CedarLex.Error α := .error ⟨pos, s!"@effect(\"{text}\") の文法: {msg}"⟩
+  let form := "call <destination> <GET|POST|PUT|PATCH|DELETE> <path | url: column> <T>(<column>, …) (sync [<seconds>s] -> <record type> | async)"
+  let err {α} (msg : String) : Except CedarLex.Error α := .error ⟨pos, s!"@effect(\"{text}\") syntax: {msg}"⟩
   let (head, responseText) ← match text.splitOn "->" with
     | [h] => pure (h, none)
     | [h, t] => pure (h, some t)
-    | _ => err s!"-> は 1 つだけ({form})"
-  let [before, afterOpen] := head.splitOn "(" | err s!"T(列, …) の括弧は 1 組({form})"
-  let [inside, tail] := afterOpen.splitOn ")" | err s!"T(列, …) の括弧は 1 組({form})"
+    | _ => err s!"only one -> is allowed ({form})"
+  let [before, afterOpen] := head.splitOn "(" | err s!"T(column, …) must have exactly one pair of parentheses ({form})"
+  let [inside, tail] := afterOpen.splitOn ")" | err s!"T(column, …) must have exactly one pair of parentheses ({form})"
   let columns ← if (trimmed inside).isEmpty then pure [] else
     let names := (inside.splitOn ",").map columnName
-    if names.any (· == "") then err "本文の列に空の名前がある" else pure names
+    if names.any (· == "") then err "a body column has an empty name" else pure names
   let (destination, method, path, urlColumn, table) ← match wordsOf before with
     | ["call", dest, method, "url:", col, table] => pure (dest, method, none, some (columnName col), table)
     | ["call", dest, method, spec, table] =>
       if spec.startsWith "url:" then pure (dest, method, none, some (columnName (spec.drop 4).toString), table)
       else
         unless validCallPath spec do
-          err s!"パス {spec} は / で始まる印字可能な ASCII で、? と # を含まず、埋め込みは {"{key}"} だけでなければならない"
+          err s!"path {spec} must be printable ASCII starting with /, must not contain ? or #, and its only placeholder may be {"{key}"}"
         pure (dest, method, some spec, none, table)
     | _ => err form
   unless ["GET", "POST", "PUT", "PATCH", "DELETE"].contains method do
-    err s!"メソッド {method} は無い(GET / POST / PUT / PATCH / DELETE)"
+    err s!"unknown method {method} (GET / POST / PUT / PATCH / DELETE)"
   let (mode, timeout) ← match wordsOf tail with
     | ["sync"] => pure ("sync", none)
     | ["sync", secs] =>
       if secs.endsWith "s" then
         match (secs.dropEnd 1).toString.toNat? with
-        | some n => if n > 0 then pure ("sync", some n) else err "sync の上限は 1 秒以上"
-        | none => err s!"sync の上限 {secs} は <秒>s の形でなければならない"
-      else err s!"sync の上限 {secs} は <秒>s の形でなければならない"
+        | some n => if n > 0 then pure ("sync", some n) else err "the sync limit must be at least 1 second"
+        | none => err s!"the sync limit {secs} must have the form <seconds>s"
+      else err s!"the sync limit {secs} must have the form <seconds>s"
     | ["async"] => pure ("async", none)
-    | _ => err s!"T(列, …) の後は sync [<秒>s] か async({form})"
+    | _ => err s!"T(column, …) must be followed by sync [<seconds>s] or async ({form})"
   let response ← match responseText with
     | none => pure none
     | some t =>
-      match runToEnd parseTypeTop (← (tokenize t).mapError fun e => ⟨pos, s!"@effect(\"{text}\") の文法: 応答の型: {e.msg}"⟩)
-          t "応答の型" with
+      match runToEnd parseTypeTop (← (tokenize t).mapError fun e => ⟨pos, s!"@effect(\"{text}\") syntax: response type: {e.msg}"⟩)
+          t "response type" with
       | .ok ty => pure (some ty)
-      | .error e => err s!"応答の型: {e.msg}"
-  if mode == "async" && response.isSome then err "async に -> <応答の型> は書けない(応答は捨てる)"
-  if mode == "sync" && response.isNone then err "sync には -> <レコード型> で応答の型を書く"
+      | .error e => err s!"response type: {e.msg}"
+  if mode == "async" && response.isSome then err "async cannot have -> <response type> (the response is discarded)"
+  if mode == "sync" && response.isNone then err "sync requires a response type written as -> <record type>"
   return { kind := "call", table := table.splitOn "::", columns,
            call := some { destination, method, path, urlColumn, mode, timeout, response } }
 
-/-- 効果の文字列 `read T` / `list T` / `insert T` / `update T(c1, c2, …)` / `delete T` / `upload T` / `download T` /
-    `mail T(宛先列; 件名列, 本文列…)` / `call …` を解析する。 -/
+/-- Parses an effect string `read T` / `list T` / `insert T` / `update T(c1, c2, …)` / `delete T` / `upload T` /
+    `download T` / `mail T(recipientColumn; subjectColumn, bodyColumn…)` / `call …`. -/
 def parseEffectText (text : String) (pos : Pos) : Except CedarLex.Error EffectSpec :=
   if (wordsOf text).head? == some "call" then parseCallEffect text pos else
   let body : P EffectSpec := do
     let kind ← expectIdent
     unless effectKinds.contains kind do
-      fail s!"効果の種類 {kind} は無い(read / list / insert / update / delete / upload / download / mail / call)"
+      fail s!"unknown effect kind {kind} (read / list / insert / update / delete / upload / download / mail / call)"
     let table ← parsePath
     let (target, columns) ← if kind == "update" then
         expectSym "("
@@ -504,17 +505,19 @@ def parseEffectText (text : String) (pos : Pos) : Except CedarLex.Error EffectSp
         expectSym ")"
         pure (some target, cols)
       else pure (none, [])
-    unless ← atEnd do failUnexpected "効果の終わり"
+    unless ← atEnd do failUnexpected "the end of the effect"
     return { kind, table, columns, target }
   match (do let (spec, _) ← body.run ⟨← tokenize text, 0, endPos text⟩; pure spec : Except CedarLex.Error EffectSpec) with
   | .ok spec => .ok spec
-  | .error e => .error ⟨pos, s!"@effect(\"{text}\") の文法: {e.msg}"⟩
+  | .error e => .error ⟨pos, s!"@effect(\"{text}\") syntax: {e.msg}"⟩
 
-/-- `@external("base: https://…; auth: bearer <環境変数名> | header <ヘッダ名> <環境変数名> | none")` の中身を解析する。
-    `base` は省略できる(`url: 列` の送り先)。`auth` は必須。環境変数名は英大文字・数字・`_`(先頭は英大文字)。 -/
+/-- Parses the contents of
+    `@external("base: https://…; auth: bearer <ENV_VAR_NAME> | header <header-name> <ENV_VAR_NAME> | none")`. `base` may
+    be omitted (a destination addressed by `url: column`). `auth` is required. Environment variable names consist of
+    uppercase ASCII letters, digits and `_` (starting with an uppercase letter). -/
 def parseExternal (value : String) (pos : Pos) : Except CedarLex.Error Destination := do
-  let form := "@external(\"base: https://…; auth: bearer <環境変数名> | header <ヘッダ名> <環境変数名> | none\")"
-  let err {α} (msg : String) : Except CedarLex.Error α := .error ⟨pos, s!"@external の文法: {msg}({form})"⟩
+  let form := "@external(\"base: https://…; auth: bearer <ENV_VAR_NAME> | header <header-name> <ENV_VAR_NAME> | none\")"
+  let err {α} (msg : String) : Except CedarLex.Error α := .error ⟨pos, s!"@external syntax: {msg} ({form})"⟩
   let validEnv (env : String) : Bool :=
     env.length > 0 && env.length ≤ 128 && (env.toList.head?.map Char.isUpper).getD false &&
       env.toList.all fun c => c.toNat < 128 && (c.isUpper || c.isDigit || c == '_')
@@ -531,86 +534,89 @@ def parseExternal (value : String) (pos : Pos) : Except CedarLex.Error Destinati
       | [] => ("", "")
     match key with
     | "base" =>
-      if base.isSome then err "base が 2 つある"
-      unless isHttpsUrl v do err s!"base {v} は https:// で始まる URL でなければならない"
-      base := some (if v.endsWith "/" then (v.dropEnd 1).toString else v)
+      if base.isSome then err "base appears twice"
+      unless isHttpsUrl v do err s!"base {v} must be a URL starting with https://"
+      base := some (v.dropEndWhile (· == '/')).toString
     | "auth" =>
-      if auth.isSome then err "auth が 2 つある"
+      if auth.isSome then err "auth appears twice"
       match wordsOf v with
       | ["none"] => auth := some .none
       | ["bearer", env] =>
-        unless validEnv env do err s!"環境変数名 {env} は英大文字で始まり英大文字・数字・_ だけ"
+        unless validEnv env do err s!"environment variable name {env} must start with an uppercase letter and contain only uppercase letters, digits and _"
         auth := some (.bearer env)
       | ["header", name, env] =>
-        unless validHeaderName name do err s!"ヘッダ名 {name} は英数字と - だけ"
-        unless validEnv env do err s!"環境変数名 {env} は英大文字で始まり英大文字・数字・_ だけ"
+        unless validHeaderName name do err s!"header name {name} must contain only alphanumerics and -"
+        unless validEnv env do err s!"environment variable name {env} must start with an uppercase letter and contain only uppercase letters, digits and _"
         auth := some (.header name env)
-      | _ => err s!"auth {v} は bearer <環境変数名> / header <ヘッダ名> <環境変数名> / none のどれか"
-    | other => err s!"キー {other} は無い(base / auth)"
-  let some a := auth | err "auth を書く"
+      | _ => err s!"auth {v} must be one of bearer <ENV_VAR_NAME> / header <header-name> <ENV_VAR_NAME> / none"
+    | other => err s!"unknown key {other} (base / auth)"
+  let some a := auth | err "auth is required"
   return { base, auth := a }
 
-/-! ## 構成と検査 -/
+/-! ## Construction and checks -/
 
-/-- テーブル(エンティティ型)とその列、添付の列(`@attachment("列")`)。 -/
+/-- A table (entity type), its columns, and its attachment column (`@attachment("column")`). -/
 structure TableInfo where
   ty : EntityType
   columns : List Column
   pos : Pos
   attachment : Option Column := none
 
-/-- `@attachment("列")`(添付の列): エンティティに添えられた注釈から列の名前を読む。無ければ `none`。
-    2 つ以上・空の名前は拒む。 -/
+/-- `@attachment("column")` (attachment column): reads the column name from the annotation on the entity. `none` if
+    absent. Rejects two or more annotations and an empty name. -/
 def attachmentColumnOf (e : Entity) : Except CedarLex.Error (Option (String × Pos)) := do
   match e.annotations.filter (·.key == "attachment") with
   | [] => return none
   | [a] =>
     let col := a.value.trimAscii.toString
-    if col.isEmpty then throw ⟨a.pos, "@attachment には添付のオブジェクトの名を保存する列の名前を 1 つ書く"⟩
+    if col.isEmpty then throw ⟨a.pos, "@attachment must name one column that stores the name of the attached object"⟩
     return some (col, a.pos)
-  | _ :: second :: _ => throw ⟨second.pos, "@attachment が 2 つ以上ある(1 エンティティに 1 つ)"⟩
+  | _ :: second :: _ => throw ⟨second.pos, "more than one @attachment (one per entity)"⟩
 
-/-- 構成の文脈。テーブル、テーブルでないエンティティ型(とその理由)、共通型、名前付きの送り先(`@external`)。 -/
+/-- The construction context: tables, entity types that are not tables (with the reason), common types, and named
+    destinations (`@external`). -/
 structure Ctx where
   tables : List TableInfo := []
   nonTables : List (EntityType × String) := []
   commons : List ((List String × String) × Ty) := []
   destinations : List (String × Destination × Pos) := []
 
-/-- 名前付きの送り先の名前か。 -/
+/-- Whether `ty` is the name of a named destination. -/
 def Ctx.isDestination (ctx : Ctx) (ty : EntityType) : Bool :=
   ty.path.isEmpty && ctx.destinations.any (·.1 == ty.id)
 
-/-- 名前空間 `ns` の中でのパスの解決。修飾の無い名前は同じ名前空間、修飾された名前は絶対。 -/
+/-- Resolves a path inside namespace `ns`. An unqualified name is in the same namespace; a qualified name is absolute.
+    -/
 def resolveType (ns : List String) : List String → EntityType
   | [n] => ⟨n, ns⟩
   | p => ⟨p.getLastD "", p.dropLast⟩
 
 def showType (t : EntityType) : String := toString t
 
-/-- 予約型 `Anonymous`(最上位)か。 -/
+/-- Whether this is the reserved type `Anonymous` (top level). -/
 def isReservedAnonymous (ns : List String) (name : String) : Bool :=
   ns.isEmpty && name == "Anonymous"
 
-/-- 予約型 `Service`(サービス主体。最上位)か。 -/
+/-- Whether this is the reserved type `Service` (the service principal; top level). -/
 def isReservedService (ns : List String) (name : String) : Bool :=
   ns.isEmpty && name == "Service"
 
-/-- 予約型(`Anonymous` / `Service`)か。どちらもテーブルではなく、属性・親・tags を持てない。 -/
+/-- Whether this is a reserved type (`Anonymous` / `Service`). Neither is a table, and neither can have attributes,
+    parents or tags. -/
 def isReserved (ns : List String) (name : String) : Bool :=
   isReservedAnonymous ns name || isReservedService ns name
 
-/-- 予約型の説明。 -/
+/-- A description of a reserved type. -/
 def reservedLabel (name : String) : String :=
-  if name == "Service" then "予約型 Service(サービス主体)" else "予約型 Anonymous(匿名の主体)"
+  if name == "Service" then "reserved type Service (the service principal)" else "reserved type Anonymous (the anonymous principal)"
 
-/-- エンティティの形から列(属性名)を得る。レコードか、レコードの共通型でなければならない。 -/
+/-- Gets the columns (attribute names) from an entity's shape. It must be a record or a common type that is a record. -/
 def columnsOfShape (ctx : Ctx) (ns : List String) (pos : Pos) : Option Ty → Except CedarLex.Error (List Column)
   | none => .ok []
   | some (.record attrs) => do
     let cols := attrs.map (·.1)
     if let some d := firstDuplicate cols then
-      throw ⟨pos, s!"属性 {d} が重複している"⟩
+      throw ⟨pos, s!"attribute {d} is duplicated"⟩
     return cols
   | some (.path p) =>
     let key := match p with
@@ -618,64 +624,64 @@ def columnsOfShape (ctx : Ctx) (ns : List String) (pos : Pos) : Option Ty → Ex
       | p => (p.dropLast, p.getLastD "")
     match ctx.commons.lookup key with
     | some (.record attrs) => .ok (attrs.map (·.1))
-    | some _ => .error ⟨pos, s!"エンティティの形 {"::".intercalate p} はレコードの共通型ではない"⟩
-    | none => .error ⟨pos, s!"エンティティの形 {"::".intercalate p} はレコードか、レコードの共通型でなければならない"⟩
-  | some (.set _) => .error ⟨pos, "エンティティの形は集合ではなくレコードでなければならない"⟩
+    | some _ => .error ⟨pos, s!"entity shape {"::".intercalate p} is not a common type that is a record"⟩
+    | none => .error ⟨pos, s!"entity shape {"::".intercalate p} must be a record or a common type that is a record"⟩
+  | some (.set _) => .error ⟨pos, "an entity shape must be a record, not a set"⟩
 
-/-- 共通型を集める。 -/
+/-- Collects the common types. -/
 def collectCommons (doc : Document) : Except CedarLex.Error Ctx := do
   let mut ctx : Ctx := {}
   for ns in doc do
     for d in ns.decls do
       if let .typeAlias t := d then
         if let some a := t.annotations.find? (·.key == "effect") then
-          throw ⟨a.pos, s!"@effect はアクションにだけ添える(共通型 {t.name} に付いている)"⟩
+          throw ⟨a.pos, s!"@effect may be attached only to actions (found on common type {t.name})"⟩
         if (ctx.commons.lookup (ns.path, t.name)).isSome then
-          throw ⟨t.pos, s!"共通型 {t.name} が重複している"⟩
+          throw ⟨t.pos, s!"common type {t.name} is duplicated"⟩
         ctx := { ctx with commons := ctx.commons ++ [((ns.path, t.name), t.ty)] }
   return ctx
 
-/-- エンティティ型を集め、テーブルとテーブルでない型に分ける。 -/
+/-- Collects the entity types and splits them into tables and non-table types. -/
 def collectEntities (doc : Document) (ctx : Ctx) : Except CedarLex.Error Ctx := do
   let mut ctx := ctx
   for ns in doc do
     for d in ns.decls do
       if let .entity e := d then
         if let some a := e.annotations.find? (·.key == "effect") then
-          throw ⟨a.pos, s!"@effect はアクションにだけ添える(エンティティ {", ".intercalate e.names} に付いている)"⟩
+          throw ⟨a.pos, s!"@effect may be attached only to actions (found on entity {", ".intercalate e.names})"⟩
         let attachment ← attachmentColumnOf e
         let external ← match e.annotations.filter (·.key == "external") with
           | [] => pure none
           | [a] => some <$> parseExternal a.value a.pos
-          | _ :: second :: _ => throw ⟨second.pos, "@external が 2 つ以上ある(1 エンティティに 1 つ)"⟩
+          | _ :: second :: _ => throw ⟨second.pos, "more than one @external (one per entity)"⟩
         for name in e.names do
           let ty : EntityType := ⟨name, ns.path⟩
           if ctx.tables.any (·.ty == ty) || ctx.nonTables.any (·.1 == ty) then
-            throw ⟨e.pos, s!"エンティティ型 {showType ty} が重複している"⟩
+            throw ⟨e.pos, s!"entity type {showType ty} is duplicated"⟩
           if let some decl := external then
-            -- 名前付きの送り先: テーブルではなく、属性・親・tags・enum・他の注釈を持てない。
+            -- A named destination: not a table; it cannot have attributes, parents, tags, enum or other annotations.
             if let some (_, pos) := attachment then
-              throw ⟨pos, s!"送り先 {name}(@external)はテーブルではないので @attachment を添えられない"⟩
-            if e.enum.isSome then throw ⟨e.pos, s!"送り先 {name}(@external)は enum にできない"⟩
-            if isReserved ns.path name then throw ⟨e.pos, s!"{reservedLabel name}に @external は添えられない"⟩
-            unless ns.path.isEmpty do throw ⟨e.pos, s!"名前空間つきの送り先 {showType ty} は対応しない"⟩
+              throw ⟨pos, s!"destination {name} (@external) is not a table, so it cannot carry @attachment"⟩
+            if e.enum.isSome then throw ⟨e.pos, s!"destination {name} (@external) cannot be an enum"⟩
+            if isReserved ns.path name then throw ⟨e.pos, s!"{reservedLabel name} cannot carry @external"⟩
+            unless ns.path.isEmpty do throw ⟨e.pos, s!"namespaced destination {showType ty} is not supported"⟩
             let cols ← columnsOfShape ctx ns.path e.pos e.shape
             unless cols.isEmpty && e.parents.isEmpty && e.tags.isNone do
-              throw ⟨e.pos, s!"送り先 {name}(@external)は属性・親・tags を持てない"⟩
-            ctx := { ctx with nonTables := ctx.nonTables ++ [(ty, "外部 API の送り先(@external)で、テーブルではない")],
+              throw ⟨e.pos, s!"destination {name} (@external) cannot have attributes, parents, or tags"⟩
+            ctx := { ctx with nonTables := ctx.nonTables ++ [(ty, "an external API destination (@external), not a table")],
                               destinations := ctx.destinations ++ [(name, decl, e.pos)] }
           else if let some _ := e.enum then
             if let some (_, pos) := attachment then
-              throw ⟨pos, s!"エンティティ {name} はテーブルではないので @attachment を添えられない"⟩
-            ctx := { ctx with nonTables := ctx.nonTables ++ [(ty, "enum 型はテーブルではない")] }
+              throw ⟨pos, s!"entity {name} is not a table, so it cannot carry @attachment"⟩
+            ctx := { ctx with nonTables := ctx.nonTables ++ [(ty, "an enum type is not a table")] }
           else if isReserved ns.path name then
             if let some (_, pos) := attachment then
-              throw ⟨pos, s!"{reservedLabel name}はテーブルではないので @attachment を添えられない"⟩
+              throw ⟨pos, s!"{reservedLabel name} is not a table, so it cannot carry @attachment"⟩
             let cols ← columnsOfShape ctx ns.path e.pos e.shape
             unless cols.isEmpty && e.parents.isEmpty && e.tags.isNone do
-              throw ⟨e.pos, s!"{reservedLabel name}は属性・親・tags を持てない"⟩
-            let reason := if isReservedService ns.path name then "nyxis が予約するサービス主体の型で、テーブルではない"
-              else "nyxis が予約する匿名の主体の型で、テーブルではない"
+              throw ⟨e.pos, s!"{reservedLabel name} cannot have attributes, parents, or tags"⟩
+            let reason := if isReservedService ns.path name then "the service principal type reserved by nyxis, not a table"
+              else "the anonymous principal type reserved by nyxis, not a table"
             ctx := { ctx with nonTables := ctx.nonTables ++ [(ty, reason)] }
           else
             let cols ← columnsOfShape ctx ns.path e.pos e.shape
@@ -683,34 +689,36 @@ def collectEntities (doc : Document) (ctx : Ctx) : Except CedarLex.Error Ctx := 
               | none => pure none
               | some (col, pos) =>
                 unless cols.contains col do
-                  throw ⟨pos, s!"@attachment の列 {col} はエンティティ {name} に無い(列: {", ".intercalate cols})"⟩
+                  throw ⟨pos, s!"@attachment column {col} is not in entity {name} (columns: {", ".intercalate cols})"⟩
                 pure (some col)
             ctx := { ctx with tables := ctx.tables ++ [{ ty, columns := cols, pos := e.pos, attachment := attachmentColumn }] }
   return ctx
 
-/-- 効果の対象のテーブルを引く。 -/
+/-- Looks up the effect's target table. -/
 def resolveTable (ctx : Ctx) (ns : List String) (p : List String) (pos : Pos) : Except CedarLex.Error TableInfo := do
   let ty := resolveType ns p
   match ctx.tables.find? (·.ty == ty) with
   | some t => return t
   | none =>
     match ctx.nonTables.lookup ty with
-    | some reason => throw ⟨pos, s!"効果の対象 {showType ty} はテーブルではない({reason})"⟩
-    | none => throw ⟨pos, s!"効果の対象のテーブル(エンティティ型){showType ty} がスキーマに無い"⟩
+    | some reason => throw ⟨pos, s!"the effect target {showType ty} is not a table ({reason})"⟩
+    | none => throw ⟨pos, s!"the effect target table (entity type) {showType ty} is not in the schema"⟩
 
-/-! ## cedar-lean の型環境の構成
+/-! ## Building the cedar-lean type environment
 
-`Cedar.Validation.Schema` は注釈を持たないので、解析は上の構成が行い、ここでは属性の型と `appliesTo` を写す。
-アクションの `context` の型は、nyxis が判定に渡す文脈(`Authz.judgementRequest`: 挿入・更新では `context.values` に
-提案される値、それ以外は空)から効果の宣言で決め、正本に `context` が書かれていればそれと一致することを要求する。
-正本の `context` がサーバー生成値の属性 `now: datetime` / `id: String` を宣言していれば、その属性を型に加える
-(nyxis はそのアクションの判定で `context.now` / `context.id` に要求ごとの値を置く)。
-実体の親: `entity T in [P]` は型環境の祖先の型になり、`@parents("列, …")` が親を指す列を定める(列の型は
-`P` か `Set<P>`。その値が行の実体の祖先になる)。所属行(第 2 段): `@memberships("M: 列 -> 列, …")` は、テーブル `M` の
-行のうち所属する側の列が行の実体を指すものの、親を指す列の値を祖先に加える(多対多の所属を別テーブルの行で表す)。
-名前空間・共通型・enum は対応しない(`PostgresShape` と同じ範囲)。 -/
+`Cedar.Validation.Schema` has no annotations, so the parsing is done by the construction above; here we copy the
+attribute types and `appliesTo`. The type of an action's `context` is determined by the effect declaration from the
+context nyxis passes to the decision (`Authz.judgementRequest`: for insert and update, the proposed values in
+`context.values`; otherwise empty), and if the source schema writes a `context`, it must match. If the source `context`
+declares the server-generated attributes `now: datetime` / `id: String`, those attributes are added to the type (nyxis
+puts per-request values in `context.now` / `context.id` when judging that action). Entity parents: `entity T in [P]`
+becomes the ancestor types in the type environment, and `@parents("column, …")` names the parent columns (of type `P` or
+`Set<P>`; their values become the ancestors of the row's entity). Membership rows (second stage):
+`@memberships("M: column -> column, …")` adds to the ancestors the parent-column values of those rows of table `M` whose
+member-side column points at the row's entity (many-to-many membership represented by rows of another table).
+Namespaces, common types and enums are not supported (the same scope as `PostgresShape`). -/
 
-/-- 列として扱える Cedar の拡張型。`__cedar::` で修飾してもよい。 -/
+/-- Cedar extension types usable as columns. They may be qualified with `__cedar::`. -/
 def extensionType : String → Option Cedar.Validation.ExtType
   | "decimal" => some .decimal
   | "datetime" => some .datetime
@@ -718,20 +726,21 @@ def extensionType : String → Option Cedar.Validation.ExtType
   | "ipaddr" => some .ipAddr
   | _ => none
 
-/-- 文書に宣言されたエンティティ型(テーブルと、テーブルでない `Anonymous` を含む)。 -/
+/-- The entity types declared in the document (including tables and the non-table `Anonymous`). -/
 def entityTypesOf (doc : Document) : List EntityType :=
   doc.flatMap fun ns => ns.decls.flatMap fun
     | .entity e => e.names.map fun n => (⟨n, ns.path⟩ : EntityType)
     | _ => []
 
-/-- 修飾の無いエンティティ型のパスを解決する。名前空間つきの型は対応しない。 -/
+/-- Resolves an unqualified entity type path. Namespaced types are not supported. -/
 def resolveEntity (tys : List EntityType) : List String → Except String EntityType
   | [name] =>
     if tys.contains ⟨name, []⟩ then .ok ⟨name, []⟩
-    else .error s!"エンティティ型 {name} が無い"
-  | p => .error s!"名前空間つきの型 {"::".intercalate p} は対応しない"
+    else .error s!"entity type {name} does not exist"
+  | p => .error s!"namespaced type {"::".intercalate p} is not supported"
 
-/-- パスで書かれたスカラーの型。組み込み型、拡張型、エンティティ型。共通型は対応しない。 -/
+/-- A scalar type written as a path: a built-in type, an extension type, or an entity type. Common types are not
+    supported. -/
 def scalarType (tys : List EntityType) : List String → Except String Cedar.Validation.CedarType
   | ["Bool"] => .ok (.bool .anyBool)
   | ["Long"] => .ok .int
@@ -739,16 +748,16 @@ def scalarType (tys : List EntityType) : List String → Except String Cedar.Val
   | ["__cedar", name] =>
     match extensionType name with
     | some x => .ok (.ext x)
-    | none => .error s!"型 __cedar::{name} は無い"
+    | none => .error s!"type __cedar::{name} does not exist"
   | [name] =>
     match extensionType name with
     | some x => .ok (.ext x)
     | none =>
       if tys.contains ⟨name, []⟩ then .ok (.entity ⟨name, []⟩)
-      else .error s!"型 {name} はエンティティ型でも組み込みの型でもない(共通型は対応しない)"
-  | p => .error s!"名前空間つきの型 {"::".intercalate p} は対応しない"
+      else .error s!"type {name} is neither an entity type nor a built-in type (common types are not supported)"
+  | p => .error s!"namespaced type {"::".intercalate p} is not supported"
 
-/-- 正本の型を cedar-lean の型に写す。レコードの属性の `?` は `optional`。 -/
+/-- Maps a source-schema type to a cedar-lean type. A `?` on a record attribute becomes `optional`. -/
 def cedarType (tys : List EntityType) : Ty → Except String Cedar.Validation.CedarType
   | .path p => scalarType tys p
   | .set elem => do return .set (← cedarType tys elem)
@@ -757,7 +766,7 @@ def cedarType (tys : List EntityType) : Ty → Except String Cedar.Validation.Ce
       let t ← cedarType tys ty
       return (name, if optional then Cedar.Validation.Qualified.optional t else .required t)
     if let some d := firstDuplicate (fields.map (·.1)) then
-      throw s!"属性 {d} が重複している"
+      throw s!"attribute {d} is duplicated"
     return .record (Cedar.Data.Map.make fields)
 termination_by ty => sizeOf ty
 decreasing_by
@@ -768,7 +777,8 @@ decreasing_by
     simp only [Prod.mk.sizeOf_spec] at this
     omega
 
-/-- 型が名前 `names` のどれか(修飾の無いパス)を参照するか。送り先(`@external`)の型が属性の型に現れないことの検査に使う。 -/
+/-- Whether a type refers to any of the names `names` (unqualified paths). Used to check that destination (`@external`)
+    types do not appear in attribute types. -/
 def mentionsAny (names : List String) : Ty → Bool
   | .path [n] => names.contains n
   | .path _ => false
@@ -783,72 +793,74 @@ decreasing_by
     simp only [Prod.mk.sizeOf_spec] at this
     omega
 
-/-- 文書に宣言されたエンティティ型のうち、送り先(`@external`)でないもの。属性・親・`appliesTo`・応答の型に使える型。 -/
+/-- The entity types declared in the document that are not destinations (`@external`): the types usable in attributes,
+    parents, `appliesTo` and response types. -/
 def entityTypesExceptDestinations (doc : Document) (ctx : Ctx) : List EntityType :=
   (entityTypesOf doc).filter fun t => !ctx.isDestination t
 
-/-- `call` の効果の宣言を検査して構成する。送り先の宣言、送り先の形(`base` と固定のパス、または `base` 無しと
-    `url: 列`)、メソッドと本文の列、`context.values`(提案値を取るか。本文の列と同名の属性は拒む)、実行時機と応答の型
-    (`sync` はレコード型が要る)。列の型の検査は `checkExternalColumns`。 -/
+/-- Checks and builds a `call` effect declaration: the destination declaration, the destination's shape (`base` with a
+    fixed path, or no `base` with `url: column`), the method and body columns, `context.values` (whether it takes
+    proposed values; attributes named like a body column are rejected), the timing and the response type (`sync` needs a
+    record type). Column types are checked by `checkExternalColumns`. -/
 def callEffect (ctx : Ctx) (tys : List EntityType) (a : Action) (table : TableInfo) (spec : EffectSpec)
     (effPos : Pos) : Except CedarLex.Error Nyxis.Db.EffectKind := do
-  let some c := spec.call | throw ⟨effPos, "内部エラー: call の宣言が無い"⟩
+  let some c := spec.call | throw ⟨effPos, "internal error: missing call declaration"⟩
   let some (_, decl, _) := ctx.destinations.find? (·.1 == c.destination)
     | if ctx.tables.any (·.ty == ⟨c.destination, []⟩) then
-        throw ⟨effPos, s!"call の送り先 {c.destination} はテーブルで、@external の宣言が無い(送り先は @external(\"…\") entity {c.destination}; と宣言する)"⟩
+        throw ⟨effPos, s!"call destination {c.destination} is a table and has no @external declaration (declare a destination as @external(\"…\") entity {c.destination};)"⟩
       else
-        throw ⟨effPos, s!"call の送り先 {c.destination} に @external の宣言が無い(@external(\"base: https://…; auth: …\") entity {c.destination};)"⟩
+        throw ⟨effPos, s!"call destination {c.destination} has no @external declaration (@external(\"base: https://…; auth: …\") entity {c.destination};)"⟩
   let method ← match c.method with
     | "GET" => pure CallMethod.get
     | "POST" => pure .post
     | "PUT" => pure .put
     | "PATCH" => pure .patch
     | "DELETE" => pure .delete
-    | other => throw ⟨effPos, s!"メソッド {other} は無い"⟩
+    | other => throw ⟨effPos, s!"unknown method {other}"⟩
   let target ← match c.path, c.urlColumn, decl.base with
     | some p, _, some _ => pure (CallTarget.path p)
     | some _, _, none =>
-      throw ⟨effPos, s!"送り先 {c.destination} に base が無いので、固定のパスではなく url: 列(対象行の URL の列)で送り先を書く"⟩
+      throw ⟨effPos, s!"destination {c.destination} has no base, so write the destination with url: column (the column holding the target row's URL) instead of a fixed path"⟩
     | none, some col, none =>
       unless table.columns.contains col do
-        throw ⟨effPos, s!"url: の列 {col} はテーブル {showType table.ty} に無い(列: {", ".intercalate table.columns})"⟩
+        throw ⟨effPos, s!"url: column {col} is not in table {showType table.ty} (columns: {", ".intercalate table.columns})"⟩
       pure (.column col)
     | none, some _, some _ =>
-      throw ⟨effPos, s!"base のある送り先 {c.destination} に url: 列 は書けない(base と url: は併用できない)"⟩
-    | none, none, _ => throw ⟨effPos, "内部エラー: call の送り先の形が無い"⟩
+      throw ⟨effPos, s!"destination {c.destination} has a base, so url: column cannot be used (base and url: cannot be combined)"⟩
+    | none, none, _ => throw ⟨effPos, "internal error: missing call destination shape"⟩
   unless method.hasBody || spec.columns.isEmpty do
-    throw ⟨effPos, s!"{c.method} では本文を送らないので本文の列を書けない({showType table.ty}())"⟩
+    throw ⟨effPos, s!"{c.method} sends no body, so body columns cannot be listed ({showType table.ty}())"⟩
   if let some dup := firstDuplicate spec.columns then
-    throw ⟨effPos, s!"call の効果に列 {dup} が重複している"⟩
+    throw ⟨effPos, s!"column {dup} is duplicated in the call effect"⟩
   for col in spec.columns do
     unless table.columns.contains col do
-      throw ⟨effPos, s!"列 {col} はテーブル {showType table.ty} に無い(列: {", ".intercalate table.columns})"⟩
+      throw ⟨effPos, s!"column {col} is not in table {showType table.ty} (columns: {", ".intercalate table.columns})"⟩
   if let some col := c.urlColumn then
     if spec.columns.contains col then
-      throw ⟨effPos, s!"url: の列 {col} は本文の列にも書けない"⟩
+      throw ⟨effPos, s!"url: column {col} cannot also be a body column"⟩
   let proposes ← match a.context with
     | some (.record attrs) =>
       match attrs.find? (·.1 == "values") with
       | some (_, false, .record vattrs) =>
         for (n, _, _) in vattrs do
           if spec.columns.contains n then
-            throw ⟨a.pos, s!"call の context.values の属性 {n} は本文の列と同名(どちらの値を送るか決まらない)"⟩
+            throw ⟨a.pos, s!"attribute {n} of the call's context.values has the same name as a body column (it is ambiguous which value to send)"⟩
         pure true
-      | some _ => throw ⟨a.pos, "call の context.values はレコード型(省略不可)でなければならない"⟩
+      | some _ => throw ⟨a.pos, "the call's context.values must be a record type (required)"⟩
       | none => pure false
     | _ => pure false
   let mode ← match c.mode with
     | "async" =>
-      if c.response.isSome then throw ⟨effPos, "async に -> <応答の型> は書けない"⟩
+      if c.response.isSome then throw ⟨effPos, "async cannot have -> <response type>"⟩
       pure CallMode.async
     | _ =>
-      let some ty := c.response | throw ⟨effPos, "sync には -> <レコード型> で応答の型を書く"⟩
-      let cty ← (cedarType tys ty).mapError (⟨effPos, s!"call の応答の型: {·}"⟩)
-      let .record _ := cty | throw ⟨effPos, "call の応答の型はレコード型 { 名前: 型, 名前?: 型 } でなければならない"⟩
+      let some ty := c.response | throw ⟨effPos, "sync requires a response type written as -> <record type>"⟩
+      let cty ← (cedarType tys ty).mapError (⟨effPos, s!"call response type: {·}"⟩)
+      let .record _ := cty | throw ⟨effPos, "the call response type must be a record type { name: type, name?: type }"⟩
       pure (.sync c.timeout cty)
   return .call c.destination method target spec.columns proposes mode
 
-/-- アクションを集め、効果の宣言を検査する。 -/
+/-- Collects the actions and checks their effect declarations. -/
 def collectActions (doc : Document) (ctx : Ctx) : Except CedarLex.Error (List Authz.ActionDecl) := do
   let tys := entityTypesExceptDestinations doc ctx
   let mut actions : List Authz.ActionDecl := []
@@ -858,9 +870,9 @@ def collectActions (doc : Document) (ctx : Ctx) : Except CedarLex.Error (List Au
         let label := ", ".intercalate (a.names.map (s!"\"{·}\""))
         let effects := a.annotations.filter (·.key == "effect")
         let spec ← match effects with
-          | [] => throw ⟨a.pos, s!"アクション {label} に効果の宣言(@effect)が無い"⟩
+          | [] => throw ⟨a.pos, s!"action {label} has no effect declaration (@effect)"⟩
           | [one] => parseEffectText one.value one.pos
-          | _ :: second :: _ => throw ⟨second.pos, s!"アクション {label} に効果の宣言(@effect)が 2 つ以上ある(1 アクションに効果は 1 つ)"⟩
+          | _ :: second :: _ => throw ⟨second.pos, s!"action {label} has more than one effect declaration (@effect) (one effect per action)"⟩
         let effPos := (effects.head?.map (·.pos)).getD a.pos
         let table ← resolveTable ctx ns.path spec.table effPos
         let kind ← match spec.kind with
@@ -869,88 +881,92 @@ def collectActions (doc : Document) (ctx : Ctx) : Except CedarLex.Error (List Au
           | "insert" => pure .insert
           | "delete" => pure .delete
           | "upload" | "download" =>
-            -- 添付の署名付き URL の発行は、添付の列を宣言したテーブルにだけ宣言できる。
+            -- Issuing signed attachment URLs can be declared only for a table that declares an attachment column.
             unless table.attachment.isSome do
-              throw ⟨effPos, s!"{spec.kind} の効果の対象 {showType table.ty} に添付の列の宣言 @attachment(\"列\") が無い"⟩
+              throw ⟨effPos, s!"the {spec.kind} effect target {showType table.ty} has no attachment column declaration @attachment(\"column\")"⟩
             pure (if spec.kind == "upload" then .upload else .download)
           | "mail" =>
-            -- メール送信。宛先の列と内容の列はテーブルの列(列の型は `checkExternalColumns` が型環境で検査する)。
+            -- Mail sending. The recipient and content columns are table columns (their types are checked against the
+            -- type environment by `checkExternalColumns`).
             let some target := spec.target
-              | throw ⟨effPos, s!"mail の効果には宛先の列を書く(mail {showType table.ty}(列; 列, …))"⟩
+              | throw ⟨effPos, s!"a mail effect must name the recipient column (mail {showType table.ty}(column; column, …))"⟩
             unless table.columns.contains target do
-              throw ⟨effPos, s!"列 {target} はテーブル {showType table.ty} に無い(列: {", ".intercalate table.columns})"⟩
+              throw ⟨effPos, s!"column {target} is not in table {showType table.ty} (columns: {", ".intercalate table.columns})"⟩
             if spec.columns.isEmpty then
-              throw ⟨effPos, s!"mail の効果には件名の列を 1 つ以上書く(mail {showType table.ty}(宛先列; 件名列, 本文列…))"⟩
+              throw ⟨effPos, s!"a mail effect must name at least one subject column (mail {showType table.ty}(recipientColumn; subjectColumn, bodyColumn…))"⟩
             if let some dup := firstDuplicate spec.columns then
-              throw ⟨effPos, s!"mail の効果に列 {dup} が重複している"⟩
+              throw ⟨effPos, s!"column {dup} is duplicated in the mail effect"⟩
             if spec.columns.contains target then
-              throw ⟨effPos, s!"mail の効果の宛先の列 {target} は内容の列にも書けない"⟩
+              throw ⟨effPos, s!"the mail effect's recipient column {target} cannot also be a content column"⟩
             for c in spec.columns do
               unless table.columns.contains c do
-                throw ⟨effPos, s!"列 {c} はテーブル {showType table.ty} に無い(列: {", ".intercalate table.columns})"⟩
+                throw ⟨effPos, s!"column {c} is not in table {showType table.ty} (columns: {", ".intercalate table.columns})"⟩
             pure (.mail target spec.columns)
           | "call" => callEffect ctx tys a table spec effPos
           | _ =>
             if spec.columns.isEmpty then
-              throw ⟨effPos, s!"update の効果には更新する列を 1 つ以上書く(update {showType table.ty}(列, …))"⟩
+              throw ⟨effPos, s!"an update effect must name at least one column to update (update {showType table.ty}(column, …))"⟩
             if let some dup := firstDuplicate spec.columns then
-              throw ⟨effPos, s!"update の効果に列 {dup} が重複している"⟩
+              throw ⟨effPos, s!"column {dup} is duplicated in the update effect"⟩
             for c in spec.columns do
               unless table.columns.contains c do
-                throw ⟨effPos, s!"列 {c} はテーブル {showType table.ty} に無い(列: {", ".intercalate table.columns})"⟩
+                throw ⟨effPos, s!"column {c} is not in table {showType table.ty} (columns: {", ".intercalate table.columns})"⟩
             pure (.update spec.columns)
-        -- 送り先(`@external`)は `appliesTo` の主体・対象に書けない(効果の中でだけ名指しする)。
+        -- A destination (`@external`) cannot be written as a principal or resource in `appliesTo` (it is named only
+        -- inside the effect).
         for t in ((a.principals.getD []) ++ (a.resources.getD [])).map (resolveType ns.path) do
           if ctx.isDestination t then
-            throw ⟨a.pos, s!"送り先 {showType t}(@external)はアクション {label} の appliesTo の主体・対象に書けない(効果の call の中でだけ名指しする)"⟩
+            throw ⟨a.pos, s!"destination {showType t} (@external) cannot be a principal or resource in the appliesTo of action {label} (name it only inside the effect's call)"⟩
         match a.resources with
         | none =>
-          throw ⟨a.pos, s!"アクション {label} に appliesTo の resource が無い(効果の対象 {showType table.ty} を resource に含めること)"⟩
+          throw ⟨a.pos, s!"action {label} has no appliesTo resource (include the effect target {showType table.ty} in resource)"⟩
         | some rs =>
           let resolved := rs.map (resolveType ns.path)
           unless resolved.contains table.ty do
-            throw ⟨a.pos, s!"効果の対象 {showType table.ty} がアクション {label} の appliesTo の resource({", ".intercalate (resolved.map showType)})に無い"⟩
+            throw ⟨a.pos, s!"the effect target {showType table.ty} is not in the appliesTo resource ({", ".intercalate (resolved.map showType)}) of action {label}"⟩
         for name in a.names do
           let uid : EntityUID := ⟨⟨"Action", ns.path⟩, name⟩
           if actions.any (·.action == uid) then
-            throw ⟨a.pos, s!"アクション {showType uid.ty}::\"{name}\" が重複している"⟩
+            throw ⟨a.pos, s!"action {showType uid.ty}::\"{name}\" is duplicated"⟩
           actions := actions ++ [⟨uid, ⟨kind, table.ty⟩⟩]
   return actions
 
-/-- `@parents("列, …")`(親を指す列): エンティティに添えられた注釈から列の名前を読む。無ければ `none`。
-    2 つ以上・空の名前・重複は拒む。 -/
+/-- `@parents("column, …")` (parent columns): reads the column names from the annotation on the entity. `none` if
+    absent. Rejects two or more annotations, empty names and duplicates. -/
 def parentColumnsOf (e : Entity) : Except CedarLex.Error (Option (List String)) := do
   match e.annotations.filter (·.key == "parents") with
   | [] => return none
   | [a] =>
     let cols := (a.value.splitOn ",").map fun s => s.trimAscii.toString
     if cols.any (· == "") then
-      throw ⟨a.pos, "@parents には親を指す列の名前をカンマ区切りで書く(空の名前がある)"⟩
+      throw ⟨a.pos, "@parents takes comma-separated names of the parent columns (there is an empty name)"⟩
     if let some d := firstDuplicate cols then
-      throw ⟨a.pos, s!"@parents に列 {d} が重複している"⟩
+      throw ⟨a.pos, s!"column {d} is duplicated in @parents"⟩
     return some cols
-  | _ :: second :: _ => throw ⟨second.pos, "@parents が 2 つ以上ある(1 エンティティに 1 つ)"⟩
+  | _ :: second :: _ => throw ⟨second.pos, "more than one @parents (one per entity)"⟩
 
-/-- `@memberships("M: 列 -> 列, …; …")`(所属行): エンティティに添えられた注釈から、所属行のテーブル名・
-    所属する側の列・親を指す列を読む(項目は `;` で区切る)。無ければ空。2 つ以上の注釈・形の誤り・空や重複の名前は拒む。
-    列の型の検査は `membershipsOf` が型環境を見て行う。 -/
+/-- `@memberships("M: column -> column, …; …")` (membership rows): reads, from the annotation on the entity, the
+    membership table name, the member-side column and the parent columns (items are separated by `;`). Empty if absent.
+    Rejects two or more annotations, malformed items, and empty or duplicated names. Column types are checked by
+    `membershipsOf` against the type environment. -/
 def membershipItemsOf (e : Entity) : Except CedarLex.Error (List (String × String × List String × Pos)) := do
   match e.annotations.filter (·.key == "memberships") with
   | [] => return []
   | [a] =>
-    let form := "@memberships の各項目は「所属行のテーブル: 所属する側の列 -> 親を指す列, …」(項目は ; で区切る)"
+    let form := "each @memberships item must be \"membershipTable: memberColumn -> parentColumn, …\" (items are separated by ;)"
     (a.value.splitOn ";").mapM fun item => do
       let [table, rest] := (item.splitOn ":").map (·.trimAscii.toString) | throw ⟨a.pos, form⟩
       let [member, parents] := (rest.splitOn "->").map (·.trimAscii.toString) | throw ⟨a.pos, form⟩
       let cols := (parents.splitOn ",").map fun s => s.trimAscii.toString
-      if table == "" || member == "" || cols.any (· == "") then throw ⟨a.pos, s!"{form}(空の名前がある)"⟩
-      if let some d := firstDuplicate cols then throw ⟨a.pos, s!"@memberships の親を指す列 {d} が重複している"⟩
+      if table == "" || member == "" || cols.any (· == "") then throw ⟨a.pos, s!"{form} (there is an empty name)"⟩
+      if let some d := firstDuplicate cols then throw ⟨a.pos, s!"@memberships parent column {d} is duplicated"⟩
       return (table, member, cols, a.pos)
-  | _ :: second :: _ => throw ⟨second.pos, "@memberships が 2 つ以上ある(1 エンティティに 1 つ。複数の項目は ; で区切る)"⟩
+  | _ :: second :: _ => throw ⟨second.pos, "more than one @memberships (one per entity; separate multiple items with ;)"⟩
 
-/-- 所属行の宣言を型環境で検査して構成する: 所属行のテーブルは正本のテーブル(予約型 Anonymous でも自分自身でもない)、
-    所属する側の列の型はこのエンティティの型そのもの、親を指す列の型は宣言した親の型 `P` か `Set<P>`。同じテーブル・
-    同じ所属する側の列の項目の重複は拒む。 -/
+/-- Checks and builds the membership-row declarations against the type environment: the membership table is a table of
+    the source schema (neither the reserved type Anonymous nor the entity itself), the member-side column's type is
+    exactly this entity's type, and the parent columns' types are a declared parent type `P` or `Set<P>`. Duplicate
+    items with the same table and the same member-side column are rejected. -/
 def membershipsOf (tys : List EntityType) (ets : Cedar.Validation.EntitySchema) (ty : EntityType)
     (parents : List EntityType) (items : List (String × String × List String × Pos)) :
     Except CedarLex.Error (List Nyxis.Materials.Membership) := do
@@ -958,44 +974,46 @@ def membershipsOf (tys : List EntityType) (ets : Cedar.Validation.EntitySchema) 
   for (table, member, cols, pos) in items do
     let m ← (resolveEntity tys [table]).mapError (⟨pos, ·⟩)
     if isReserved m.path m.id then
-      throw ⟨pos, s!"{reservedLabel m.id}は所属行のテーブルにできない"⟩
-    if m == ty then throw ⟨pos, s!"エンティティ {showType ty} の所属行のテーブルに自分自身は使えない"⟩
+      throw ⟨pos, s!"{reservedLabel m.id} cannot be a membership table"⟩
+    if m == ty then throw ⟨pos, s!"entity {showType ty} cannot use itself as its membership table"⟩
     if out.any (fun o => o.table == m && o.member == member) then
-      throw ⟨pos, s!"@memberships に {table}: {member} の項目が重複している"⟩
-    let some entry := ets.find? m | throw ⟨pos, s!"所属行のテーブル {table} の型が無い"⟩
+      throw ⟨pos, s!"the @memberships item {table}: {member} is duplicated"⟩
+    let some entry := ets.find? m | throw ⟨pos, s!"the type of membership table {table} does not exist"⟩
     let some q := entry.attrs.find? member
-      | throw ⟨pos, s!"@memberships の所属する側の列 {member} はエンティティ {table} に無い"⟩
+      | throw ⟨pos, s!"@memberships member-side column {member} is not in entity {table}"⟩
     unless q.getType == .entity ty do
-      throw ⟨pos, s!"@memberships の所属する側の列 {member} の型は {showType ty}(このエンティティの型)でなければならない"⟩
+      throw ⟨pos, s!"the type of @memberships member-side column {member} must be {showType ty} (this entity's type)"⟩
     for c in cols do
       let some qc := entry.attrs.find? c
-        | throw ⟨pos, s!"@memberships の親を指す列 {c} はエンティティ {table} に無い"⟩
+        | throw ⟨pos, s!"@memberships parent column {c} is not in entity {table}"⟩
       let ok := match qc.getType with
         | .entity p => parents.contains p
         | .set (.entity p) => parents.contains p
         | _ => false
       unless ok do
-        throw ⟨pos, s!"@memberships の親を指す列 {c} の型は、宣言した親の型か、その集合(Set<親の型>)でなければならない"⟩
+        throw ⟨pos, s!"the type of @memberships parent column {c} must be a declared parent type or a set of it (Set<ParentType>)"⟩
     out := out ++ [⟨m, member, cols⟩]
   return out
 
-/-- エンティティ型の項目と、親を指す列。形はレコード、親は祖先の型、tags は任意。enum は対応しない。
-    親(`in [P, …]`)を宣言したエンティティには `@parents("列, …")` で親を指す列を添えるか、`@memberships` で所属行を
-    宣言する(`hasMemberships`。両方でもよい)。`@parents` の各列の型は親の型 `P` か `Set<P>` でなければならない
-    (その列の値が行の実体の祖先になる: `Nyxis.Materials.rowAncestors`)。
-    予約型 `Anonymous` を親にはできない。親の型が自分自身であったり、親の型がさらに親を持つ(多段の親。`withParents`
-    は親を宣言したエンティティの名前)ことも拒む: nyxis の行の実体の祖先は直接の親だけで、Cedar の `in` は祖先の
-    集合が推移的に閉じていることを前提にするので、多段を許すと承認した正本の `in`(とくに forbid)の意味がずれる。 -/
+/-- The entry for an entity type, and its parent columns. The shape is a record, the parents are ancestor types, tags
+    are optional. Enums are not supported. An entity that declares parents (`in [P, …]`) must carry
+    `@parents("column, …")` naming its parent columns, or declare membership rows with `@memberships` (`hasMemberships`;
+    both are allowed). The type of each `@parents` column must be a parent type `P` or `Set<P>` (the column's values
+    become the ancestors of the row's entity: `Nyxis.Materials.rowAncestors`). The reserved type `Anonymous` cannot be a
+    parent. A parent type that is the entity itself, or a parent type that itself has parents (multi-level parents;
+    `withParents` is the names of the entities that declare parents), is also rejected: the ancestors of nyxis's row
+    entities are only the direct parents, while Cedar's `in` assumes the set of ancestors is transitively closed, so
+    allowing multiple levels would shift the meaning of `in` (especially in forbid) in the approved source. -/
 def entityEntry (tys : List EntityType) (withParents : List String) (hasMemberships : Bool) (e : Entity) :
     Except CedarLex.Error (Cedar.Validation.EntitySchemaEntry × List String) := do
   let wrap {α} (r : Except String α) : Except CedarLex.Error α := r.mapError (⟨e.pos, ·⟩)
-  if e.enum.isSome then throw ⟨e.pos, "enum 型のエンティティは対応しない"⟩
+  if e.enum.isSome then throw ⟨e.pos, "enum entity types are not supported"⟩
   let attrs : Cedar.Validation.RecordType ← match e.shape with
     | none => pure Cedar.Data.Map.empty
     | some ty =>
       match ← wrap (cedarType tys ty) with
       | .record rty => pure rty
-      | _ => throw ⟨e.pos, "エンティティの形はレコードでなければならない"⟩
+      | _ => throw ⟨e.pos, "an entity shape must be a record"⟩
   let tags ← match e.tags with
     | none => pure none
     | some ty => some <$> wrap (cedarType tys ty)
@@ -1003,92 +1021,95 @@ def entityEntry (tys : List EntityType) (withParents : List String) (hasMembersh
   let label := ", ".intercalate e.names
   for p in parents do
     if isReserved p.path p.id then
-      throw ⟨e.pos, s!"{reservedLabel p.id}を親にはできない"⟩
+      throw ⟨e.pos, s!"{reservedLabel p.id} cannot be a parent"⟩
     if e.names.contains p.id then
-      throw ⟨e.pos, s!"エンティティ {label} は自分自身を親にできない"⟩
+      throw ⟨e.pos, s!"entity {label} cannot have itself as a parent"⟩
     if withParents.contains p.id then
-      throw ⟨e.pos, s!"親 {p.id} はさらに親を持つ(多段の親は対応しない: 行の実体の祖先は直接の親だけで、Cedar の in と意味がずれる)"⟩
+      throw ⟨e.pos, s!"parent {p.id} itself has parents (multi-level parents are not supported: the ancestors of a row's entity are only its direct parents, which would shift the meaning of Cedar's in)"⟩
   if hasMemberships && parents.isEmpty then
-    throw ⟨e.pos, s!"エンティティ {label} の @memberships は、親(in [親の型])を宣言したエンティティにだけ添える"⟩
+    throw ⟨e.pos, s!"@memberships on entity {label} may be attached only to an entity that declares parents (in [ParentType])"⟩
   let cols ← match ← parentColumnsOf e, parents with
     | none, [] => pure []
     | none, _ :: _ =>
       if hasMemberships then pure [] else
-      throw ⟨e.pos, s!"エンティティ {label} は親(in)を宣言しているが、親を指す列の宣言 @parents(\"列, …\") も所属行の宣言 @memberships(\"…\") も無い"⟩
+      throw ⟨e.pos, s!"entity {label} declares parents (in) but has neither a parent-column declaration @parents(\"column, …\") nor a membership-row declaration @memberships(\"…\")"⟩
     | some _, [] =>
-      throw ⟨e.pos, s!"エンティティ {label} の @parents は、親(in [親の型])を宣言したエンティティにだけ添える"⟩
+      throw ⟨e.pos, s!"@parents on entity {label} may be attached only to an entity that declares parents (in [ParentType])"⟩
     | some cols, _ :: _ =>
       for c in cols do
         let some q := attrs.find? c
-          | throw ⟨e.pos, s!"@parents の列 {c} はエンティティ {label} に無い"⟩
+          | throw ⟨e.pos, s!"@parents column {c} is not in entity {label}"⟩
         let ok := match q.getType with
           | .entity p => parents.contains p
           | .set (.entity p) => parents.contains p
           | _ => false
         unless ok do
-          throw ⟨e.pos, s!"@parents の列 {c} の型は、宣言した親の型か、その集合(Set<親の型>)でなければならない"⟩
+          throw ⟨e.pos, s!"the type of @parents column {c} must be a declared parent type or a set of it (Set<ParentType>)"⟩
       pure cols
   return (.standard { ancestors := Cedar.Data.Set.make parents, attrs, tags }, cols)
 
-/-- 判定の文脈の型 `{ values: … }`。 -/
+/-- The decision context type `{ values: … }`. -/
 def valuesContext (values : Cedar.Validation.RecordType) : Cedar.Validation.RecordType :=
   Cedar.Data.Map.make [("values", .required (.record values))]
 
-/-- 効果の宣言から、nyxis が判定に渡す文脈(`Authz.judgementRequest`)の型を決める。
-    読み取り・一覧・削除では空。挿入では対象テーブルの行全体、更新では宣言された列(それぞれ省略可)が
-    `context.values`。 -/
+/-- Determines, from the effect declaration, the type of the context nyxis passes to decision
+    (`Authz.judgementRequest`). Empty for read, list and delete. For insert, `context.values` is the whole row of the
+    target table; for update, it is the declared columns (each optional). -/
 def effectContext (ets : Cedar.Validation.EntitySchema) (effect : Nyxis.Db.Effect) :
     Except String Cedar.Validation.RecordType := do
   let some entry := ets.find? effect.table
-    | throw s!"効果の対象 {showType effect.table} の型が無い"
+    | throw s!"the type of effect target {showType effect.table} does not exist"
   let attrs := entry.attrs
   match effect.kind with
   | .read | .list | .delete | .upload | .download | .mail _ _ | .call .. => return Cedar.Data.Map.empty
   | .insert => return valuesContext attrs
   | .update cols =>
     let fields ← cols.mapM fun c => do
-      let some q := attrs.find? c | throw s!"列 {c} が {showType effect.table} に無い"
+      let some q := attrs.find? c | throw s!"column {c} is not in {showType effect.table}"
       return (c, Cedar.Validation.Qualified.optional q.getType)
     return valuesContext (Cedar.Data.Map.make fields)
 
-/-- サーバー生成値の文脈の属性: `now`(要求の処理を始めた現在時刻、`datetime`)と `id`(この要求のために
-    新しく作った一意 ID、`String`)。正本のアクションの `context` にこの名前で宣言されたときだけ、nyxis が判定の
-    文脈に置く(`Authz.contextAttrs`)。宣言するなら型はこのとおりでなければならない。 -/
+/-- Context attributes with server-generated values: `now` (the current time when processing of the request started,
+    `datetime`) and `id` (a unique ID freshly created for this request, `String`). nyxis puts them in the decision
+    context only when they are declared under these names in the `context` of the source schema's action
+    (`Authz.contextAttrs`). If declared, their types must be exactly these. -/
 def generatedAttrs : List (Attr × Cedar.Validation.CedarType) :=
   [("now", .ext .datetime), ("id", .string)]
 
-/-- 正本に書かれた `context` から、nyxis が判定に渡す文脈の型を決める: 効果から決めた部分(`effectContext`)に、
-    正本が宣言したサーバー生成値の属性を加えたものと一致しなければならない。`call` の効果(`callValues`)では、正本が
-    `values` をレコード型(省略不可)で宣言していればそれを提案値の型として加える(nyxis はその呼び出しで提案値を
-    `context.values` と本文に置く)。 -/
+/-- Determines the type of the context nyxis passes to decision from the `context` written in the source schema: it must
+    equal the part determined from the effect (`effectContext`) plus the server-generated attributes declared in the
+    source. For a `call` effect (`callValues`), if the source declares `values` as a record type (required), it is added
+    as the type of the proposed values (nyxis puts the proposed values in `context.values` and in the body of that
+    call). -/
 def declaredContext (name : String) (pos : Pos) (base : Cedar.Validation.RecordType)
     (declared : Cedar.Validation.CedarType) (callValues : Bool := false) :
     Except CedarLex.Error Cedar.Validation.RecordType := do
-  let .record rty := declared | throw ⟨pos, s!"アクション {name} の context はレコードでなければならない"⟩
+  let .record rty := declared | throw ⟨pos, s!"the context of action {name} must be a record"⟩
   let mut fields := base.toList
   if callValues then
     if let some q := rty.find? "values" then
       match q with
       | .required (.record _) => fields := fields ++ [("values", q)]
-      | _ => throw ⟨pos, s!"アクション {name} の context.values はレコード型(省略不可)でなければならない"⟩
+      | _ => throw ⟨pos, s!"the context.values of action {name} must be a record type (required)"⟩
   for (attr, ty) in generatedAttrs do
     if let some q := rty.find? attr then
       unless q == .required ty do
-        throw ⟨pos, s!"アクション {name} の context.{attr} は nyxis のサーバー生成値の型でなければならない"⟩
+        throw ⟨pos, s!"the context.{attr} of action {name} must have the type of nyxis's server-generated value"⟩
       fields := fields ++ [(attr, .required ty)]
   let expected := Cedar.Data.Map.make fields
   unless rty == expected do
-    throw ⟨pos, s!"アクション {name} の context は、nyxis が効果から決める文脈の型(とサーバー生成値 now / id)と一致しなければならない"⟩
+    throw ⟨pos, s!"the context of action {name} must match the context type nyxis determines from the effect (plus the server-generated values now / id)"⟩
   return expected
 
-/-- アクションの項目。`appliesTo` の主体・対象の型、親(アクション群)、文脈の型。正本に `context` が
-    書かれていれば、効果から決めた文脈の型(と、宣言されたサーバー生成値 `now` / `id`)と一致しなければならない。 -/
+/-- The entry for an action: the principal and resource types of `appliesTo`, the parents (action groups), and the
+    context type. If the source schema writes a `context`, it must match the context type determined from the effect
+    (plus the declared server-generated values `now` / `id`). -/
 def actionEntry (tys : List EntityType) (ets : Cedar.Validation.EntitySchema)
     (actions : List Authz.ActionDecl) (a : Action) (name : String) :
     Except CedarLex.Error Cedar.Validation.ActionSchemaEntry := do
   let wrap {α} (r : Except String α) : Except CedarLex.Error α := r.mapError (⟨a.pos, ·⟩)
   let uid : EntityUID := ⟨⟨"Action", []⟩, name⟩
-  let some decl := actions.find? (·.action == uid) | throw ⟨a.pos, s!"アクション {name} に効果の宣言が無い"⟩
+  let some decl := actions.find? (·.action == uid) | throw ⟨a.pos, s!"action {name} has no effect declaration"⟩
   let base ← wrap (effectContext ets decl.effect)
   let callValues := match decl.effect.kind with
     | .call .. => true
@@ -1100,12 +1121,13 @@ def actionEntry (tys : List EntityType) (ets : Cedar.Validation.EntitySchema)
   let resources ← wrap ((a.resources.getD []).mapM (resolveEntity tys))
   let parents ← a.parents.mapM fun (path, n) =>
     if path.isEmpty || path == ["Action"] then pure (⟨⟨"Action", []⟩, n⟩ : EntityUID)
-    else throw ⟨a.pos, s!"名前空間つきのアクション {"::".intercalate path}::\"{n}\" は対応しない"⟩
+    else throw ⟨a.pos, s!"namespaced action {"::".intercalate path}::\"{n}\" is not supported"⟩
   return { appliesToPrincipal := Cedar.Data.Set.make principals, appliesToResource := Cedar.Data.Set.make resources,
            ancestors := Cedar.Data.Set.make parents, context }
 
-/-- 解析済みの正本と、そこから構成したアクションの宣言から、cedar-lean の型環境と親を指す列・所属行を構成する。
-    送り先(`@external`)は型環境に入れず、属性の型・親・tags に現れれば拒む。 -/
+/-- Builds the cedar-lean type environment, the parent columns and the membership rows from the parsed source schema and
+    the action declarations built from it. Destinations (`@external`) are not put in the type environment, and are
+    rejected if they appear in attribute types, parents or tags. -/
 def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
     Except CedarLex.Error
       (Cedar.Validation.Schema × Nyxis.Materials.ParentColumns × Nyxis.Materials.MembershipColumns) := do
@@ -1119,19 +1141,19 @@ def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
   let mut pending : List (EntityType × List (String × String × List String × Pos)) := []
   for ns in doc do
     unless ns.path.isEmpty do
-      throw ⟨default, s!"名前空間 {"::".intercalate ns.path} は対応しない(型環境を構成できない)"⟩
+      throw ⟨default, s!"namespace {"::".intercalate ns.path} is not supported (cannot build the type environment)"⟩
     for d in ns.decls do
       match d with
-      | .typeAlias t => throw ⟨t.pos, s!"共通型 {t.name} は対応しない(型環境を構成できない)"⟩
+      | .typeAlias t => throw ⟨t.pos, s!"common type {t.name} is not supported (cannot build the type environment)"⟩
       | .entity e =>
         if e.annotations.any (·.key == "external") then continue
         let label := ", ".intercalate e.names
         for p in e.parents do
           if let [n] := p then
             if destNames.contains n then
-              throw ⟨e.pos, s!"送り先 {n}(@external)はエンティティ {label} の親にできない"⟩
+              throw ⟨e.pos, s!"destination {n} (@external) cannot be a parent of entity {label}"⟩
         if (e.shape.map (mentionsAny destNames)).getD false || (e.tags.map (mentionsAny destNames)).getD false then
-          throw ⟨e.pos, s!"送り先(@external)の型はエンティティ {label} の属性・tags の型に使えない"⟩
+          throw ⟨e.pos, s!"a destination (@external) type cannot be used in the attribute or tags types of entity {label}"⟩
         let items ← membershipItemsOf e
         let (entry, cols) ← entityEntry tys withParents (!items.isEmpty) e
         for n in e.names do
@@ -1144,7 +1166,7 @@ def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
   let etsMap : Cedar.Validation.EntitySchema := Cedar.Data.Map.make ets
   let mut memberships : Nyxis.Materials.MembershipColumns := []
   for (ty, items) in pending do
-    let some entry := etsMap.find? ty | throw ⟨default, s!"エンティティ {showType ty} の型が無い"⟩
+    let some entry := etsMap.find? ty | throw ⟨default, s!"the type of entity {showType ty} does not exist"⟩
     memberships := memberships ++ [(ty, ← membershipsOf tys etsMap ty entry.ancestors.toList items)]
   let mut acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry) := []
   for ns in doc do
@@ -1155,16 +1177,19 @@ def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
           acts := acts ++ [(⟨⟨"Action", []⟩, n⟩, entry)]
   return (⟨etsMap, Cedar.Data.Map.make acts⟩, parents, memberships)
 
-/-! ## 一意性と参照整合の宣言
+/-! ## Uniqueness and referential-integrity declarations
 
-テーブル(エンティティ)の注釈 `@unique("列, …; 列, …")` は列の組の一意性(`;` で区切った組ごと、`,` で区切った列)、
-`@references("列 restrict, 列 cascade アクション, …")` は実体参照の列の参照整合(参照先は列の型のテーブル。削除時は
-`restrict` = 参照する行があれば競合、`cascade アクション` = 参照する行もそのアクション(このテーブルの削除効果を持つ
-宣言済みアクション)で判定して消す)。拒むもの: テーブルでないエンティティへの注釈、無い列、空・重複の名前、
-実体参照でない(集合を含む)列の参照、テーブルでない型への参照、無いアクション・このテーブルの削除効果でない
-アクションの `cascade`、`cascade` の循環(自分自身を含む)。 -/
+On a table (entity), the annotation `@unique("column, …; column, …")` declares uniqueness of column groups (groups
+separated by `;`, columns separated by `,`), and `@references("column restrict, column cascade action, …")` declares
+referential integrity of entity-reference columns (the referenced table is the column's type. On delete, `restrict` =
+conflict if a referencing row exists; `cascade action` = referencing rows are also judged with that action (a declared
+action with this table's delete effect) and deleted). Rejected: the annotations on an entity that is not a table,
+missing columns, empty or duplicated names, references from columns that are not entity references (including sets),
+references to types that are not tables, `cascade` with a missing action or an action that is not this table's delete
+effect, and `cascade` cycles (including self-cycles).
+-/
 
-/-- `@unique` の組(列の名前の列と位置)。 -/
+/-- The `@unique` groups (a list of column names, and the position). -/
 def uniqueGroupsOf (e : Entity) : Except CedarLex.Error (List (List String × Pos)) := do
   match e.annotations.filter (·.key == "unique") with
   | [] => return []
@@ -1172,14 +1197,14 @@ def uniqueGroupsOf (e : Entity) : Except CedarLex.Error (List (List String × Po
     let groups := (a.value.splitOn ";").map fun g => (g.splitOn ",").map fun s => s.trimAscii.toString
     for g in groups do
       if g.any (· == "") then
-        throw ⟨a.pos, "@unique には一意な列の組をカンマ区切りで(組の間は ; で)書く(空の名前がある)"⟩
+        throw ⟨a.pos, "@unique takes groups of unique columns, comma-separated (groups separated by ;) (there is an empty name)"⟩
       if let some d := firstDuplicate g then
-        throw ⟨a.pos, s!"@unique の組に列 {d} が重複している"⟩
+        throw ⟨a.pos, s!"column {d} is duplicated in a @unique group"⟩
     return groups.map (·, a.pos)
   | _ :: second :: _ =>
-    throw ⟨second.pos, "@unique が 2 つ以上ある(1 エンティティに 1 つ。複数の組は ; で区切る)"⟩
+    throw ⟨second.pos, "more than one @unique (one per entity; separate multiple groups with ;)"⟩
 
-/-- `@references` の項目(列、`cascade` のアクション名(`restrict` なら無し)、位置)。 -/
+/-- The `@references` items (column, the `cascade` action name (none for `restrict`), position). -/
 def referenceItemsOf (e : Entity) : Except CedarLex.Error (List (String × Option String × Pos)) := do
   match e.annotations.filter (·.key == "references") with
   | [] => return []
@@ -1188,16 +1213,17 @@ def referenceItemsOf (e : Entity) : Except CedarLex.Error (List (String × Optio
       match words with
       | [c, "restrict"] => pure (c, none, a.pos)
       | [c, "cascade", act] => pure (c, some act, a.pos)
-      | _ => throw ⟨a.pos, "@references の各項目は「列 restrict」か「列 cascade アクション名」(項目はカンマ区切り)"⟩
-  | _ :: second :: _ => throw ⟨second.pos, "@references が 2 つ以上ある(1 エンティティに 1 つ)"⟩
+      | _ => throw ⟨a.pos, "each @references item must be \"column restrict\" or \"column cascade actionName\" (items are comma-separated)"⟩
+  | _ :: second :: _ => throw ⟨second.pos, "more than one @references (one per entity)"⟩
 
-/-- `start` のテーブルの行の削除が、`cascade` の宣言を辿って `goal` のテーブルの行の削除に届くか。 -/
+/-- Whether deleting a row of table `start` reaches, following the `cascade` declarations, the deletion of a row of
+    table `goal`. -/
 def cascadeReaches (edges : List Nyxis.Db.Reference) (start goal : EntityType) : Nat → Bool
   | 0 => false
   | fuel + 1 =>
     (edges.filter (·.target == start)).any fun e => e.table == goal || cascadeReaches edges e.table goal fuel
 
-/-- 注釈から制約を構成し、検査する。 -/
+/-- Builds and checks the constraints from the annotations. -/
 def collectConstraints (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl)
     (ets : Cedar.Validation.EntitySchema) : Except CedarLex.Error Nyxis.Db.Constraints := do
   let mut uniques : List Nyxis.Db.Unique := []
@@ -1213,86 +1239,88 @@ def collectConstraints (doc : Document) (ctx : Ctx) (actions : List Authz.Action
           match ctx.tables.find? (·.ty == ty) with
           | none =>
             unless groups.isEmpty && items.isEmpty do
-              throw ⟨e.pos, s!"エンティティ {label} はテーブルではないので @unique / @references を添えられない"⟩
+              throw ⟨e.pos, s!"entity {label} is not a table, so it cannot carry @unique / @references"⟩
           | some table =>
             for (cols, pos) in groups do
               for c in cols do
                 unless table.columns.contains c do
-                  throw ⟨pos, s!"@unique の列 {c} はエンティティ {label} に無い"⟩
+                  throw ⟨pos, s!"@unique column {c} is not in entity {label}"⟩
               uniques := uniques ++ [⟨ty, cols⟩]
-            let some entry := ets.find? ty | throw ⟨e.pos, s!"エンティティ {label} の型が無い"⟩
+            let some entry := ets.find? ty | throw ⟨e.pos, s!"the type of entity {label} does not exist"⟩
             for (c, cascade, pos) in items do
               if references.any (fun r => r.table == ty && r.column == c) then
-                throw ⟨pos, s!"@references に列 {c} が重複している"⟩
+                throw ⟨pos, s!"column {c} is duplicated in @references"⟩
               let some q := entry.attrs.find? c
-                | throw ⟨pos, s!"@references の列 {c} はエンティティ {label} に無い"⟩
+                | throw ⟨pos, s!"@references column {c} is not in entity {label}"⟩
               let target ← match q.getType with
                 | .entity p =>
                   if ctx.tables.any (·.ty == p) then pure p
-                  else throw ⟨pos, s!"@references の列 {c} の型 {showType p} はテーブルではない"⟩
-                | _ => throw ⟨pos, s!"@references の列 {c} の型は実体参照(テーブルの型)でなければならない(集合・他の型は対応しない)"⟩
+                  else throw ⟨pos, s!"the type {showType p} of @references column {c} is not a table"⟩
+                | _ => throw ⟨pos, s!"the type of @references column {c} must be an entity reference (a table type) (sets and other types are not supported)"⟩
               let onDelete ← match cascade with
                 | none => pure Nyxis.Db.OnDelete.restrict
                 | some act =>
                   let uid : EntityUID := ⟨⟨"Action", []⟩, act⟩
                   match actions.find? (·.action == uid) with
-                  | none => throw ⟨pos, s!"@references の cascade のアクション {act} が無い"⟩
+                  | none => throw ⟨pos, s!"the @references cascade action {act} does not exist"⟩
                   | some decl =>
                     unless decl.effect == ⟨.delete, ty⟩ do
-                      throw ⟨pos, s!"@references の cascade のアクション {act} の効果は delete {showType ty}(このテーブルの削除)でなければならない"⟩
+                      throw ⟨pos, s!"the effect of the @references cascade action {act} must be delete {showType ty} (deletion from this table)"⟩
                     pure (.cascade uid)
               references := references ++ [⟨ty, c, target, onDelete⟩]
   let cascades := references.filter fun r => match r.onDelete with | .cascade _ => true | .restrict => false
   for r in cascades do
     if cascadeReaches cascades r.table r.target (cascades.length + 1) then
-      throw ⟨default, s!"@references の cascade が循環している({showType r.target} の削除が {showType r.table} を経て {showType r.target} に戻る)"⟩
+      throw ⟨default, s!"the @references cascades form a cycle (deleting {showType r.target} returns to {showType r.target} via {showType r.table})"⟩
   return { uniques, references }
 
-/-! ## 添付の列
+/-! ## Attachment columns
 
-テーブルの注釈 `@attachment("列")` は、添付のオブジェクトの名(nyxis が発行した一意 ID)を保存する String 型の列を
-名指しする。`download` の効果はこの列の現在の値からオブジェクトのパスを決める。拒むもの: 無い列(`collectEntities`)、
-String でない型の列。 -/
+The table annotation `@attachment("column")` names the String column that stores the name of the attached object (a
+unique ID issued by nyxis). The `download` effect determines the object's path from the current value of this column.
+Rejected: a missing column (`collectEntities`) and a column whose type is not String. -/
 
-/-- 添付の列の宣言を型環境で検査して構成する: 列の型は String でなければならない。 -/
+/-- Checks and builds the attachment-column declarations against the type environment: the column type must be String.
+    -/
 def collectAttachments (ctx : Ctx) (ets : Cedar.Validation.EntitySchema) :
     Except CedarLex.Error (List (Table × Column)) := do
   let mut out : List (Table × Column) := []
   for t in ctx.tables do
     if let some col := t.attachment then
-      let some entry := ets.find? t.ty | throw ⟨t.pos, s!"エンティティ {showType t.ty} の型が無い"⟩
+      let some entry := ets.find? t.ty | throw ⟨t.pos, s!"the type of entity {showType t.ty} does not exist"⟩
       let some q := entry.attrs.find? col
-        | throw ⟨t.pos, s!"@attachment の列 {col} はエンティティ {showType t.ty} に無い"⟩
+        | throw ⟨t.pos, s!"@attachment column {col} is not in entity {showType t.ty}"⟩
       unless q == .required .string do
-        throw ⟨t.pos, s!"@attachment の列 {col} の型は String(省略不可)でなければならない"⟩
+        throw ⟨t.pos, s!"the type of @attachment column {col} must be String (required)"⟩
       out := out ++ [(t.ty, col)]
   return out
 
-/-! ## メール送信と外部 API 呼び出しの列
+/-! ## Mail and external API call columns
 
-`mail T(宛先列; 件名列, 本文列…)` の宛先・件名・本文の列と `call … url: 列 …` の URL の列は、String(省略不可)でなければ
-ならない(宛先はメールアドレス、送り先は HTTPS の URL、件名と本文はそのまま送る)。`call` の本文の列は任意の型(JSON に写す)。 -/
+The recipient, subject and body columns of `mail T(recipientColumn; subjectColumn, bodyColumn…)` and the URL column of
+`call … url: column …` must be String (required) (the recipient is an email address, the destination an HTTPS URL, and
+the subject and body are sent as-is). The body columns of `call` may have any type (mapped to JSON). -/
 
-/-- 外部効果の宣言の列の型を型環境で検査する。 -/
+/-- Checks the column types of external-effect declarations against the type environment. -/
 def checkExternalColumns (actions : List Authz.ActionDecl) (ets : Cedar.Validation.EntitySchema) :
     Except CedarLex.Error Unit := do
   for decl in actions do
     let requireString (what : String) (cols : List Column) : Except CedarLex.Error Unit := do
       let some entry := ets.find? decl.effect.table
-        | throw ⟨default, s!"効果の対象 {showType decl.effect.table} の型が無い"⟩
+        | throw ⟨default, s!"the type of effect target {showType decl.effect.table} does not exist"⟩
       for c in cols do
         let some q := entry.attrs.find? c
-          | throw ⟨default, s!"{what}の列 {c} はエンティティ {showType decl.effect.table} に無い"⟩
+          | throw ⟨default, s!"{what} column {c} is not in entity {showType decl.effect.table}"⟩
         unless q == .required .string do
-          throw ⟨default, s!"アクション {decl.action.eid} の{what}の列 {c} の型は String(省略不可)でなければならない"⟩
+          throw ⟨default, s!"the type of {what} column {c} of action {decl.action.eid} must be String (required)"⟩
     match decl.effect.kind with
-    | .mail recipient content => requireString "mail の効果の宛先・件名・本文" (recipient :: content)
-    | .call _ _ (.column url) _ _ _ => requireString "call の効果の url: " [url]
+    | .mail recipient content => requireString "mail effect recipient/subject/body" (recipient :: content)
+    | .call _ _ (.column url) _ _ _ => requireString "call effect url:" [url]
     | _ => pure ()
 
-/-- 構文木から `Authz.Schema` を構成し、検査する。テーブルと列、効果つきのアクション、同じ文書からの
-    cedar-lean の型環境、親を指す列と所属行、一意性と参照整合の宣言、添付の列、メール送信と外部 API
-    呼び出しの列の型、名前付きの送り先。 -/
+/-- Builds and checks `Authz.Schema` from the syntax tree: tables and columns, actions with effects, the cedar-lean type
+    environment from the same document, parent columns and membership rows, uniqueness and referential-integrity
+    declarations, attachment columns, the column types of mail and external API calls, and named destinations. -/
 def elaborate (doc : Document) : Except CedarLex.Error Authz.Schema := do
   let ctx ← collectCommons doc
   let ctx ← collectEntities doc ctx
@@ -1304,7 +1332,7 @@ def elaborate (doc : Document) : Except CedarLex.Error Authz.Schema := do
   return { tables := ctx.tables.map (fun t => (t.ty, t.columns)), actions, types, parents, memberships, constraints,
            attachments, destinations := ctx.destinations.map fun (name, decl, _) => (name, decl) }
 
-/-- Cedar スキーマ(人間可読形式)の文書から `Authz.Schema` を構成する。失敗すれば位置つきのエラー。 -/
+/-- Builds `Authz.Schema` from a Cedar schema document (human-readable format). On failure, a positioned error. -/
 def parse (s : String) : Except CedarLex.Error Authz.Schema := do
   elaborate (← parseDocumentString s)
 

@@ -2,10 +2,10 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSql
 import Nyxis.Internal.IOTrace
 
-/-! 書き込み結果の内部の照合(A4。Lean の正常終了の条件は以下で証明する)。
-これは認可ではない。FFI と外部 DB との対応は信頼する。
-ここに入るのはモデルが発行した操作だけで、スナップショットのトランザクションの中で行う。
-失敗はそのトランザクションを中断しなければならず、COMMIT の前に状態や HTTP の成功は漏れない。
+/-! Internal matching of write results (A4; the conditions for normal termination in Lean are proved below). This is not
+authorization. The correspondence between the FFI and the external DB is trusted. Only operations issued by the model
+enter here, and this runs inside the snapshot's transaction. A failure must abort that transaction; no state or HTTP
+success leaks before COMMIT.
 -/
 namespace Nyxis.Internal.PostgresWrite
 open Nyxis Db LeanPq.Extern
@@ -30,9 +30,9 @@ def reader (result : PGresult) : Reader where
   rows := native (PqNtuples result)
   columns := native (PqNfields result)
 
-/-- 対応するのは RETURNING の無い主キーの書き込みで、影響する行が 0 または 1 のものだけ。
-正規の件数の表記と、完全に一致するコマンドタグ(INSERT の OID 0 を含む)を要求する。
-0 行の挿入は競合、0 行の更新・削除は不在。書き込みは行を返さない。
+/-- Only primary-key writes without RETURNING that affect 0 or 1 rows are supported. Requires the canonical count
+notation and an exactly matching command tag (including OID 0 for INSERT). An insert of 0 rows is a conflict; an update
+or delete of 0 rows is absent. Writes return no rows.
 -/
 def extract (op : Operation) (r : Reader) : IO Outcome := do
   let tagPrefix ← match op with
@@ -51,10 +51,10 @@ def extract (op : Operation) (r : Reader) : IO Outcome := do
   | .update _ _ _ | .delete _ _ => return .notFound
   | .read _ _ => invalid
 
-/-- 日本語: 実extractの正常終了ならreadではなく、status・行数・列数・
-影響件数・タグの取得が連続するIO状態で成功している。commandOk、行列数0、
-正規件数0/1と操作に対応するタグを検査し、1は行なし成功、0は挿入の競合または
-更新/削除の不在になる。FFIの返り値と実DBの一致は主張しない。 -/
+/-- If the real extract terminates normally, the operation is not a read, and fetching the status, row count, column
+count, affected count and tag succeeded in consecutive IO states. commandOk, zero rows and columns, a canonical count of
+0/1 and the tag corresponding to the operation are checked; 1 becomes success without rows, and 0 becomes a conflict for
+an insert or absent for an update/delete. Agreement between the FFI return values and the real DB is not claimed. -/
 theorem extract_success (op : Operation) (r : Reader) (actual : Outcome)
     (w w' : Void IO.RealWorld) (h : extract op r w = .ok actual w') :
     ∃ tagStart count w1 w2 w3 w4,
@@ -113,8 +113,8 @@ theorem extract_success (op : Operation) (r : Reader) (actual : Outcome)
   all_goals subst w'
   all_goals exact ⟨_, count, w1, w2, w3, w4, rfl, hs, hr, hc, hn, htag, hn'', by simp [hone]⟩
 
-/-- トランザクションの現在のスナップショットに対する Store.apply の結果と照合する。
-妥当な SQL の結果でも、モデルと一致しなければ拒む: ROLLBACK し、公開しない。
+/-- Matches against the result of Store.apply on the transaction's current snapshot. Even a valid SQL result is rejected
+if it does not match the model: ROLLBACK, and expose nothing.
 -/
 def verify (op : Operation) (expected : Outcome) (r : Reader) : IO Unit := do
   let actual ← extract op r
@@ -122,9 +122,9 @@ def verify (op : Operation) (expected : Outcome) (r : Reader) : IO Unit := do
   | .ok none, .ok none | .conflict, .conflict | .notFound, .notFound => pure ()
   | _, _ => invalid
 
-/-- 日本語: 書込み照合が正常終了したなら、同じ開始IO状態からのextractは
-期待値そのものを返し、その値は行を含まない成功・競合・不在のいずれか。
-照合自体は抽出後のIO状態を変えない。FFIと外部DBの一致は主張しない。 -/
+/-- If write matching terminates normally, extract from the same starting IO state returns exactly the expected value,
+which is one of: success without rows, conflict, or absent. The matching itself does not change the IO state after
+extraction. Agreement between the FFI and the external DB is not claimed. -/
 theorem verify_success (op : Operation) (expected : Outcome) (r : Reader)
     (w w' : Void IO.RealWorld)
     (h : verify op expected r w = .ok () w') :

@@ -3,7 +3,7 @@
 English | [日本語](README.ja.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.1.7-orange.svg)](https://github.com/NyxFoundation/nyxis)
+[![Version](https://img.shields.io/badge/version-v0.1.8-orange.svg)](https://github.com/NyxFoundation/nyxis)
 [![Status](https://img.shields.io/badge/status-under%20development-yellow.svg)](ASSUMPTIONS.md)
 [![Lean](https://img.shields.io/badge/Lean-v4.34.1-0052cc.svg?logo=lean&logoColor=white)](lean-toolchain)
 [![Cedar](https://img.shields.io/badge/policies-Cedar-6f42c1.svg)](https://www.cedarpolicy.com/)
@@ -23,7 +23,7 @@ Every backend built on Nyxis comes with a formal proof of the following:
 The Lean kernel checks this property on every `lake build`. Reviewing and auditing authorization comes down to reading the schema and policies and confirming that the proof checks.
 
 > [!NOTE]
-> Nyxis is under active development (v0.1.7). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
+> Nyxis is under active development (v0.1.8). The scope of the guarantee and the assumptions trusted outside the proof are spelled out in [ASSUMPTIONS.md](ASSUMPTIONS.md). Read it before using Nyxis in production.
 
 ## How it works
 
@@ -61,7 +61,7 @@ Besides `read`, `list`, `insert`, `update` (with an explicit column list), and `
 - Lean 4 via [elan](https://github.com/leanprover/elan) (the version is pinned in `lean-toolchain`)
 - Python 3.12 or later, the OpenSSL CLI, and a C compiler
 - pkg-config and the development files for libpq and libcrypto (on macOS, `brew install libpq`; because Homebrew's libpq is keg-only, add `$(brew --prefix libpq)/lib/pkgconfig` to `PKG_CONFIG_PATH`)
-- At runtime: PostgreSQL (Supabase) and Supabase Auth
+- At runtime: PostgreSQL (Supabase), Supabase Auth, and curl 8.4 or later on `PATH` (used for JWKS fetching, Storage, mail and external API calls; the backend checks the version at startup and does not start without it)
 
 ## Build
 
@@ -70,7 +70,7 @@ python3 scripts/prepare-dependencies.py   # fetch pinned dependencies into .lake
 lake build                                # build and check the core, proofs, and tests
 ```
 
-See [docs/dependencies.md](docs/dependencies.md) for dependency preparation and [docs/local-supabase.md](docs/local-supabase.md) for setting up a local Supabase (both in Japanese).
+See [docs/dependencies.md](docs/dependencies.md) for dependency preparation and [docs/local-supabase.md](docs/local-supabase.md) for setting up a local Supabase.
 
 ## Using Nyxis in your application
 
@@ -99,8 +99,6 @@ Link arguments do not propagate to the requiring package, so copy the `postgresL
 | `supabase/` | Local Supabase configuration |
 
 ## Documentation
-
-Apart from the README and ASSUMPTIONS, documentation is currently written in Japanese.
 
 - [ASSUMPTIONS.md](ASSUMPTIONS.md): scope of the guarantee and the assumptions trusted outside the proof
 - [docs/proofs.md](docs/proofs.md): catalog of proven theorems and what each one does not state

@@ -10,22 +10,23 @@ import Nyxis.Internal.ApprovedServer
 import Nyxis.Materials
 
 /-!
-# Test.Axioms — 定理が依存する公理の検査
+# Test.Axioms — checking the axioms the theorems depend on
 
-認可安全性の定理 `Nyxis.Runtime.authorization_safety` と、`Nyxis.*` の下にある全定理(行の出所、承認済み正本への
-適用、接続層の補助定理)が、Lean の標準の公理(`propext` / `Classical.choice` / `Quot.sound`)以外に依存しないことを
-`lake build` で検査する。未証明の穴や独自公理が混ざればビルドが失敗する(許されない公理の名を報告する)。
-主定理については `#print axioms` の出力も併せて残す。
+Checks with `lake build` that the authorization safety theorem `Nyxis.Runtime.authorization_safety` and all theorems
+under `Nyxis.*` (row provenance, the application to approved sources, the connection layer's auxiliary theorems) depend
+on no axioms other than Lean's standard ones (`propext` / `Classical.choice` / `Quot.sound`). If an unproven hole or a
+custom axiom slips in, the build fails (reporting the name of the disallowed axiom). For the main theorem, the output of
+`#print axioms` is kept as well.
 -/
 
 namespace Test.Axioms
 
 open Lean Elab Command
 
-/-- 許される公理。 -/
+/-- The allowed axioms. -/
 def allowed : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
-/-- `#assert_axioms c` — 定数 `c` が依存する公理が `allowed` に収まらなければエラーにする。 -/
+/-- `#assert_axioms c` — error if the axioms the constant `c` depends on are not within `allowed`. -/
 elab "#assert_axioms " id:ident : command => do
   let n ← liftTermElabM (realizeGlobalConstNoOverloadWithInfo id)
   let axioms ← collectAxioms n
@@ -34,8 +35,10 @@ elab "#assert_axioms " id:ident : command => do
       throwError "{n} depends on a disallowed axiom: {a}"
   logInfo m!"{n} depends on axioms: {axioms.toList}"
 
-/-- `#assert_axioms_under ns` — 名前空間 `ns` の下にある、読み込み済みの全定理(private 定理を含む)について `allowed` を検査する。
-    列挙を手で保守しないため、補助定理の追加・削除で検査が漏れない。 -/
+/-- `#assert_axioms_under ns` — check `allowed` for every loaded theorem under the namespace `ns` (including private
+    theorems). Since the enumeration is not maintained by hand, adding or removing auxiliary theorems never leaves one
+    unchecked.
+    -/
 elab "#assert_axioms_under " ns:ident : command => do
   let env ← getEnv
   let mut count : Nat := 0
@@ -51,37 +54,41 @@ elab "#assert_axioms_under " ns:ident : command => do
     count := count + 1
   logInfo m!"{count} theorems under {ns.getId} depend only on {allowed}"
 
--- 主定理と、承認済み正本への適用。`#print axioms` の出力も残す。
+-- The main theorem and its application to approved sources. The output of `#print axioms` is kept as well.
 #assert_axioms Nyxis.Runtime.authorization_safety
 #assert_axioms Nyxis.Approved.authorization_safety
 #print axioms Nyxis.Runtime.authorization_safety
 #print axioms Nyxis.Approved.authorization_safety
 
--- 判定材料の限定。認可層の判定(限定した材料)と判定材料の全体での判定の一致。cedar-lean の slicing 定理と
--- 構成による実体の適合性に依存する。
+-- Restricting the decision materials. Agreement between the authorization layer's decision (on restricted materials)
+-- and the decision on all decision materials. Depends on cedar-lean's slicing theorem and on entity conformance by
+-- construction.
 #assert_axioms Nyxis.Authz.permits_authorized
 #assert_axioms Nyxis.Materials.isAuthorized_slice
 #assert_axioms Nyxis.Materials.instanceOfSchema_entities
 #print axioms Nyxis.Authz.permits_authorized
--- 部分的な取得(点検索)との一致。検査 `coversOp` / `coversStep` に通れば判定と `step` の結果が全体と一致する。
+-- Agreement with partial fetching (point lookups). If the checks `coversOp` / `coversStep` pass, the decision and the
+-- result of `step` agree with the full ones.
 #assert_axioms Nyxis.Authz.step_eq_of_covers
 #assert_axioms Nyxis.Authz.permits_eq_of_covers
 #assert_axioms Nyxis.Materials.sliceAtLevel_eq
 #assert_axioms Nyxis.Authz.permittedRows_eq_of_covers
 #print axioms Nyxis.Authz.step_eq_of_covers
--- 一覧の件数とページ。主定理の (4) の各段。
+-- List counts and pages. Each stage of (4) of the main theorem.
 #assert_axioms Nyxis.Runtime.trace_list
 #assert_axioms Nyxis.Runtime.step_list
 #assert_axioms Nyxis.Db.ListQuery.mem_select
 #print axioms Nyxis.Runtime.trace_list
--- 一意性と参照整合、削除の連鎖。主定理の (5) の各段と、部分的な取得での連鎖の一致。
+-- Uniqueness, referential integrity and delete cascades. Each stage of (5) of the main theorem, and agreement of
+-- cascades under partial fetching.
 #assert_axioms Nyxis.Runtime.trace_origin
 #assert_axioms Nyxis.Authz.stepOp_authorized
 #assert_axioms Nyxis.Authz.cascadeRun_authorized
 #assert_axioms Nyxis.Authz.stepOp_eq_of_covers
 #assert_axioms Nyxis.Authz.cascadeRun_eq_of_covers
 #print axioms Nyxis.Runtime.trace_origin
--- 所属行。所属行から決まる祖先と、部分的な取得(所属行の記録)との一致の各段。
+-- Membership rows. Each stage of the ancestors determined by membership rows and of agreement with partial fetching
+-- (recording membership rows).
 #assert_axioms Nyxis.Materials.rowAncestors_ty
 #assert_axioms Nyxis.Materials.entities_find?_eq
 #assert_axioms Nyxis.Materials.rowData_eq
@@ -92,9 +99,10 @@ elab "#assert_axioms_under " ns:ident : command => do
 #assert_axioms Nyxis.Authz.Known.remove_consistent
 #assert_axioms Nyxis.Authz.judgementEntities_find?_eq
 #print axioms Nyxis.Materials.entities_find?_eq
--- 宣言された外部効果(添付の署名付き URL の発行。メール送信。外部 API 呼び出し)。主定理の (6)〜(9) の各段と、
--- 部分的な取得での外部効果の処理の一致、外部効果の結果の値が判定を変えないこと、選ぶハンドラ(定期処理の起動を含む)が
--- 結果の列に依らないこと。
+-- Declared external effects (issuing signed URLs for attachments; mail sending; external API calls). Each stage of
+-- (6)–(9) of the main theorem, agreement of external-effect processing under partial fetching, the result values of
+-- external effects not changing the decision, and the selected handler (including scheduled-job startup) not depending
+-- on the result sequence.
 #assert_axioms Nyxis.Runtime.trace_external
 #assert_axioms Nyxis.Runtime.trace_signed
 #assert_axioms Nyxis.Runtime.trace_call
@@ -110,7 +118,8 @@ elab "#assert_axioms_under " ns:ident : command => do
 #print axioms Nyxis.Runtime.trace_external
 #print axioms Nyxis.Runtime.trace_call
 #print axioms Nyxis.Runtime.trace_called
--- 接続層の段階的な実行(点検索)。正常終了の記録と、各段の取得が全体の状態と整合するときの `handleRequest` との一致。
+-- Staged execution (point lookups) in the connection layer. The record of successful completion, and agreement with
+-- `handleRequest` when each stage's fetch is consistent with the full state.
 #assert_axioms Nyxis.Internal.PostgresRun.runStaged_success
 #assert_axioms Nyxis.Internal.PostgresRun.StagedRun.model
 #assert_axioms Nyxis.Internal.PostgresRun.StagedRun.sql
@@ -119,12 +128,12 @@ elab "#assert_axioms_under " ns:ident : command => do
 #assert_axioms Nyxis.Internal.PostgresRun.StagedRequest.replay
 #assert_axioms Nyxis.Internal.PostgresRun.handleStaged_success
 #print axioms Nyxis.Internal.PostgresRun.handleStaged_success
--- HTTP 入口から段階的な実行までの合成(実起動の経路)。
+-- Composition from the HTTP entry point to staged execution (the real startup path).
 #assert_axioms Nyxis.Internal.PostgresHttp.handleVerified_readAll_response
 #assert_axioms Nyxis.Internal.ApprovedServer.readAll_response
 #print axioms Nyxis.Internal.ApprovedServer.readAll_response
 
--- 純粋モデル・行の出所・接続層の補助定理(`Nyxis.*` の全定理)。
+-- Pure model, row provenance and the connection layer's auxiliary theorems (all theorems under `Nyxis.*`).
 #assert_axioms_under Nyxis
 
 end Test.Axioms

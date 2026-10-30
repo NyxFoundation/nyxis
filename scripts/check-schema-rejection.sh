@@ -1,11 +1,11 @@
 #!/bin/sh
-# 検査: nyxis が、効果の宣言が無いアクションや、スキーマに無い列を効果が参照するスキーマを
-# ビルド時に拒むことを確かめる。サンプルのスキーマ BulletinBoard/schema.cedarschema から 2 つの変種を作り、
-#   (1) no-effect       — 1 つのアクション(deletePost)の @effect を消す
-#   (2) unknown-column  — editPost の効果に存在しない列 bodyy を書く
-# それぞれを正本の場所に一時的に置いて `lake build` を走らせ、非 0 で終わり期待するエラーが報告されれば合格。
-# 終わりに正本を戻し、`lake build` が exit 0 に戻ることも確かめる。すべて満たせば exit 0、さもなくば 1。
-# 正本は一時ディレクトリに退避し、中断しても trap で戻す(一時ディレクトリは残す)。
+# Check: nyxis rejects, at build time, a schema with an action that has no effect declaration, or with an effect that
+# references a column not in the schema. Two variants are made from the sample schema BulletinBoard/schema.cedarschema:
+# (1) no-effect — remove the @effect of one action (deletePost) (2) unknown-column — write a nonexistent column bodyy in
+# the effect of editPost Each is temporarily put in place of the original and `lake build` is run; it passes if the
+# build exits non-zero and reports the expected error. Finally the original is restored and `lake build` is checked to
+# exit 0 again. Exit 0 if all of this holds, otherwise 1. The original is saved in a temporary directory and restored by
+# a trap even on interruption (the temporary directory is kept).
 set -u
 cd "$(dirname "$0")/../examples/bulletin-board/backend" || exit 1
 
@@ -20,7 +20,7 @@ echo "backup and logs: $tmp"
 
 status=0
 
-# $1 = 変種の名前、$2 = 正本に施す sed のスクリプト、$3 = ビルドログに期待するエラーの語
+# $1 = variant name, $2 = sed script applied to the original, $3 = error text expected in the build log
 try_variant() {
   name=$1
   script=$2
@@ -47,8 +47,8 @@ try_variant() {
   fi
 }
 
-try_variant no-effect '/^@effect("delete Post")$/d' '効果の宣言(@effect)が無い'
-try_variant unknown-column 's/^@effect("update Post(title, body)")$/@effect("update Post(title, bodyy)")/' '列 bodyy はテーブル Post に無い'
+try_variant no-effect '/^@effect("delete Post")$/d' 'has no effect declaration (@effect)'
+try_variant unknown-column 's/^@effect("update Post(title, body)")$/@effect("update Post(title, bodyy)")/' 'column bodyy is not in table Post'
 
 restore
 if lake build > "$tmp/restored.log" 2>&1; then

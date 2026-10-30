@@ -1,46 +1,53 @@
 import Nyxis.Internal.CurlStdin
 import Nyxis.Authz
 
-/-! 承認済みの curl による SMTP(S) でのメール送信(A9。コア専用、未証明)。
+/-! Sending mail over SMTP(S) through the approved curl (A9; core only, unproven).
 
-認可層(`Nyxis.Authz.externalStep`)が permit した外部効果の記録(`Authz.Payload.mail`: 宛先・件名・本文。いずれも対象の
-行の宣言された列の値)についてだけ、接続層(`PostgresRun.runStaged`)がここを呼ぶ。中継はコア設定 `Config.url`
-(`smtps://[user:pass@]ホスト[:port]`、ローカルの Mailpit 等には `smtp://ホスト:port`。資格情報を含むので秘密)で固定し、
-差出人はコア設定 `Config.sender`。要求の値は宛先・件名・本文にだけ現れ、接続先・差出人・ヘッダの名前には使わない。
+The connection layer (`PostgresRun.runStaged`) calls this only for external-effect records that the authorization layer
+(`Nyxis.Authz.externalStep`) permitted (`Authz.Payload.mail`: recipient, subject, and body, all values of declared
+columns of the target row). The relay is fixed by the core configuration `Config.url`
+(`smtps://[user:pass@]host[:port]`, or `smtp://host:port` for a local Mailpit or similar; it is secret because it
+contains credentials), and the sender is the core configuration `Config.sender`. Request values appear only in the
+recipient, subject, and body, and are never used for the destination host, the sender, or header names.
 
-- 設定(URL・差出人・宛先・本文のファイル)は標準入力の curl 設定(`--config -`)で渡し、プロセスの引数には現れない。
-- メッセージ(RFC 5322。本文は UTF-8 の text/plain)は一時ファイル(`IO.FS.createTempFile`。所有者だけが読み書きできる)に
-  書いて `upload-file` で渡し、送信後に消す(curl の SMTP は標準入力の設定と本文を同時には取れず、`data` は使えない)。
-  行頭の `.` の逃がし(dot-stuffing)は curl が行う。
-- `--proto =smtp,smtps`、リダイレクト非追従、接続 5 秒・全転送 20 秒。送信の失敗(curl の終了コードが 0 以外)は例外で、
-  要求全体が 503 になりトランザクションは取り消される(黙って成功にしない)。配送の成否は中継以降の責務(A9)。
+- The configuration (URL, sender, recipient, body file) is passed in a curl configuration on standard input
+  (`--config -`) and does not appear in the process arguments.
+- The message (RFC 5322; the body is UTF-8 text/plain) is written to a temporary file (`IO.FS.createTempFile`; readable
+  and writable only by the owner), passed with `upload-file`, and deleted after sending (curl's SMTP cannot take both
+  the configuration and the body from standard input, so `data` cannot be used). curl performs the escaping of a leading
+  `.` on a line (dot-stuffing).
+- `--proto =smtp,smtps`, no redirect following, 5 seconds to connect and 20 seconds for the whole transfer. A send
+  failure (curl exit code other than 0) is an exception: the whole request becomes 503 and the transaction is rolled
+  back (it is never silently treated as success). Whether delivery succeeds is the responsibility of the relay and
+  beyond (A9).
 -/
 namespace Nyxis.Internal.MailSend
 
-/-- メールの設定。 -/
+/-- Mail configuration. -/
 structure Config where
-  /-- 中継の URL(`smtp://` / `smtps://`)。 -/
+  /-- The relay URL (`smtp://` / `smtps://`). -/
   url : String
-  /-- 差出人のメールアドレス。 -/
+  /-- The sender's email address. -/
   sender : String
 
-/-- メールアドレス: 印字可能な ASCII で、空白・`<`・`>`・`"`・`\`・`,`・`;`・括弧を含まず、`@` を 1 つ(先頭・末尾でなく)
-    持つ(1〜254 文字)。 -/
+/-- An email address: printable ASCII, containing no whitespace, `<`, `>`, `"`, `\`, `,`, `;`, or parentheses, and
+    exactly one `@` (not first or last) (1 to 254 characters). -/
 def validAddress (s : String) : Bool :=
   s.length > 0 && s.length ≤ 254 && (s.toList.filter (· == '@')).length == 1 &&
     !s.startsWith "@" && !s.endsWith "@" &&
     s.toList.all fun c => 33 ≤ c.toNat && c.toNat ≤ 126 && !['<', '>', '"', '\\', ',', ';', '(', ')'].contains c
 
-/-- 中継の URL: `smtp://` または `smtps://` で始まり、印字可能な ASCII で、`"`・`\` を含まない(〜1024 文字)。 -/
+/-- A relay URL: starts with `smtp://` or `smtps://`, printable ASCII, containing no `"` or `\` (up to 1024 characters).
+    -/
 def validUrl (url : String) : Bool :=
   (url.startsWith "smtp://" || url.startsWith "smtps://") && url.length ≤ 1024 &&
     url.toList.all fun c => 33 ≤ c.toNat && c.toNat ≤ 126 && c != '"' && c != '\\'
 
-/-- 2 つの設定を検査して組む。どちらかが不正なら `none`。 -/
+/-- Check the two settings and assemble them. `none` if either is invalid. -/
 def Config.parse (url sender : String) : Option Config :=
   if validUrl url && validAddress sender then some ⟨url, sender⟩ else none
 
-/-- Base64(RFC 4648)。件名の encoded-word に使う。 -/
+/-- Base64 (RFC 4648). Used for the subject's encoded-word. -/
 def base64 (bytes : ByteArray) : String := Id.run do
   let table := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toList
   let at_ := fun (i : Nat) => table.getD i 'A'
@@ -58,17 +65,20 @@ def base64 (bytes : ByteArray) : String := Id.run do
     i := i + 3
   return out
 
-/-- ヘッダの値: CR / LF と制御文字を除く。ASCII でなければ encoded-word(`=?UTF-8?B?…?=`。RFC 2047)にする。 -/
+/-- A header value: CR / LF and control characters removed. If it is not ASCII, it becomes an encoded-word
+    (`=?UTF-8?B?…?=`; RFC 2047). -/
 def headerValue (s : String) : String :=
   let cleaned := String.ofList (s.toList.filter fun c => c.toNat ≥ 32 && c.toNat != 127)
   if cleaned.toList.all (·.toNat < 128) then cleaned
   else "=?UTF-8?B?" ++ base64 cleaned.toUTF8 ++ "?="
 
-/-- 本文の行末を CRLF にする(CRLF と LF を行の区切りとし、単独の CR と NUL は除く — 裸の CR を中継に渡さない)。 -/
+/-- Make the body's line endings CRLF (CRLF and LF are line separators; lone CRs and NULs are removed — a bare CR is
+    never passed to the relay). -/
 def crlf (s : String) : String :=
   "\r\n".intercalate ((((s.replace "\r\n" "\n").replace "\r" "").replace "\x00" "").splitOn "\n")
 
-/-- メッセージ(RFC 5322)。差出人と宛先は検査済みのアドレス、件名はヘッダの値、本文は UTF-8 の text/plain。 -/
+/-- The message (RFC 5322). The sender and recipient are checked addresses, the subject is a header value, and the body
+    is UTF-8 text/plain. -/
 def message (config : Config) (recipient subject body : String) : String :=
   "From: " ++ config.sender ++ "\r\n" ++
   "To: " ++ recipient ++ "\r\n" ++
@@ -79,7 +89,8 @@ def message (config : Config) (recipient subject body : String) : String :=
   "\r\n" ++
   crlf body ++ "\r\n"
 
-/-- curl に標準入力で渡す設定(`--config -`)。資格情報(URL の中)と宛先は引数に現れない。 -/
+/-- The configuration passed to curl on standard input (`--config -`). The credentials (inside the URL) and the
+    recipient do not appear in the arguments. -/
 def configText (config : Config) (recipient file : String) : String :=
   String.intercalate "\n" [
     "url = " ++ CurlStdin.quote config.url,
@@ -87,16 +98,18 @@ def configText (config : Config) (recipient file : String) : String :=
     "mail-rcpt = " ++ CurlStdin.quote recipient,
     "upload-file = " ++ CurlStdin.quote file] ++ "\n"
 
-/-- 固定の輸送の方針。SMTP / SMTPS だけ、リダイレクト非追従、接続 5 秒・全転送 20 秒。 -/
+/-- The fixed transport policy. SMTP / SMTPS only, no redirect following, 5 seconds to connect and 20 seconds for the
+    whole transfer. -/
 def arguments : Array String := #[
   "--disable", "--silent", "--globoff", "--noproxy", "*",
   "--proto", "=smtp,smtps", "--proto-redir", "=smtp,smtps", "--max-redirs", "0",
   "--connect-timeout", "5", "--max-time", "20",
   "--config", "-"]
 
-/-- メールを送る。失敗は例外。 -/
+/-- Send mail. Failure is an exception. -/
 def send (config : Config) (recipient subject body : String) : IO Unit := do
-  -- 設定と宛先の再検査(構成子で検査を迂回した値や、宛先の列の不正な値では送らない)。
+  -- Re-check the configuration and recipient (do not send with values that bypassed the check via the constructor, or
+  -- with an invalid value in the recipient column).
   unless validUrl config.url && validAddress config.sender do throw (IO.userError "mail configuration invalid")
   unless validAddress recipient do throw (IO.userError "mail recipient invalid")
   let (handle, path) ← IO.FS.createTempFile

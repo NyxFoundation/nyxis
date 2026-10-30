@@ -3,7 +3,7 @@ import Test.Fixture
 
 open Nyxis Db Cedar.Spec Nyxis.Internal.PostgresSnapshot
 
-/-- 型環境が要らない検査用の空の型環境。 -/
+/-- An empty type environment for tests that do not need one. -/
 private def noTypes : Cedar.Validation.Schema := ⟨Cedar.Data.Map.empty, Cedar.Data.Map.empty⟩
 
 private def user : Table := ⟨"User", []⟩
@@ -63,4 +63,4 @@ private def emptyRows := Test.Fixture.schema.tables.map fun (t, cols) =>
   s.find? post "same" == some Cedar.Data.Map.empty &&
   s.find? user "same" == some Cedar.Data.Map.empty) == some true
 -- Quoting/escaping is decoded as data; JSONB whitespace is accepted.
-#guard (decoded [[some "';日本語", some " [ \"string\", \"a\\n\\\"b\" ] "]]).isOk
+#guard (decoded [[some "';\u65E5\u672C\u8A9E", some " [ \"string\", \"a\\n\\\"b\" ] "]]).isOk

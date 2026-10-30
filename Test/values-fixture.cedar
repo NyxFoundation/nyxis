@@ -1,5 +1,5 @@
-// コアの検査用ポリシー。values-fixture.cedarschema に対して妥当。
-// datetime の大小、集合の contains、レコードの属性参照、decimal の比較、実体の親(in)を判定に使う。
+// Policies for the core checks. Valid against values-fixture.cedarschema. Uses datetime ordering, set contains, record
+// attribute access, decimal comparison, and entity parents (in) in decisions.
 
 @id("register-self")
 permit (
@@ -8,8 +8,8 @@ permit (
   resource is User
 ) when { resource == principal && context.values.admin == false };
 
-// 所有者(文書の親: `resource in principal` は、親を指す列 owner の値が主体のとき成り立つ)と、
-// 共有先(Set<User>)に含まれる利用者は読める。
+// The owner (the document's parent: `resource in principal` holds when the value of the column owner, which points to
+// the parent, is the principal) and users included in the share list (Set<User>) can read.
 @id("read-own-or-shared")
 permit (
   principal is User,
@@ -17,7 +17,8 @@ permit (
   resource is Doc
 ) when { resource in principal || resource.viewers.contains(principal) };
 
-// "public" ラベル(Set<String>)を持ち、作成日時が期限より前の文書は匿名を含む誰でも読める。
+// A document that has the "public" label (Set<String>) and whose creation time is before its expiry can be read by
+// anyone, including anonymous users.
 @id("read-public-unexpired")
 permit (
   principal,
@@ -29,7 +30,7 @@ permit (
   resource.created > datetime("2000-01-01")
 };
 
-// レコード属性 meta の editor は、meta.pinned のときだけ読める。
+// The editor in the record attribute meta can read only when meta.pinned holds.
 @id("read-pinned-editor")
 permit (
   principal is User,
@@ -37,7 +38,7 @@ permit (
   resource is Doc
 ) when { resource.meta.editor == principal && resource.meta.pinned };
 
-// 自分を所有者とし、価格(decimal)が 100 未満の文書だけ作成できる。
+// A user can create only documents that name themselves as owner and whose price (decimal) is less than 100.
 @id("create-own-cheap")
 permit (
   principal is User,
@@ -45,7 +46,7 @@ permit (
   resource is Doc
 ) when { resource.owner == principal && resource.price.lessThan(decimal("100.0")) };
 
-// 所有者は編集できるが、期限を作成日時より前にはできない。
+// The owner can edit, but cannot set the expiry before the creation time.
 @id("edit-own")
 permit (
   principal is User,

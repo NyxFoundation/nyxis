@@ -1,7 +1,7 @@
 import Nyxis
 
-/-! 掲示板のモデル・接続検査専用データ。コアの Test には依存しない。
-手書きのスキーマとポリシーは Model の guard で正本との一致を検査する。 -/
+/-! Data used only by the bulletin board's model and connection checks. Does not depend on the core Test. The guards in
+Model check that the hand-written schema and policies match the approved sources. -/
 
 namespace BulletinBoardTest.Fixture
 
@@ -12,7 +12,7 @@ open Nyxis.Db
 open Nyxis.Authz
 open Nyxis.Runtime
 
-/-! ## スキーマ -/
+/-! ## Schema -/
 
 def userT : EntityType := ⟨"User", []⟩
 def postT : EntityType := ⟨"Post", []⟩
@@ -22,7 +22,7 @@ def act (name : String) : EntityUID := ⟨actionT, name⟩
 def user (id : String) : EntityUID := ⟨userT, id⟩
 def post (id : String) : EntityUID := ⟨postT, id⟩
 
-/-- 型環境のエンティティ項目(標準型。属性はすべて必須、親と tags は無し)。 -/
+/-- An entity entry of the type environment (standard type. All attributes required, no parents or tags). -/
 def entityTy (attrs : List (String × Cedar.Validation.CedarType)) : Cedar.Validation.EntitySchemaEntry :=
   .standard { ancestors := Set.make [], attrs := Map.make (attrs.map fun (n, t) => (n, .required t)), tags := none }
 
@@ -30,17 +30,18 @@ def userAttrs : List (String × Cedar.Validation.CedarType) := [("admin", .bool 
 def postAttrs : List (String × Cedar.Validation.CedarType) :=
   [("author", .entity userT), ("title", .string), ("body", .string), ("published", .bool .anyBool)]
 
-/-- 判定の文脈の型 `{ values: { … } }`。 -/
+/-- The type of the decision context, `{ values: { … } }`. -/
 def valuesCtx (fields : List (String × Cedar.Validation.QualifiedType)) : Cedar.Validation.RecordType :=
   Map.make [("values", .required (.record (Map.make fields)))]
 
-/-- 型環境のアクション項目。 -/
+/-- An action entry of the type environment. -/
 def actionTy (principals resources : List EntityType)
     (context : Cedar.Validation.RecordType := Map.empty) : Cedar.Validation.ActionSchemaEntry :=
   { appliesToPrincipal := Set.make principals, appliesToResource := Set.make resources,
     ancestors := Set.make [], context }
 
-/-- cedar-lean の型環境(手書き。正本 `schema.cedarschema` から構成されるものと `Model` で一致を検査する)。 -/
+/-- The cedar-lean type environment (hand-written. `Model` checks that it matches the one built from the source
+    `schema.cedarschema`). -/
 def types : Cedar.Validation.Schema :=
   ⟨ Map.make [(userT, entityTy userAttrs), (postT, entityTy postAttrs), (anonymousType, entityTy [])]
   , Map.make
@@ -68,7 +69,7 @@ def schema : Schema :=
       , ⟨act "readUser", ⟨.read, userT⟩⟩ ]
     types }
 
-/-! ## ポリシー -/
+/-! ## Policies -/
 
 def resourceAttr (a : Attr) : Expr := .getAttr (.var .resource) a
 def principalAttr (a : Attr) : Expr := .getAttr (.var .principal) a
@@ -97,7 +98,7 @@ def policies : Policies :=
   , permitWhen "read-user" (.is userT) (.actionScope (.eq (act "readUser"))) (.is userT)
       (.or (.binaryApp .eq (.var .resource) (.var .principal)) principalIsAdmin) ]
 
-/-! ## DB の初期状態 -/
+/-! ## Initial DB state -/
 
 def row (kvs : List (Column × Cell)) : Row := Map.make kvs
 
@@ -116,10 +117,11 @@ def bob : Principal := .user (user "bob")
 def root : Principal := .user (user "root")
 def anon : Principal := .anonymous
 
-/-- 検査用の固定のサーバー生成値(サンプルの正本は `context` に `now` / `id` を宣言していないので判定に現れない)。 -/
+/-- Fixed server-generated values for the checks (the sample's sources do not declare `now` / `id` in `context`, so they
+    do not appear in decisions). -/
 def gen : Generated := { now := ⟨1700000000000⟩, id := "00000000-0000-4000-8000-000000000001" }
 
-/-! ## 1 回の呼び出しの検査 -/
+/-! ## Checks of a single call -/
 
 def isOk : Outcome → Bool
   | .ok _ => true
@@ -129,12 +131,12 @@ def isDenied : Outcome → Bool
   | .denied => true
   | _ => false
 
-/-- 呼び出しが許可され、操作が 1 つ発行され、その操作の主体が呼び出しの主体である。 -/
+/-- The call is permitted, exactly one operation is issued, and that operation's principal is the call's principal. -/
 def allowed (p : Principal) (s : Store) (action : String) (key : Key) (values : Row := Map.empty) : Bool :=
   let r := step schema policies p gen s (act action) key values {}
   isOk r.outcome && (match r.issued with | [i] => i.principal == p && i.generated == gen | _ => false)
 
-/-- 呼び出しが拒否され、操作は発行されず、DB の状態も変わらない。 -/
+/-- The call is denied, no operation is issued, and the DB state does not change. -/
 def denied (p : Principal) (s : Store) (action : String) (key : Key) (values : Row := Map.empty) : Bool :=
   let r := step schema policies p gen s (act action) key values {}
   isDenied r.outcome && r.issued.isEmpty && r.store == s

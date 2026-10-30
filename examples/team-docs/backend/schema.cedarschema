@@ -1,65 +1,76 @@
-// 2 つめの公式サンプル(team-docs)の Cedar スキーマ。
+// Cedar schema of the second official sample (team-docs).
 //
-// 組織(ワークスペース)に複数の利用者が owner / editor / viewer として属し、文書を組織内で共有し、
-// 個別の利用者にも共有できる。文書は作成日時と更新日時を持ち、その値は nyxis が要求ごとに決める
-// 現在時刻(`context.now`)でなければ記録されない(policies.cedar)。
+// Several users belong to an org (workspace) as owner / editor / viewer; documents are shared within the org and can
+// also be shared with individual users. Documents have creation and update times, which are recorded only if they are
+// the current time nyxis determines per request (`context.now`) (policies.cedar).
 //
-// nyxis ではこの文書がテーブル定義を兼ねる:
-//   - エンティティ型 = テーブル、属性 = 列、エンティティ ID = 主キー(写像のコードは無い)。
-//   - 各アクションには `@effect("…")` で効果(permit されたとき DB で起きる操作)を 1 つ添える。
-//   - 所属は別テーブルの行(所属行)で表す: `Membership` の行が「利用者 user が組織 org の組 team に属する」ことを
-//     表し、`entity User in [Team, Org]` と `@memberships("Membership: user -> team, org")` は、利用者の実体が
-//     自分の所属行の team と org の値を親(Cedar の祖先)に持つことを宣言する。ポリシーは
-//     `principal in resource.org`(主体が対象の組織のメンバーなら)と `principal in resource.org.editors`
-//     (主体が対象の組織の編集者の組に属するなら)と書ける。多対多の所属(1 人が複数の組織に、1 つの組織に
-//     複数の人が属する)は所属行の数だけ表せる。
-//   - 組(`Team`)は組織ごとの役割の組で、組織は editor の組と viewer の組を 1 つずつ参照する。owner は組織の行の
-//     利用者の集合(`owners`)で持つ(所属の変更と組織の削除ができる少数の管理者)。
-//   - `entity Doc in [Org]` と `@parents("org")` は、文書の実体が列 `org` の値(組織)を親に持つことを宣言する。
-//   - `Set<User>` の列は実体の集合(owner の集合、個別の共有先)。
-//   - 挿入・更新のアクションの `context` には提案される値 `values` が入り、`now` を宣言したアクションでは
-//     nyxis の決めた現在時刻が `context.now` に入る(ハンドラは偽れない)。
-//   - `@unique("列, …")` は列の組の一意性(組織名は一意、文書の題名は組織の中で一意、組の役割は組織の中で一意、
-//     所属行は利用者と組の組ごとに 1 つ)。違反は 409。
-//   - `@references("列 restrict, 列 cascade アクション")` は実体参照の列の参照整合: 参照先の行が無い挿入・更新は 409。
-//     参照される行の削除は、`restrict` なら参照する行があれば 409(文書を作った利用者は消せない)、`cascade` なら
-//     参照する行も消える(組織を消すと組・所属行・文書も消え、利用者を消すとその所属行も消える)。消える各行は
-//     そのアクション(`deleteTeam` / `removeMember` / `deleteDoc`)で判定され、1 行でも permit されなければ要求全体が
-//     403 になり何も消えない。nyxis は同じ制約を DB にも設定する。
-//   - 添付: 文書は 1 つの添付ファイルを Supabase Storage に持てる。`@attachment("attachment")` は、添付のオブジェクトの
-//     名(nyxis が発行した一意 ID)を保存する String 列を名指しする(空文字列は添付なし)。`@effect("upload Doc")` /
-//     `@effect("download Doc")` は宣言された外部効果で、permit されたときだけ nyxis が Storage のオブジェクト
-//     `Doc/<文書の主キー>/<名>`(アップロードでは `context.id`、ダウンロードでは列 `attachment` の値)への署名付き URL の
-//     発行を求める。ハンドラはパスもバケットも名指しできず、ファイルの内容は nyxis を通らない。
-//   - 通知: 利用者は文書を購読でき(`Subscription`。宛先のメールアドレスは購読時に利用者が書く列 `email`。Auth からは
-//     読まない)、文書が共有されると購読者ごとに通知の行(`Notification`: 宛先・件名・本文・送信済みか)が作られて
-//     メールが送られる。`@effect("mail Notification(email; subject, body)")` は宣言された外部効果で、permit されたときだけ
-//     nyxis がその行の列 `email` を宛先、`subject` を件名、`body` を本文としてコア設定の SMTP 中継へ送る。ハンドラは
-//     宛先も内容も名指しできない。送信は DB を変えない(送信済みの記録は別のアクション `markNotificationSent`)。
-//   - `Service` は nyxis が予約するサービス主体の型(テーブルではない)。定期処理(`TeamDocs.Jobs.notifyPending`: 送信
-//     済みでない通知のうち、宛先の利用者がいま文書を読めるものだけを送る)の主体で、ID はコア設定
-//     `NYXIS_SERVICE_PRINCIPAL` から決まる。HTTP の要求の主体には決してならない(JWT の主体は常に `User`)。
-//   - `Anonymous` は nyxis が予約する主体の型で、JWT が無い・検証に失敗したリクエストの主体。テーブルではない。
-//   - 外部 API 呼び出し: `@external("base: …; auth: …")` を添えた `Summarizer` / `Audit` は名前付きの送り先
-//     (nyxis が予約する仲間。テーブルではなく、属性・親を持たず、`appliesTo` にも書けない)。ベース URL と認証方式は
-//     ここに書き、鍵はコア設定 `NYXIS_EXT_SUMMARIZER` / `NYXIS_EXT_AUDIT`(環境変数。正本には名前だけ)。
-//     `@effect("call …")` は宣言された外部効果で、permit されたときだけ nyxis が、正本の宣言と対象の行の列だけから
-//     決めた URL と本文を送る(ハンドラは URL もヘッダも本文も組めない)。`sync`(`summarizeDoc`)は応答を正本で宣言した型に
-//     復号してハンドラへ値として渡し、ハンドラはそれを別のアクション(`recordSummary`)で DB に書く — その書き込みは通常の
-//     判定を通る。`async`(`announceDocUpdate`)は応答なしで、nyxis の予約テーブル `_nyxis_outbox` に同じトランザクションで
-//     書かれ、COMMIT の後に nyxis の内部ループが送る。このサンプルの送り先はどちらもローカルの模擬 API
-//     (`scripts/check-team-docs.py` が https://localhost:18118 に立てる)で、本番の URL ではない。
+// In nyxis this document doubles as the table definition: - entity type = table, attribute = column, entity ID =
+// primary key (there is no mapping code). - Each action carries one effect with `@effect("…")` (the operation that
+// happens in the DB when permitted).
+// - Membership is represented by rows of a separate table (membership rows): a `Membership` row states that "user user
+// belongs to team team of org org", and `entity User in [Team, Org]` with
+// `@memberships("Membership: user -> team, org")` declares that a user entity has the team and org values of its own
+// membership rows as parents (Cedar ancestors). Policies can write `principal in resource.org` (if the principal is a
+// member of the resource's org) and `principal in resource.org.editors` (if the principal belongs to the editor team of
+// the resource's org). Many-to-many membership (one person in several orgs, one org with several people) is expressed
+// by as many membership rows as needed.
+// - A team (`Team`) is a per-org role team; an org references exactly one editor team and one viewer team. owner is
+// held as the org row's set of users (`owners`) (a few administrators who can change memberships and delete the org).
+// - `entity Doc in [Org]` with `@parents("org")` declares that a document entity has the value of column `org` (the
+// org) as parent. - A `Set<User>` column is a set of entities (the set of owners, the individual share targets).
+// - The `context` of insert and update actions contains the proposed values `values`, and for actions that declare
+// `now`, `context.now` contains the current time nyxis determined (the handler cannot forge it).
+// - `@unique("column, …")` is uniqueness of a tuple of columns (org names are unique, document titles are unique within
+// an org, team roles are unique within an org, one membership row per (user, team) pair). A violation is 409.
+// - `@references("column restrict, column cascade action")` is referential integrity of entity reference columns: an
+// insert or update whose referenced row is missing is 409. Deleting a referenced row is 409 under `restrict` if
+// referencing rows exist (a user who created documents cannot be deleted); under `cascade` the referencing rows are
+// deleted too (deleting an org also deletes its teams, membership rows and documents; deleting a user deletes its
+// membership rows). Each deleted row is judged by that action (`deleteTeam` / `removeMember` / `deleteDoc`), and if
+// even one row is not permitted the whole request becomes 403 and nothing is deleted. nyxis also sets the same
+// constraints in the DB.
+// - Attachments: a document can have one attachment file in Supabase Storage. `@attachment("attachment")` names the
+// String column that stores the attachment object's name (a unique ID issued by nyxis) (the empty string means no
+// attachment). `@effect("upload Doc")` / `@effect("download Doc")` are declared external effects: only when permitted
+// does nyxis request issuance of a signed URL for the Storage object `Doc/<document primary key>/<name>` (`context.id`
+// for uploads, the value of column `attachment` for downloads). The handler can name neither the path nor the bucket,
+// and file contents do not pass through nyxis.
+// - Notifications: a user can subscribe to a document (`Subscription`; the recipient mail address is the column `email`
+// the user writes when subscribing; it is not read from Auth), and when the document is shared, a notification row
+// (`Notification`: recipient, subject, body, whether sent) is created per subscriber and mail is sent.
+// `@effect("mail Notification(email; subject, body)")` is a declared external effect: only when permitted does nyxis
+// send to the SMTP relay of the core settings, with the row's column `email` as recipient, `subject` as subject and
+// `body` as body. The handler can name neither the recipient nor the content. Sending does not change the DB (the sent
+// record is a separate action `markNotificationSent`).
+// - `Service` is the service principal type reserved by nyxis (not a table). It is the principal of the periodic job
+// (`TeamDocs.Jobs.notifyPending`: sends, among the unsent notifications, only those whose recipient user can read the
+// document now), and its ID is determined by the core setting `NYXIS_SERVICE_PRINCIPAL`. It never becomes the principal
+// of an HTTP request (the principal of a JWT is always a `User`).
+// - `Anonymous` is the principal type reserved by nyxis, the principal of requests without a JWT or whose verification
+// failed. Not a table.
+// - External API calls: `Summarizer` / `Audit`, annotated with `@external("base: …; auth: …")`, are named destinations
+// (a kind reserved by nyxis: not tables, with no attributes or parents, and not allowed in `appliesTo`). The base URL
+// and authentication scheme are written here; the keys are the core settings `NYXIS_EXT_SUMMARIZER` / `NYXIS_EXT_AUDIT`
+// (environment variables; the approved source has only their names). `@effect("call …")` is a declared external effect:
+// only when permitted does nyxis send the URL and body it determined from the approved declaration and the target row's
+// columns alone (the handler can build neither the URL, the headers nor the body). `sync` (`summarizeDoc`) decodes the
+// response into the type declared in the approved source and passes it to the handler as a value; the handler writes it
+// to the DB through a separate action (`recordSummary`) — that write passes the ordinary decision. `async`
+// (`announceDocUpdate`) has no response; it is written to nyxis's reserved table `_nyxis_outbox` in the same
+// transaction, and nyxis's internal loop sends it after COMMIT. Both destinations of this sample are a local mock API
+// (started by `scripts/check-team-docs.py` at https://localhost:18118), not production URLs.
 //
-// 開発者はこの文書と policies.cedar を読んで承認する。
+// Developers read and approve this document and policies.cedar.
 
-// 利用者。Supabase Auth のユーザー ID がエンティティ ID(主キー)になる。所属行(Membership)の team と org を親に持つ。
+// A user. The Supabase Auth user ID becomes the entity ID (primary key). Has the team and org of its membership rows
+// (Membership) as parents.
 @memberships("Membership: user -> team, org")
 entity User in [Team, Org] = {
   "name": String
 };
 
-// 組織。owner は利用者の集合で持ち(所属の変更と組織の削除ができる)、editor と viewer はそれぞれ 1 つの組(Team)で
-// 持つ(組の所属は Membership の行)。組織名は一意。
+// An org. owner is held as a set of users (who can change memberships and delete the org); editor and viewer are each
+// held as one team (Team) (team membership is Membership rows). Org names are unique.
 @unique("name")
 entity Org = {
   "name": String,
@@ -68,7 +79,8 @@ entity Org = {
   "viewers": Team
 };
 
-// 組織の役割の組。役割は組織の中で一意(組織ごとに editor の組と viewer の組が 1 つずつ)。組織が消えれば組も消える。
+// A role team of an org. The role is unique within the org (one editor team and one viewer team per org). Deleting the
+// org deletes its teams.
 @unique("org, role")
 @references("org cascade deleteTeam")
 entity Team = {
@@ -76,8 +88,8 @@ entity Team = {
   "role": String
 };
 
-// 所属行: 利用者 user が組織 org の組 team に属する。利用者と組の組ごとに 1 行。利用者・組・組織のどれが消えても
-// 所属行は消える(各行を removeMember で判定)。
+// Membership row: user user belongs to team team of org org. One row per (user, team) pair. If the user, team or org is
+// deleted, the membership row is deleted (each row judged by removeMember).
 @unique("user, team")
 @references("user cascade removeMember, team cascade removeMember, org cascade removeMember")
 entity Membership = {
@@ -86,9 +98,11 @@ entity Membership = {
   "org": Org
 };
 
-// 文書。組織を親に持ち、個別の共有先(shared)を持てる。題名は組織の中で一意。組織が消えれば文書も消え(各文書を
-// deleteDoc で判定)、文書を作った利用者は消せない。添付の名は列 attachment(空文字列は添付なし)。要約(summary)は
-// 外部の要約 API(Summarizer)の応答を recordSummary で記録した値(空文字列は要約なし)。
+// A document. Has an org as parent and can have individual share targets (shared). Titles are unique within an org.
+// Deleting the org deletes the documents (each judged by deleteDoc), and a user who created documents cannot be
+// deleted. The attachment name is column attachment (the empty string means no attachment). summary is the value
+// recorded by recordSummary from the response of the external summarizer API (Summarizer) (the empty string means no
+// summary).
 @parents("org")
 @unique("org, title")
 @references("org cascade deleteDoc, createdBy restrict")
@@ -105,8 +119,9 @@ entity Doc in [Org] = {
   "summary": String
 };
 
-// 購読: 利用者 user が文書 doc の共有の通知を受け取る。宛先のメールアドレスは購読時に書く。利用者と文書の組ごとに 1 行。
-// 文書か利用者が消えれば購読も消える(各行を deleteSubscription で判定)。
+// Subscription: user user receives notifications of sharing of document doc. The recipient mail address is written when
+// subscribing. One row per (user, document) pair. Deleting the document or user deletes the subscription (each row
+// judged by deleteSubscription).
 @unique("doc, user")
 @references("doc cascade deleteSubscription, user cascade deleteSubscription")
 entity Subscription = {
@@ -115,10 +130,11 @@ entity Subscription = {
   "email": String
 };
 
-// 通知: 文書の共有時に購読者ごとに作られる送信の記録。元の購読(subscription)を指し、宛先(email)と宛先の利用者
-// (recipient)はその購読の列と一致し、件名(subject)と本文(body)は文書の題名と本文と一致することをポリシーが要求する
-// (作成時と送信時)。メール送信の効果はこの行の列の値をそのまま使う。sent は送信済みか。文書・宛先の利用者・購読が消えれば
-// 通知も消える。
+// Notification: a sending record created per subscriber when a document is shared. It points at the original
+// subscription (subscription), and the policy requires that the recipient (email) and recipient user (recipient) match
+// that subscription's columns and that the subject (subject) and body (body) match the document's title and body (at
+// creation and at sending). The mail-sending effect uses this row's column values as they are. sent is whether it was
+// sent. Deleting the document, the recipient user or the subscription deletes the notification.
 @references("doc cascade deleteNotification, recipient cascade deleteNotification, subscription cascade deleteNotification")
 entity Notification = {
   "doc": Doc,
@@ -130,21 +146,23 @@ entity Notification = {
   "sent": Bool
 };
 
-// 匿名の主体(nyxis が予約。テーブルではない)。
+// The anonymous principal (reserved by nyxis; not a table).
 entity Anonymous;
 
-// サービス主体(nyxis が予約。テーブルではない)。定期処理の主体で、HTTP の要求の主体にはならない。
+// The service principal (reserved by nyxis; not a table). The principal of periodic jobs; never the principal of an
+// HTTP request.
 entity Service;
 
-// 外部 API の送り先(nyxis が予約する仲間。テーブルではない)。文書の要約 API(sync)と、文書の更新の監査ログ API(async)。
-// どちらもローカルの模擬 API(統合テストが立てる)。鍵は環境変数 NYXIS_EXT_SUMMARIZER / NYXIS_EXT_AUDIT。
+// External API destinations (a kind reserved by nyxis; not tables). The document summarizer API (sync) and the document
+// update audit log API (async). Both are a local mock API (started by the integration test). The keys are the
+// environment variables NYXIS_EXT_SUMMARIZER / NYXIS_EXT_AUDIT.
 @external("base: https://localhost:18118/summarizer; auth: bearer NYXIS_EXT_SUMMARIZER")
 entity Summarizer;
 
 @external("base: https://localhost:18118/audit; auth: bearer NYXIS_EXT_AUDIT")
 entity Audit;
 
-// 利用者を登録する(自分自身の User 行を作る)。
+// Registers a user (creates one's own User row).
 @effect("insert User")
 action "registerUser" appliesTo {
   principal: [User],
@@ -152,21 +170,23 @@ action "registerUser" appliesTo {
   context: { "values": { "name": String } }
 };
 
-// 利用者を読む。本人だけ。
+// Reads a user. The user themselves only.
 @effect("read User")
 action "readUser" appliesTo {
   principal: [User],
   resource: [User]
 };
 
-// 利用者を消す(自分自身の User 行)。所属行は連鎖で消える。文書を作った利用者は参照整合(restrict)で消せない(409)。
+// Deletes a user (one's own User row). Membership rows are deleted by cascade. A user who created documents cannot be
+// deleted, by referential integrity (restrict) (409).
 @effect("delete User")
 action "deleteUser" appliesTo {
   principal: [User],
   resource: [User]
 };
 
-// 組織を作る。作る人が唯一の owner になり、editor と viewer の組はまだ存在しない組を指す(続けて createTeam で作る)。
+// Creates an org. The creator becomes its only owner, and the editor and viewer teams point at teams that do not exist
+// yet (created next by createTeam).
 @effect("insert Org")
 action "createOrg" appliesTo {
   principal: [User],
@@ -174,28 +194,29 @@ action "createOrg" appliesTo {
   context: { "values": { "name": String, "owners": Set<User>, "editors": Team, "viewers": Team } }
 };
 
-// 組織を読む。owner と、いずれかの組に属する利用者だけ。
+// Reads an org. Only owners and users who belong to one of its teams.
 @effect("read Org")
 action "readOrg" appliesTo {
   principal: [User],
   resource: [Org]
 };
 
-// 所属する組織の一覧。
+// Lists the orgs one belongs to.
 @effect("list Org")
 action "listOrgs" appliesTo {
   principal: [User],
   resource: [Org]
 };
 
-// 組織を消す。owner だけ。組・所属行・文書は cascade で消え、各文書は deleteDoc で判定される(他の人の文書が残っていれば消せない)。
+// Deletes an org. Owners only. Teams, membership rows and documents are deleted by cascade, each document judged by
+// deleteDoc (cannot delete if someone else's documents remain).
 @effect("delete Org")
 action "deleteOrg" appliesTo {
   principal: [User],
   resource: [Org]
 };
 
-// 組織の owner の集合を変える。owner だけ。自分を外せない。
+// Changes the org's set of owners. Owners only. An owner cannot remove themselves.
 @effect("update Org(owners)")
 action "setOwners" appliesTo {
   principal: [User],
@@ -203,7 +224,8 @@ action "setOwners" appliesTo {
   context: { "values": { "owners"?: Set<User> } }
 };
 
-// 組織の役割の組を作る。組織の owner だけ。組織がその役割の組として参照している組に限る。
+// Creates a role team of an org. Owners of the org only. Limited to the team the org references as the team of that
+// role.
 @effect("insert Team")
 action "createTeam" appliesTo {
   principal: [User],
@@ -211,14 +233,15 @@ action "createTeam" appliesTo {
   context: { "values": { "org": Org, "role": String } }
 };
 
-// 組を消す(組織の削除の連鎖で各組をこれで判定する)。組織の owner だけ。
+// Deletes a team (the cascade of an org deletion judges each team with this). Owners of the org only.
 @effect("delete Team")
 action "deleteTeam" appliesTo {
   principal: [User],
   resource: [Team]
 };
 
-// 利用者を組織の組に加える(所属行を作る)。組織の owner だけ。組はその組織の組でなければならない。
+// Adds a user to a team of an org (creates a membership row). Owners of the org only. The team must be a team of that
+// org.
 @effect("insert Membership")
 action "addMember" appliesTo {
   principal: [User],
@@ -226,21 +249,23 @@ action "addMember" appliesTo {
   context: { "values": { "user": User, "team": Team, "org": Org } }
 };
 
-// 組織の所属行の一覧。owner と、いずれかの組に属する利用者だけ。
+// Lists the org's membership rows. Only owners and users who belong to one of its teams.
 @effect("list Membership")
 action "listMembers" appliesTo {
   principal: [User],
   resource: [Membership]
 };
 
-// 所属行を消す(組織・組・利用者の削除の連鎖でも各所属行をこれで判定する)。本人か、組織の owner。
+// Deletes a membership row (the cascades of org, team and user deletions also judge each membership row with this). The
+// member themselves or an owner of the org.
 @effect("delete Membership")
 action "removeMember" appliesTo {
   principal: [User],
   resource: [Membership]
 };
 
-// 文書を作る。組織の owner と editor の組の利用者だけ。作成日時・更新日時は nyxis の現在時刻(context.now)。添付と要約は無し。
+// Creates a document. Only owners of the org and users in the editor team. Creation and update times are nyxis's
+// current time (context.now). No attachment and no summary.
 @effect("insert Doc")
 action "createDoc" appliesTo {
   principal: [User],
@@ -254,21 +279,21 @@ action "createDoc" appliesTo {
   }
 };
 
-// 文書を読む。組織の owner、組織の組に属する利用者、個別に共有された利用者。
+// Reads a document. Owners of the org, users who belong to a team of the org, individually shared users.
 @effect("read Doc")
 action "readDoc" appliesTo {
   principal: [User],
   resource: [Doc]
 };
 
-// 文書の一覧。各行に readDoc と同じ条件を適用する。
+// Lists documents. Applies the same condition as readDoc to each row.
 @effect("list Doc")
 action "listDocs" appliesTo {
   principal: [User],
   resource: [Doc]
 };
 
-// 文書の題名・本文を編集する。更新日時は nyxis の現在時刻でなければならない。
+// Edits a document's title and body. The update time must be nyxis's current time.
 @effect("update Doc(title, body, updatedAt)")
 action "editDoc" appliesTo {
   principal: [User],
@@ -279,16 +304,19 @@ action "editDoc" appliesTo {
   }
 };
 
-// 文書の要約を外部の要約 API に求める(外部効果。sync)。組織の owner と editor の組の利用者だけ。permit されると nyxis が
-// Summarizer の POST /v1/summaries/<文書の主キー> に文書の題名と本文を送り、応答を { summary: String } に復号してハンドラへ
-// 渡す(5 秒で期限)。応答は DB に書かれず、ハンドラが recordSummary で別に判定を通して記録する。
+// Asks the external summarizer API for a document summary (an external effect; sync). Only owners of the org and users
+// in the editor team. When permitted, nyxis sends the document's title and body to Summarizer's POST
+// /v1/summaries/<document primary key>, decodes the response into { summary: String } and passes it to the handler
+// (5-second deadline). The response is not written to the DB; the handler records it separately through recordSummary,
+// which passes its own decision.
 @effect("call Summarizer POST /v1/summaries/{key} Doc(title, body) sync 5s -> { summary: String }")
 action "summarizeDoc" appliesTo {
   principal: [User],
   resource: [Doc]
 };
 
-// 要約を記録する(外部 API の応答の値を書く唯一の経路)。組織の owner と editor の組の利用者だけ。空の要約は記録できない。
+// Records a summary (the only path for writing an external API response value). Only owners of the org and users in the
+// editor team. An empty summary cannot be recorded.
 @effect("update Doc(summary)")
 action "recordSummary" appliesTo {
   principal: [User],
@@ -296,16 +324,18 @@ action "recordSummary" appliesTo {
   context: { "values": { "summary"?: String } }
 };
 
-// 文書の更新を監査ログ API に通知する(外部効果。async)。組織の owner と editor の組の利用者だけ。permit されると nyxis が
-// Audit の POST /v1/docs/<文書の主キー>/updated に文書の題名と更新日時を、要求と同じトランザクションでアウトボックスに書き、
-// COMMIT の後に内部ループが送る(応答は無い)。
+// Announces a document update to the audit log API (an external effect; async). Only owners of the org and users in the
+// editor team. When permitted, nyxis writes the document's title and update time for Audit's POST /v1/docs/<document
+// primary key>/updated to the outbox in the request's own transaction, and the internal loop sends it after COMMIT
+// (there is no response).
 @effect("call Audit POST /v1/docs/{key}/updated Doc(title, updatedAt) async")
 action "announceDocUpdate" appliesTo {
   principal: [User],
   resource: [Doc]
 };
 
-// 文書を個別の利用者に共有する(共有先の集合を置き換える)。組織の owner と editor の組の利用者だけ。
+// Shares a document with individual users (replaces the set of share targets). Only owners of the org and users in the
+// editor team.
 @effect("update Doc(shared)")
 action "shareDoc" appliesTo {
   principal: [User],
@@ -313,15 +343,17 @@ action "shareDoc" appliesTo {
   context: { "values": { "shared"?: Set<User> } }
 };
 
-// 文書を削除する。その文書の作成者だけ(組織の owner か editor の組に残っている間)。組織の削除の連鎖でも各文書をこれで判定する。
+// Deletes a document. Its creator only (while they remain an owner of the org or in the editor team). The cascade of an
+// org deletion also judges each document with this.
 @effect("delete Doc")
 action "deleteDoc" appliesTo {
   principal: [User],
   resource: [Doc]
 };
 
-// 添付の名を記録する(アップロード URL の発行の直前に、nyxis の発行した一意 ID を列 attachment に書く)。
-// 組織の owner と editor の組の利用者だけ。記録できる名はこの要求の一意 ID(context.id)に限る。
+// Records the attachment name (just before issuing the upload URL, writes the unique ID issued by nyxis to column
+// attachment). Only owners of the org and users in the editor team. The name that can be recorded is limited to this
+// request's unique ID (context.id).
 @effect("update Doc(attachment)")
 action "attachDoc" appliesTo {
   principal: [User],
@@ -329,8 +361,9 @@ action "attachDoc" appliesTo {
   context: { "values": { "attachment"?: String }, "id": String }
 };
 
-// 添付の署名付きアップロード URL を発行する(外部効果)。組織の owner と editor の組の利用者で、文書に記録された
-// 添付の名がこの要求の一意 ID であるときだけ(発行の対象は Doc/<文書>/<context.id>)。
+// Issues a signed upload URL for the attachment (an external effect). Only owners of the org and users in the editor
+// team, and only when the attachment name recorded in the document is this request's unique ID (the issuance target is
+// Doc/<document>/<context.id>).
 @effect("upload Doc")
 action "uploadAttachment" appliesTo {
   principal: [User],
@@ -338,15 +371,17 @@ action "uploadAttachment" appliesTo {
   context: { "id": String }
 };
 
-// 添付の署名付きダウンロード URL を発行する(外部効果)。文書を読める利用者(組織の owner、組織の組に属する利用者、
-// 個別に共有された利用者)。発行の対象は Doc/<文書>/<列 attachment の値>。
+// Issues a signed download URL for the attachment (an external effect). Users who can read the document (owners of the
+// org, users who belong to a team of the org, individually shared users). The issuance target is Doc/<document>/<value
+// of column attachment>.
 @effect("download Doc")
 action "downloadAttachment" appliesTo {
   principal: [User],
   resource: [Doc]
 };
 
-// 文書を購読する(自分自身の購読行を作る)。文書を読める利用者だけ。宛先のメールアドレスは本文で与える。
+// Subscribes to a document (creates one's own subscription row). Only users who can read the document. The recipient
+// mail address is given in the body.
 @effect("insert Subscription")
 action "subscribe" appliesTo {
   principal: [User],
@@ -354,22 +389,25 @@ action "subscribe" appliesTo {
   context: { "values": { "doc": Doc, "user": User, "email": String } }
 };
 
-// 文書の購読の一覧。本人の購読と、文書の組織の owner・editor の組の利用者(共有時に宛先を集めるため)。
+// Lists a document's subscriptions. One's own subscriptions, and owners of the document's org and users in its editor
+// team (to collect recipients when sharing).
 @effect("list Subscription")
 action "listSubscriptions" appliesTo {
   principal: [User],
   resource: [Subscription]
 };
 
-// 購読をやめる。本人か、文書の作成者か、文書の組織の owner(文書・利用者の削除の連鎖でも各行をこれで判定する)。
+// Unsubscribes. The subscriber, the document's creator, or an owner of the document's org (the cascades of document and
+// user deletions also judge each row with this).
 @effect("delete Subscription")
 action "deleteSubscription" appliesTo {
   principal: [User],
   resource: [Subscription]
 };
 
-// 通知の行を作る(文書の共有時に購読者ごとに)。文書の組織の owner と editor の組の利用者だけ。宛先と宛先の利用者は
-// 指した購読の列、件名と本文は文書の題名と本文、送信済みではない行に限る(ポリシー)。
+// Creates a notification row (per subscriber when a document is shared). Only owners of the document's org and users in
+// its editor team. The recipient and recipient user are the referenced subscription's columns, the subject and body are
+// the document's title and body, and the row is not yet sent (policy).
 @effect("insert Notification")
 action "createNotification" appliesTo {
   principal: [User],
@@ -377,16 +415,17 @@ action "createNotification" appliesTo {
   context: { "values": { "doc": Doc, "recipient": User, "subscription": Subscription, "email": String, "subject": String, "body": String, "sent": Bool } }
 };
 
-// 通知のメールを送る(外部効果)。宛先は列 email、件名は列 subject、本文は列 body。文書の組織の owner と editor の組の
-// 利用者、またはサービス主体(定期処理)。送信済みでなく、宛先と宛先の利用者が指した購読の列と一致し、宛先の利用者がいま
-// 文書を読めるときだけ。
+// Sends notification mail (an external effect). The recipient is column email, the subject column subject, the body
+// column body. Owners of the document's org and users in its editor team, or the service principal (periodic job). Only
+// when not yet sent, the recipient and recipient user match the referenced subscription's columns, and the recipient
+// user can read the document now.
 @effect("mail Notification(email; subject, body)")
 action "sendNotification" appliesTo {
   principal: [User, Service],
   resource: [Notification]
 };
 
-// 通知を送信済みにする。文書の組織の owner と editor の組の利用者、またはサービス主体。
+// Marks a notification as sent. Owners of the document's org and users in its editor team, or the service principal.
 @effect("update Notification(sent)")
 action "markNotificationSent" appliesTo {
   principal: [User, Service],
@@ -394,14 +433,16 @@ action "markNotificationSent" appliesTo {
   context: { "values": { "sent"?: Bool } }
 };
 
-// 通知の一覧。サービス主体(定期処理が送信済みでない通知を集める)と、文書の組織の owner・editor の組の利用者。
+// Lists notifications. The service principal (the periodic job collects unsent notifications), and owners of the
+// document's org and users in its editor team.
 @effect("list Notification")
 action "listNotifications" appliesTo {
   principal: [User, Service],
   resource: [Notification]
 };
 
-// 通知を消す(文書・利用者の削除の連鎖で各行をこれで判定する)。宛先の本人か、文書の作成者か、文書の組織の owner。
+// Deletes a notification (the cascades of document and user deletions judge each row with this). Its recipient, the
+// document's creator, or an owner of the document's org.
 @effect("delete Notification")
 action "deleteNotification" appliesTo {
   principal: [User],

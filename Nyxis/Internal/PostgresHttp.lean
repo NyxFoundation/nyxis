@@ -5,19 +5,20 @@ import Nyxis.Internal.HttpAuth
 import Nyxis.Internal.HttpResponse
 import Nyxis.Internal.Generated
 
-/-! HTTP から PostgreSQL への接続コード(A4。本文取得後の処理は部分的に証明済み)。
-アプリケーションからは import できない。起動(`ApprovedServer`)が承認済みの JWT 検証器を選び、
-主体や接続文字列をリクエストのどの項目からも決めない。サーバー生成値(現在時刻と一意 ID)は認証の直後に
-`generate`(本番は `Generated.fresh`)で 1 度だけ決め、要求のどの項目からも決めない。外部効果の設定(Supabase
-Storage・メールの中継)はコア設定で、要求のどの項目からも決めない。HTTP の入口は要求を `job := none`(ルーティング)で
-組むので、定期処理とサービス主体はここからは起動しない。
+/-! Glue code from HTTP to PostgreSQL (A4; the processing after the body is read is partially proved). Applications
+cannot import this. Startup (`ApprovedServer`) selects the approved JWT verifier, and neither the principal nor the
+connection string is determined from any field of the request. Server-generated values (the current time and unique IDs)
+are determined exactly once, right after authentication, by `generate` (`Generated.fresh` in production), and never from
+any field of the request. The external-effect settings (Supabase Storage and mail relay) are core settings and are never
+determined from any field of the request. The HTTP entry point builds requests with `job := none` (routing), so
+scheduled jobs and the service principal are never started from here.
 -/
 namespace Nyxis.Internal.PostgresHttp
 open Std.Async
 
-/-- 上限つきの本文の読み取りに成功した後に HTTP ハンドラが使う IO の段階。
-認証の例外は匿名になる。サーバー生成値は認証の後に `generate` で決める。`generate` と backend の例外は
-固定の HTTP エラー応答を選ぶためだけに保持し、応答の内容として出すことはない。 -/
+/-- The IO stage the HTTP handler uses after the bounded body read has succeeded. An authentication exception becomes
+anonymous. Server-generated values are determined by `generate` after authentication. Exceptions from `generate` and the
+backend are kept only to select a fixed HTTP error response and are never emitted as response content. -/
 def dispatch
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -29,12 +30,14 @@ def dispatch
     .ok <$> backend { principal, generated, request }
   catch e => pure (.error e)
 
-/-- 日本語: 本文取得後に実HTTPハンドラが呼ぶdispatchが正常終了したなら、
-同じヘッダの認証が返した主体、または認証例外時の匿名主体だけを使い、その直後のIO状態から
-サーバー生成値を決め(`generate`)、同じメソッド/パス/問い合わせ文字列/選別した要求ヘッダ/本文とその主体・生成値のbackend呼出しが
-その直後のIO状態から実行される。成功応答はbackendの結果そのもので、終了IO状態も等しい。
-失敗値は`generate`またはbackendの例外そのもの。
-認証器のJWT検証の正しさ・時計/乱数の正しさ・本文取得・Async実行とHTTP輸送は含まない。 -/
+/-- If the dispatch that the real HTTP handler calls after reading the body terminates normally, it uses only the
+principal returned by authenticating the same headers, or the anonymous principal on an authentication exception; from
+the IO state right after that it determines the server-generated values (`generate`), and the backend call with the same
+method/path/query string/selected request headers/body and that principal and those generated values runs from the IO
+state right after that. A success response is exactly the backend's result, and the final IO state is equal too. A
+failure value is exactly the exception from `generate` or the backend. The correctness of the authenticator's JWT
+verification, the correctness of the clock/randomness, body reading, Async execution and HTTP transport are not
+included. -/
 theorem dispatch_success
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -91,25 +94,26 @@ theorem dispatch_success
       cases h
       exact ⟨.anonymous, wa, Or.inr ⟨rfl, e, rfl⟩, Or.inl hg⟩
 
-/-- 日本語: 本文取得後の本番dispatchが成功応答を返すとき、主体は同じヘッダを
-HttpAuth.principalOfで検証した結果（認証例外なら匿名）であり、同じ要求を渡した
-実PostgresRun.handleStaged(段階的な実行)が同じ応答で正常終了する。
-ユーザーの場合は同じbearerの検証器が返したsubjectとコア設定の型に一致し、
-空白のみ/NUL入りsubjectと予約匿名型が拒まれたことも証明する。
-ここではさらにhandleStaged_successの結論を合成する: モデルと形状の一致検査の成功、
-新規接続からidle、BEGIN/inTransaction、ルーティングした要求の段階的な実行の記録
-(各呼び出しの点検索・取得した行の形状検査・閉包の検査・取得した行だけでの判定・
-発行の事前検査・計画順のSQL実行と照合)、健全性検査、COMMIT/idleが連続IO状態で成功する。
-発行した操作の各SQLは同じ主体についてその段で取得した材料について認可済みの操作から
-生成され、形状検査も通る(信頼なし)。応答はStoreを受け取らない再生器で要求と各段の
-結果列だけから再現でき、結果列の各行は同じ主体について認可済みの読み取りがその段で
-取得した行で指す行である(信頼なし。認可判定用に取得した行が応答へ渡る別の入力は無い)。
-各段の取得がその時点の全体の状態と整合する(ChainRequest。接続層ではA4の信頼)なら、
-応答は同じ初期状態でのhandleRequestの応答そのもので、SQLに対応する操作の列
-(主体・アクション・操作)はhandleRequestの発行列と一致する。
-もう1つの成功応答は、外部API呼び出しの応答が宣言した型に合わなかった失敗だけを写した固定の502
-(`PostgresRun.gatewayResponse`)で、そのときは同じ本体のトランザクションがその例外で失敗している。
-本文取得/HTTP変換/Async実行/輸送と、JWT検証器・外部DBの振る舞いは未証明。 -/
+/-- When the production dispatch after reading the body returns a success response, the principal is the result of
+verifying the same headers with HttpAuth.principalOf (anonymous on an authentication exception), and the real
+PostgresRun.handleStaged (staged execution) given the same request terminates normally with the same response. For a
+user, it matches the subject returned by the verifier for the same bearer token and the type from the core settings;
+this also proves that whitespace-only/NUL-containing subjects and the reserved anonymous type were rejected. Here we
+additionally compose the conclusion of handleStaged_success: the model/shape consistency check succeeds, and from a new
+connection, idle, BEGIN/inTransaction, the record of the staged execution of the routed request (for each call: point
+lookups, shape check of the fetched rows, closure check, decision using only the fetched rows, pre-check of issuance,
+SQL execution in plan order and matching), the health check, and COMMIT/idle succeed in consecutive IO states. Each SQL
+statement of an issued operation is generated from an operation authorized for the same principal on the materials
+fetched at that stage, and it also passes the shape check (no trust). The response can be reproduced by a replayer that
+does not receive the Store, from only the request and each stage's result list, and each row in the result list is a row
+that an authorized read for the same principal points to among the rows fetched at that stage (no trust; there is no
+other input through which rows fetched for the authorization decision reach the response). If each stage's fetch is
+consistent with the whole state at that point (ChainRequest; trusted as A4 at the connection layer), the response is
+exactly the response of handleRequest on the same initial state, and the list of operations corresponding to the SQL
+(principal, action, operation) matches handleRequest's issued list. The other success response is the fixed 502
+(`PostgresRun.gatewayResponse`) that maps only the failure where an external API call's response did not match its
+declared type; in that case the transaction of the same body has failed with that exception. Body reading/HTTP
+conversion/Async execution/transport, and the behavior of the JWT verifier and the external DB, are unproved. -/
 theorem dispatch_verified_read_safety
     (conninfo : String) (app : Runtime.App) (shape : PostgresShape.Shape) (external : ExternalSend.Config)
     (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))
@@ -182,20 +186,20 @@ theorem dispatch_verified_read_safety
     | inr failed => exact Or.inl failed.1
   exact ⟨principal, wa, ha, provenance, generated, wg, hg, hb, hvalid, hstaged⟩
 
-/-- dispatch の後に使う応答の継続。backend のエラーは固定の応答を選ぶだけで、その診断の文言を
-応答の構築に渡すことはない。 -/
+/-- The response continuation used after dispatch. A backend error only selects a fixed response; its diagnostic text is
+never passed into building the response. -/
 def respond (result : Except IO.Error Http.Response) :
     ContextAsync (Std.Http.Response Std.Http.Body.Any) := do
   match result with
   | .error _ => return ← Std.Http.Response.serviceUnavailable.text "backend unavailable"
   | .ok response => return ← Http.toHttpResponse response
 
-/-- 日本語: 実ハンドラのdispatch後の応答継続が成功したなら、backend成功時は
-そのモデル応答の状態コードと本文、backend失敗時は固定503と固定本文だけから
-HTTP応答を構築している。固定Content-Type・同じUTF-8バイト列によるFull構築と
-Anyへの変換まで構造が一致し、構築終了のIO状態も保存する。
-例外内容による本文・ヘッダ追加はない。dispatchからこの継続への到達性、
-非同期bind全体の返却値との対応、Full消費/Mutex外界動作/送信は含まない。 -/
+/-- If the real handler's response continuation after dispatch succeeds, the HTTP response is built only from the model
+response's status code and body when the backend succeeded, and only from the fixed 503 and fixed body when the backend
+failed. The structure matches all the way through building the Full from the fixed Content-Type and the same UTF-8 bytes
+and converting it to Any, and the IO state at the end of building is preserved too. No body or header is added based on
+the exception content. Reachability of this continuation from dispatch, correspondence with the return value of the
+whole async bind, Full consumption/external Mutex behavior/sending are not included. -/
 theorem respond_success (result : Except IO.Error Http.Response)
     (ctx : Std.CancellationContext) (w w' : Void IO.RealWorld)
     (pending : MaybeTask (Except IO.Error (Std.Http.Response Std.Http.Body.Any)))
@@ -216,19 +220,21 @@ theorem respond_success (result : Except IO.Error Http.Response)
     exact HttpResponse.text_any_success Std.Http.Response.serviceUnavailable
       "backend unavailable" ctx w w' pending response h hv
 
-/-- 日本語: 失敗時の応答継続は例外値によらず同じ処理である。
-同じ開始IO状態なら、エラー診断の差で構築する応答が変わらない。 -/
+/-- The response continuation on failure is the same computation regardless of the exception value. From the same
+starting IO state, differences in error diagnostics do not change the response that is built. -/
 theorem respond_error_independent (e₁ e₂ : IO.Error) :
     respond (.error e₁) = respond (.error e₂) := rfl
 
-/-- 標準の即時 IO 持ち上げを明示したもの。IO 処理は以前の IO 持ち上げと同じく同期的に実行するが、
-完了した結果は応答の構築の前に新しいタスクを登録しない。例外と IO 状態は保たれる。 -/
+/-- An explicit form of the standard immediate IO lift. The IO action runs synchronously as with the previous IO lift,
+but the completed result does not register a new task before the response is built. Exceptions and the IO state are
+preserved. -/
 def immediateIO {α : Type} (action : IO α) : ContextAsync α :=
   fun _ => EAsync.lift action
 
-/-- 日本語: 即時IO持上げと継続の合成が成功したなら、元IOは同じ開始状態から
-正常終了し、継続はその値と直後の状態から全体と同じタスク/終了状態を返す。
-IO例外を継続が成功へ変える経路はない。タスク登録の公理は使わない。 -/
+/-- If the composition of the immediate IO lift and a continuation succeeds, the original IO terminates normally from
+the same starting state, and the continuation, from that value and the state right after, returns the same task/final
+state as the whole. There is no path by which the continuation turns an IO exception into success. No task-registration
+axiom is used. -/
 theorem immediateIO_bind_success {α β : Type} (action : IO α)
     (next : α → ContextAsync β) (ctx : Std.CancellationContext)
     (w w' : Void IO.RealWorld) (pending : MaybeTask (Except IO.Error β)) (value : β)
@@ -258,8 +264,8 @@ theorem immediateIO_bind_success {α β : Type} (action : IO α)
     cases h
     cases hv
 
-/-- 上限つきの本文の読み取りの後の継続。読み取りに成功した本文だけが認証と backend の dispatch に
-到達する。 -/
+/-- The continuation after the bounded body read. Only a successfully read body reaches authentication and the backend
+dispatch. -/
 def afterBody
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -273,9 +279,9 @@ def afterBody
     let result ← immediateIO (dispatch authenticate generate backend headers { method, path, body, query, headers := Http.selectHeaders headers })
     respond result
 
-/-- 日本語: 本文取得失敗後の継続は固定400/固定本文の構築処理そのものに等しい。
-認証器・生成器・backend・ヘッダ・メソッド・パス・例外値はこの処理に使われない。
-本文読取り自体の振る舞いや、その非同期bindから継続への到達性は含まない。 -/
+/-- The continuation after a failed body read is equal to exactly the computation that builds the fixed 400/fixed body.
+The authenticator, generator, backend, headers, method, path and exception value are not used by it. The behavior of the
+body read itself and reachability of the continuation from its async bind are not included. -/
 theorem afterBody_error
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -284,13 +290,14 @@ theorem afterBody_error
     afterBody authenticate generate backend headers method path query (.error e) =
       (do return ← Std.Http.Response.badRequest.text "request body unreadable") := rfl
 
-/-- 日本語: 本文取得成功後の実処理全体がHTTP応答を返すなら、同じ要求の認証、サーバー生成値の決定、
-backend呼出しが順に実行され、その直後の状態から実際の返却HTTP応答を構築する。
-backend成功ならその状態コード/本文だけ、失敗なら固定503/固定本文だけを用いる。
-返却値は固定Content-Typeと同じUTF-8バイト列から作ったFullを包むAnyそのものであり、
-応答構築時に内部取得行や例外診断を追加しない。成功backend等式には(本番のbackendなら)
-PostgresRun.handleStaged_successを適用できる。本文読取り前からの到達性、Full消費、
-送信、JWT検証器/時計/乱数/外部DBの意味論は含まない。 -/
+/-- If the whole real computation after a successful body read returns an HTTP response, authentication of the same
+request, determination of the server-generated values and the backend call run in order, and the actually returned HTTP
+response is built from the state right after that. On backend success only its status code/body is used; on failure only
+the fixed 503/fixed body. The return value is exactly the Any wrapping a Full made from the fixed Content-Type and the
+same UTF-8 bytes, and no internally fetched rows or exception diagnostics are added while building the response.
+PostgresRun.handleStaged_success can be applied to the successful-backend equation (for the production backend).
+Reachability from before the body read, Full consumption, sending, and the semantics of the JWT
+verifier/clock/randomness/external DB are not included. -/
 theorem afterBody_ok_response
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -324,17 +331,18 @@ theorem afterBody_ok_response
   have hs := respond_success result ctx wb w' pending value hr hv
   cases result <;> exact ⟨_, wb, principal, wa, hd, ha, hb, hs⟩
 
-/-- 本番の上限つきの読み取り。例外から値への変換を含む。即時完了を実際のハンドラへ結合できるように
-分けて置く。 -/
+/-- The production bounded read, including the conversion from exception to value. Kept separate so that immediate
+completion can be connected to the actual handler. -/
 def readBody (body : Std.Http.Body.Stream) : ContextAsync (Except IO.Error String) := do
   try
     .ok <$> Std.Http.Body.Stream.readAll body (maximumSize := some Http.maxBodyBytes)
   catch e => pure (.error e)
 
-/-- 日本語: 同じ上限付き標準readAllが即時完了したとき、実readBodyは
-成功本文を変えず、読取り例外も同じ例外の失敗値へ変換し、直後のIO状態を保存する。
-外側は成功値なので、この例外は認証/backendへ進む本文成功にはならない。
-readAll自体の内部・即時完了の成立・task表現の継続実行は証明しない。 -/
+/-- When the standard readAll with the same bound completes immediately, the real readBody leaves a successful body
+unchanged, converts a read exception into a failure value carrying the same exception, and preserves the IO state right
+after. The outer value is a success, so this exception never becomes a successful body that proceeds to
+authentication/the backend. The internals of readAll itself, whether immediate completion holds, and continued execution
+of the task representation are not proved. -/
 theorem readBody_readAll_ready (body : Std.Http.Body.Stream) (ctx : Std.CancellationContext)
     (w wb : Void IO.RealWorld) (result : Except IO.Error String)
     (hr : ((Std.Http.Body.Stream.readAll body (maximumSize := some Http.maxBodyBytes) :
@@ -351,9 +359,10 @@ theorem readBody_readAll_ready (body : Std.Http.Body.Stream) (ctx : Std.Cancella
   rw [hr]
   cases result <;> rfl
 
-/-- 認証器・サーバー生成値の生成器・backend を注入する入口。本番は `handleVerified`(生成器は `Generated.fresh`、
-backend は `PostgresRun.handleStaged`。応答は checked COMMIT の後だけ返る)。検査は匿名固定の認証器や固定の生成値、
-プロセス内 Store の backend を渡す。 -/
+/-- The entry point into which the authenticator, the server-generated value generator and the backend are injected.
+Production uses `handleVerified` (generator `Generated.fresh`, backend `PostgresRun.handleStaged`; a response is
+returned only after a checked COMMIT). Tests pass an authenticator fixed to anonymous, fixed generated values, and an
+in-process Store backend. -/
 def handleAuthenticatedWith
     (authenticate : Std.Http.Headers → IO Authz.Principal) (generate : IO Authz.Generated)
     (backend : Runtime.AuthenticatedRequest → IO Http.Response)
@@ -367,9 +376,9 @@ def handleAuthenticatedWith
   let body ← readBody req.body
   afterBody authenticate generate backend req.line.headers method path query body
 
-/-- 日本語: GET /healthの実ハンドラ全体は固定200/okの構築処理に等しい。
-本文・ヘッダ・認証器・生成器・backendに依存せず、本文取得やDB処理を実行しない。
-ここでのパスは既存pathOfの結果であり、生HTTPからの復号や送信は含まない。 -/
+/-- The whole real handler for GET /health is equal to the computation that builds the fixed 200/ok. It does not depend
+on the body, headers, authenticator, generator or backend, and performs no body read or DB work. The path here is the
+result of the existing pathOf; decoding from raw HTTP and sending are not included. -/
 theorem handleAuthenticatedWith_health
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -381,11 +390,11 @@ theorem handleAuthenticatedWith_health
   simp only [handleAuthenticatedWith, hm, hp]
   rfl
 
-/-- 日本語: 非health要求で実際の上限付き本文取得が即時完了したなら、
-実ハンドラは取得直後のIO状態から、同じ要求と取得結果を使うafterBodyを実行し、
-その返却タスクと終了IO状態をそのまま返す。本文成功/失敗の両方に適用できる。
-即時完了は証明の前提であって新たな信頼仮定ではない。task表現で返る
-読取り（既に完了済みでも）、readAll内部のpartial定義や輸送については主張しない。 -/
+/-- If, for a non-health request, the actual bounded body read completes immediately, the real handler runs afterBody
+with the same request and the read result from the IO state right after the read, and returns its returned task and
+final IO state unchanged. This applies to both body success and failure. Immediate completion is a hypothesis of the
+proof, not a new trusted assumption. Nothing is claimed about reads returned in task representation (even if already
+completed), the partial definitions inside readAll, or transport. -/
 theorem handleAuthenticatedWith_body_ready
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -408,11 +417,11 @@ theorem handleAuthenticatedWith_body_ready
   rw [hr]
   rfl
 
-/-- 日本語: 非health要求の標準readAllが同じ1MiB上限で即時完了すれば、
-実ハンドラはその成功本文または同じ例外の失敗値でafterBodyへ到達する。
-読取り直後のIO状態・継続の返却タスクと終了状態を保存し、本文成功の場合は
-既存の認証/backend/応答構築証明へ、失敗の場合は固定400構築へ接続できる。
-標準readAllの即時完了は前提であり、全要求の到達性や輸送を保証しない。 -/
+/-- If the standard readAll for a non-health request completes immediately with the same 1 MiB bound, the real handler
+reaches afterBody with that successful body or a failure value carrying the same exception. It preserves the IO state
+right after the read and the continuation's returned task and final state, and can be connected to the existing
+authentication/backend/response-building proofs on body success, or to building the fixed 400 on failure. Immediate
+completion of the standard readAll is a hypothesis; reachability or transport for all requests is not guaranteed. -/
 theorem handleAuthenticatedWith_readAll_ready
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -429,10 +438,10 @@ theorem handleAuthenticatedWith_readAll_ready
   exact handleAuthenticatedWith_body_ready authenticate generate backend req hn ctx w wb result
     (readBody_readAll_ready req.body ctx w wb result hr)
 
-/-- 日本語: 非health実ハンドラで本文取得が即時に失敗値を返した場合、
-全体はその直後のIO状態から固定400/固定本文を構築する処理そのものである。
-認証器/backendは呼ばず、読取り例外の診断も応答に渡さない。
-本文読取り自体が即時失敗値を返すこととtask表現の振る舞いは含まない。 -/
+/-- If, in the real non-health handler, the body read immediately returns a failure value, the whole is exactly the
+computation that builds the fixed 400/fixed body from the IO state right after that. The authenticator/backend are not
+called, and the read exception's diagnostics are not passed into the response. That the body read itself immediately
+returns a failure value, and the behavior of the task representation, are not included. -/
 theorem handleAuthenticatedWith_error_response
     (authenticate : Std.Http.Headers → IO Authz.Principal)
     (generate : IO Authz.Generated)
@@ -446,10 +455,11 @@ theorem handleAuthenticatedWith_error_response
         ContextAsync (Std.Http.Response Std.Http.Body.Any)) ctx).toRawBaseIO wb := by
   exact handleAuthenticatedWith_body_ready authenticate generate backend req hn ctx w wb (.error e) hr
 
-/-- 認証つきの PostgreSQL 入口。検証器は検証済みの subject だけを返し、ヘッダの抽出と主体の構成は
-HttpAuth が行う。サーバー生成値は `Generated.fresh`(実時計と乱数)が要求ごとに決める。判定材料の点検索と
-認可済み操作の COMMIT は PostgresRun の段階的な経路(`handleStaged`)そのもので、プロセス内 Store・
-リクエスト由来の主体や生成値・別の DB backend は無い。 -/
+/-- The authenticated PostgreSQL entry point. The verifier returns only a verified subject; header extraction and
+principal construction are done by HttpAuth. Server-generated values are determined per request by `Generated.fresh`
+(real clock and randomness). The point lookups of decision materials and the COMMIT of authorized operations are exactly
+PostgresRun's staged path (`handleStaged`); there is no in-process Store, no request-derived principal or generated
+values, and no other DB backend. -/
 def handleVerified (conninfo : String) (app : Runtime.App) (shape : PostgresShape.Shape)
     (external : ExternalSend.Config) (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))
     (req : Std.Http.Request Std.Http.Body.Stream) :
@@ -457,24 +467,25 @@ def handleVerified (conninfo : String) (app : Runtime.App) (shape : PostgresShap
   handleAuthenticatedWith (HttpAuth.principalOf userType verify) Generated.fresh
     (PostgresRun.handleStaged conninfo app shape external) req
 
-/-- 日本語: 非healthの実handleVerifiedで、同じ上限付き標準readAllが本文を
-即時成功として返し、全体がHTTP応答を返したなら、本文直後から同じ要求の
-認証/PostgresRun.handleStagedと応答構築が連続IO状態で実行される。
-backend成功時は、モデルと形状の一致検査に成功し、新規接続・BEGIN・段階的な実行の記録
-(各呼び出しの点検索・形状検査・閉包の検査・取得した行だけでの判定・発行の事前検査・
-計画順のSQL実行と照合)・COMMITが連続IO状態で成功し、発行した操作の各SQLは同じ主体に
-ついてその段で取得した材料について認可済みの操作から生成され、応答はStoreを受け取らない
-再生器で要求と各段の結果列だけから再現でき、結果列の各行は認可済みの読み取りがその段で
-取得した行で指す行であり、各段の取得がその時点の全体の状態と整合するなら応答と
-SQLに対応する操作の列は同じ初期状態でのhandleRequestと一致する。
-ユーザー主体は同じヘッダのbearerを検証したsubjectとコア設定の型に一致する。
-backend成功のもう1つの形は、外部API呼び出しの応答が宣言した型に合わなかった失敗だけを写した固定の502で、
-そのときは同じ本体のトランザクションがその例外で失敗している。
-backend失敗時は固定503/固定本文のみを選ぶ。いずれも返却HTTP値は選択した
-状態コード/本文UTF-8から構築したFullを包むAnyそのものであり、認可判定用の
-内部取得行や例外診断を応答構築時に追加しない。
-即時本文成功は前提。readAll内部/task表現の継続、Full消費/送信、JWT検証器・
-外部DBの意味論は含まず、全HTTP要求の安全性や、定理の文が理想の命題を忠実に表すことを単独では主張しない。 -/
+/-- If, in the real non-health handleVerified, the standard readAll with the same bound returns the body as an immediate
+success and the whole returns an HTTP response, then from right after the body, authentication of the same
+request/PostgresRun.handleStaged and response building run in consecutive IO states. On backend success, the model/shape
+consistency check succeeds; the new connection, BEGIN, the record of the staged execution (for each call: point lookups,
+shape check, closure check, decision using only the fetched rows, pre-check of issuance, SQL execution in plan order and
+matching) and COMMIT succeed in consecutive IO states; each SQL statement of an issued operation is generated from an
+operation authorized for the same principal on the materials fetched at that stage; the response can be reproduced by a
+replayer that does not receive the Store, from only the request and each stage's result list; each row in the result
+list is a row that an authorized read points to among the rows fetched at that stage; and if each stage's fetch is
+consistent with the whole state at that point, the response and the list of operations corresponding to the SQL match
+handleRequest on the same initial state. A user principal matches the subject verified from the bearer token in the same
+headers and the type from the core settings. The other form of backend success is the fixed 502 that maps only the
+failure where an external API call's response did not match its declared type; in that case the transaction of the same
+body has failed with that exception. On backend failure only the fixed 503/fixed body is selected. In every case the
+returned HTTP value is exactly the Any wrapping a Full built from the selected status code/UTF-8 body, and no internally
+fetched rows used for the authorization decision or exception diagnostics are added while building the response. An
+immediately successful body is a hypothesis. The internals of readAll/continuation of the task representation, Full
+consumption/sending, and the semantics of the JWT verifier and the external DB are not included, and this alone does not
+claim safety for all HTTP requests, nor that the theorem statement faithfully expresses the intended proposition. -/
 theorem handleVerified_readAll_response
     (conninfo : String) (app : Runtime.App) (shape : PostgresShape.Shape) (external : ExternalSend.Config)
     (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))
@@ -569,11 +580,11 @@ theorem handleVerified_readAll_response
   · have responseShape := respond_success result ctx wd w' pending value hs hv
     cases result <;> exact responseShape
 
-/-- 日本語: GET /healthの実handleVerifiedが応答を返すなら、その値は
-固定200/okのUTF-8バイト列から同じ開始IO状態で構築したFullを包むAnyに等しい。
-実入口全体と固定text構築の等式も保持し、本文取得・認証・backendを呼ばず、
-要求本文や内部取得行、例外診断を応答構築へ加えない。
-本文読取りの即時完了は不要。Fullの消費・Mutexの外界動作・送信は含まない。 -/
+/-- If the real handleVerified for GET /health returns a response, its value is equal to the Any wrapping a Full built
+in the same starting IO state from the UTF-8 bytes of the fixed 200/ok. The equation between the whole real entry point
+and the fixed text construction is also kept; it does not call body reading, authentication or the backend, and adds no
+request body, internally fetched rows or exception diagnostics to the response being built. Immediate completion of the
+body read is not required. Full consumption, external Mutex behavior and sending are not included. -/
 theorem handleVerified_health_response
     (conninfo : String) (app : Runtime.App) (shape : PostgresShape.Shape) (external : ExternalSend.Config)
     (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))
@@ -601,11 +612,12 @@ theorem handleVerified_health_response
   rw [he] at h
   exact HttpResponse.text_any_success Std.Http.Response.ok "ok" ctx w w' pending value h hv
 
-/-- 日本語: 非healthの実handleVerifiedで、同じ上限付き標準readAllが即時に
-例外を返し、全体が応答を返すなら、その値は読取り直後のIO状態から固定400と
-request body unreadableのUTF-8だけで構築したFullを包むAnyに等しい。
-実入口と固定構築の等式も保持し、認証・backendを呼ばず読取り例外を応答へ渡さない。
-標準readAllの即時失敗は前提。task継続・読取り内部・Full消費・送信は含まない。 -/
+/-- If, in the real non-health handleVerified, the standard readAll with the same bound immediately returns an exception
+and the whole returns a response, its value is equal to the Any wrapping a Full built, from the IO state right after the
+read, only from the fixed 400 and the UTF-8 of "request body unreadable". The equation between the real entry point and
+the fixed construction is also kept; authentication and the backend are not called, and the read exception is not passed
+into the response. Immediate failure of the standard readAll is a hypothesis. Task continuation, read internals, Full
+consumption and sending are not included. -/
 theorem handleVerified_readAll_error_response
     (conninfo : String) (app : Runtime.App) (shape : PostgresShape.Shape) (external : ExternalSend.Config)
     (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))
@@ -636,8 +648,8 @@ theorem handleVerified_readAll_error_response
   exact HttpResponse.text_any_success Std.Http.Response.badRequest
     "request body unreadable" ctx wb w' pending value h hv
 
-/-- コア設定の検証器と PostgreSQL 接続で起動する。検証器は承認済みの JWT 実装と配置の JWKS・時計を
-使うこと(`ApprovedServer.serve` は `JwksFetch.verify` を渡す)。 -/
+/-- Starts with the verifier from the core settings and a PostgreSQL connection. The verifier must use the approved JWT
+implementation and the deployment's JWKS and clock (`ApprovedServer.serve` passes `JwksFetch.verify`). -/
 def serveVerifiedApp (port : UInt16) (conninfo : String) (app : Runtime.App)
     (shape : PostgresShape.Shape) (userType : Cedar.Spec.EntityType)
     (verify : String → IO (Option String)) (cors : Cors.Config := {})

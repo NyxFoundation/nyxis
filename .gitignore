@@ -1,15 +1,16 @@
-# Lake のビルド成果物と取得した依存
+# Lake build outputs and fetched dependencies
 .lake/
 
-# 環境ごとの秘密(Supabase のトークン等は環境変数で渡す)
+# Per-environment secrets (Supabase tokens etc. are passed via environment variables)
 .env
 .env.*
 
-# Terraform のローカルキャッシュ・state・保存plan
+# Terraform local cache, state and saved plans
 *.tfstate
 *.tfstate.*
 *.tfplan
 crash.log
 crash.*.log
 
+# Bytecode of the helper module the scripts import (scripts/nyxis_local.py)
 __pycache__/

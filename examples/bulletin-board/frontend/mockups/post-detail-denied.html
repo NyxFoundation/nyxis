@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>投稿 見られません</title>
+<title>Post Can't view</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -34,20 +34,20 @@ details summary{cursor:pointer;font-size:13px;font-weight:700;color:#6E7177;min-
 <body>
 <div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
 <header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
-  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
-  <nav class="nav" aria-label="メニュー">
-    <a href="post-list-anonymous.html">ホーム</a>
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis Board</a>
+  <nav class="nav" aria-label="Menu">
+    <a href="post-list-anonymous.html">Home</a>
   </nav>
   <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
-    <a class="who" href="me.html" aria-label="いまはゲストです"><span class="avatar guest"></span>ゲスト</a>
-    <a class="btn sm" href="login.html">Googleでログイン</a>
+    <a class="who" href="me.html" aria-label="You are a guest"><span class="avatar guest"></span>Guest</a>
+    <a class="btn sm" href="login.html">Sign in with Google</a>
   </div>
 </header>
 <div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
 <main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 24px; padding-top: 20px; padding-bottom: 56px">
   <a class="btn plain sm" href="post-list-anonymous.html" style="align-self: flex-start; padding-left: 0">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
-    ホーム
+    Home
   </a>
   <section class="sheet" role="alert" aria-labelledby="deny-title" style="position: relative; display: flex; flex-direction: column; gap: 16px; min-height: 300px; overflow: hidden">
     <div style="display: flex; align-items: center; gap: 8px">
@@ -62,18 +62,18 @@ details summary{cursor:pointer;font-size:13px;font-weight:700;color:#6E7177;min-
       <div class="sil" style="width: 42%"></div>
     </div>
     <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center">
-      <h1 id="deny-title" class="stamp">見られません</h1>
+      <h1 id="deny-title" class="stamp">Can't view</h1>
     </div>
   </section>
-  <p style="font-size: 20px; font-weight: 700; line-height: 1.5">存在しないか、下書きです。下書きは、書いた人と管理者だけが見られます。</p>
+  <p style="font-size: 20px; font-weight: 700; line-height: 1.5">It doesn't exist, or it's a draft. Drafts can be viewed only by their author and admins.</p>
   <div style="display: flex; flex-wrap: wrap; gap: 10px">
-    <a class="btn" href="login.html">Googleでログイン</a>
-    <a class="btn line" href="post-list-anonymous.html">ホームにもどる</a>
+    <a class="btn" href="login.html">Sign in with Google</a>
+    <a class="btn line" href="post-list-anonymous.html">Back to home</a>
   </div>
   <details>
     <summary>
       <svg class="ic" style="width: 14px; height: 14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
-      くわしく
+      Details
     </summary>
     <p class="mono" style="font-size: 13px; color: #6E7177; padding: 4px 0 0 18px">403 Forbidden · readPost · read-draft-post</p>
   </details>

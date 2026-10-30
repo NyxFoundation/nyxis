@@ -2,9 +2,9 @@ import TeamDocs
 import Nyxis.Internal.PostgresInit
 import TeamDocs.Approved
 
-/-! team-docs の DB の明示的な構築。A4/A7 の下で信頼する起動コード。
-監査済みのアプリケーションを内部の DB 接続より先に import する。
-HTTP の起動とは別の実行ファイルで、移行・初期データ・権限の作成は行わない。
+/-! Explicit construction of the team-docs DB. Startup code trusted under A4/A7. Imports the audited application before
+the internal DB connection. A separate executable from the HTTP startup; it performs no migrations, seed data or
+permission creation.
 -/
 
 def main (args : List String) : IO Unit := do
@@ -14,7 +14,7 @@ def main (args : List String) : IO Unit := do
     | throw (IO.userError "NYXIS_DATABASE_URL is required")
   if conninfo.trimAscii.isEmpty || conninfo.contains '\x00' then
     throw (IO.userError "NYXIS_DATABASE_URL is invalid")
-  -- libpq の診断は資格情報を含みうるので、その文面を出さない。
+  -- libpq diagnostics may contain credentials, so their text is not printed.
   try
     Nyxis.Internal.PostgresInit.provision conninfo TeamDocs.Approved.schema
   catch _ =>

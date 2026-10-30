@@ -62,11 +62,11 @@ def main():
 
         check("relative sources outside repository; application audit; fixed App fields")
         check("missing schema", text=VALID.replace('"schema.cedarschema"', '"absent-schema"'),
-              error="スキーマ")
+              error="cannot read schema")
         check("missing policies", text=VALID.replace('"policies.cedar"', '"absent-policies"'),
-              error="ポリシー")
+              error="cannot read policies")
         check("missing effect", schema_text=SCHEMA.replace('@effect("read Record")', ''),
-              error="効果の宣言(@effect)が無い")
+              error="has no effect declaration (@effect)")
         check("unknown table", schema_text=SCHEMA.replace('read Record', 'read Missing'),
               error="Missing")
         check("unknown update column", schema_text=SCHEMA.replace('read Record', 'update Record(missing)'),

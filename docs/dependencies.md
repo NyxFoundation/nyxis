@@ -1,9 +1,9 @@
-# 固定依存の準備
+# Preparing the pinned dependencies
 
-JWT検証には承認済みの lean-jose / jose-libcrypto / lean-libcrypto を使う。
-推移依存は lean-json / leancrypto。本体Lakeの依存に含め、OpenSSLバックエンドを使う。
-lean-pqも既存と同一リビジョンをこの準備経路で取得する。
-Cedarとbatteriesの既存Lake依存は維持する。
+JWT verification uses the approved lean-jose / jose-libcrypto / lean-libcrypto.
+The transitive dependencies are lean-json / leancrypto. They are included in the main Lake dependencies and use the OpenSSL backend.
+lean-pq is also fetched through this preparation path, at the same revision as before.
+The existing Lake dependencies on Cedar and batteries are kept.
 
 ```sh
 python3 scripts/prepare-dependencies.py
@@ -11,26 +11,26 @@ lake build
 sh scripts/check-installed-jwt.sh
 ```
 
-Python 3.12以降、OpenSSL CLI、pkg-config、libcrypto・libpq開発用ファイル、Cコンパイラが必要。
-`scripts/dependencies.json`が各依存の上流リビジョンと取得アーカイブのSHA256を固定する。
-準備スクリプトはGitコマンドを実行せず、HTTPSで取得・照合したソースを
-Git管理外の `.lake/vendor/` に置く。ライセンスと上流のLean/Cソースは維持する。
-初回取得後の実行はソース照合のみで、ビルド成果物を保持する。
-`.lake/vendor/` を改名・移動した場合は、macOS では実行ファイルに lean-libcrypto の dylib の絶対パスが
-埋め込まれるため、`.lake/build/bin` と `.lake/vendor/lean-libcrypto/.lake/build` を消して再ビルドする。
-既存ソースや固定情報が一致しなければ上書きせず失敗する。
+Requires Python 3.12 or later, the OpenSSL CLI, pkg-config, libcrypto and libpq development files, and a C compiler.
+`scripts/dependencies.json` pins each dependency's upstream revision and the SHA256 of the fetched archive.
+The preparation script runs no Git commands; it places the sources fetched and verified over HTTPS
+in `.lake/vendor/`, outside Git management. Licenses and the upstream Lean/C sources are kept.
+Runs after the first fetch only verify the sources, and keep the build outputs.
+If `.lake/vendor/` is renamed or moved, delete `.lake/build/bin` and `.lake/vendor/lean-libcrypto/.lake/build` and rebuild,
+because on macOS the absolute path of lean-libcrypto's dylib is embedded in the executables.
+If existing sources or the pinned information do not match, the script fails without overwriting.
 
-上流のLake設定では依存を固定キャッシュの相対パスへ変え、toolchainを本体と揃える。
-lean-jsonではLean v4.34.1で非推奨になった定理名に対する `linter.deprecated` だけを抑制し、
-他の `warningAsError` は維持する。暗号・JOSE解析・証明のコードは変更しない。
-上流設定は[lean-jsonの固定リビジョン](https://github.com/paulbutcher/lean-json/blob/c7323a3eb8323fb16ee451de495ff91192453aa5/lakefile.lean)
-と[jose-libcryptoの固定リビジョン](https://github.com/paulbutcher/jose-libcrypto/blob/d722d4a55c9dfebffe69dde58d8087ae3c004e09/lakefile.lean)で参照できる。
+The upstream Lake configurations are changed to point dependencies at relative paths in the pinned cache, and their toolchain is aligned with the main package.
+In lean-json, only `linter.deprecated` for theorem names deprecated in Lean v4.34.1 is suppressed,
+and every other `warningAsError` is kept. Cryptography, JOSE parsing and proof code are not changed.
+The upstream configurations can be seen at [the pinned revision of lean-json](https://github.com/paulbutcher/lean-json/blob/c7323a3eb8323fb16ee451de495ff91192453aa5/lakefile.lean)
+and [the pinned revision of jose-libcrypto](https://github.com/paulbutcher/jose-libcrypto/blob/d722d4a55c9dfebffe69dde58d8087ae3c004e09/lakefile.lean).
 
-`checkJwtDependency` は検査専用の実行ファイルで、一時鍵をOpenSSLで生成し、
-有効JWT・署名不正・改変sub・期限境界・期限切れ・発行者違い・audience違い・
-alg none 2件・未知kid・exp欠落の11件を検査する。
-鍵と生成JWTは一時ディレクトリだけに置き、終了時に削除する。
-`sh scripts/check-handler-effects.sh` はアプリからの `JoseLibcrypto` 直接importも拒否する。
+`checkJwtDependency` is a check-only executable. It generates a temporary key with OpenSSL and checks 11 cases:
+a valid JWT, a bad signature, a modified sub, the expiry boundary, an expired token, a wrong issuer, a wrong audience,
+2 alg none cases, an unknown kid, and a missing exp.
+The key and generated JWTs are kept only in a temporary directory and deleted on exit.
+`sh scripts/check-handler-effects.sh` also rejects a direct import of `JoseLibcrypto` from the app.
 
-これは依存の導入検査であり、本体の経路(JWKS の HTTPS 取得・JWT 検証・実 DB)の検査ではない。
-本体経路の検査は[ローカル Supabase の検査方法](local-supabase.md)を参照する。
+This is an adoption check of the dependencies, not a check of the main path (HTTPS fetch of the JWKS, JWT verification, real DB).
+For checks of the main path, see [how to check with local Supabase](local-supabase.md).

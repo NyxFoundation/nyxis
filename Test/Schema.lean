@@ -1,11 +1,11 @@
 import Nyxis.CedarSchema
 
 /-!
-# Test.Schema — Cedar スキーマの構成と検査の検査
+# Test.Schema — tests for building and checking Cedar schemas
 
-`Nyxis.CedarSchema.parse` が、正しい文書を受け入れて期待どおりの `Authz.Schema` を構成し、
-効果の宣言が無い・無いテーブルや列を参照する・文法に誤りがある文書を拒むことを `#guard` で検査する。
-`lake build` で実行される(失敗すればビルドが失敗する)。
+Checks with `#guard` that `Nyxis.CedarSchema.parse` accepts correct documents and builds the expected `Authz.Schema`,
+and rejects documents that lack an effect declaration, reference missing tables or columns, or have syntax errors. Runs
+during `lake build` (a failure fails the build).
 -/
 
 namespace Test.Schema
@@ -19,20 +19,20 @@ def accepted (s : String) : Bool :=
   | .ok _ => true
   | .error _ => false
 
-/-- 拒まれ、エラーの内容に `needle` を含む。 -/
+/-- Rejected, with an error message that contains `needle`. -/
 def rejectedWith (s needle : String) : Bool :=
   match parse s with
   | .error e => (e.msg.splitOn needle).length > 1
   | .ok _ => false
 
 def base : String := r#"
-// 検査用の小さなスキーマ
+// a small schema for tests
 entity User = { "admin": Bool };
 entity Post = { "author": User, "title": String, "body": String, "published": Bool };
 entity Anonymous;
 "#
 
-/-! ## 受け入れる文書 -/
+/-! ## Accepted documents -/
 
 #guard accepted (base ++ r#"
 @effect("read Post")
@@ -45,14 +45,14 @@ action "editPost" appliesTo { principal: [User], resource: [Post] };
 action "deletePost" appliesTo { principal: [User], resource: [Post] };
 "#)
 
-/-- テーブルとアクション(型環境を除く)。 -/
+/-- Tables and actions (excluding the type environment). -/
 def core (s : Authz.Schema) : List (Db.Table × List Db.Column) × List Authz.ActionDecl := (s.tables, s.actions)
 
-/-- 期待するテーブルとアクション。 -/
+/-- The expected tables and actions. -/
 def expected (tables : List (Db.Table × List Db.Column)) (actions : List Authz.ActionDecl) :
     Option (List (Db.Table × List Db.Column) × List Authz.ActionDecl) := some (tables, actions)
 
--- 構成される値: テーブルは宣言順(Anonymous はテーブルではない)、アクションは効果つき。
+-- The built value: tables in declaration order (Anonymous is not a table), actions with their effects.
 #guard ((parse (base ++ r#"
 @effect("update User(admin)")
 action "setAdmin" appliesTo { principal: [User], resource: [User] };
@@ -60,8 +60,9 @@ action "setAdmin" appliesTo { principal: [User], resource: [User] };
   [(⟨"User", []⟩, ["admin"]), (⟨"Post", []⟩, ["author", "title", "body", "published"])]
   [⟨⟨⟨"Action", []⟩, "setAdmin"⟩, ⟨.update ["admin"], ⟨"User", []⟩⟩⟩]
 
--- 同じ文書から構成する cedar-lean の型環境: 型は宣言どおり(`Bool` は anyBool、実体参照は entity)、
--- `appliesTo` は集合、文脈の型は効果から決まる(更新では宣言された列だけが省略可)。
+-- The cedar-lean type environment built from the same document: types as declared (`Bool` is anyBool, entity references
+-- are entity), `appliesTo` is a set, and the context type is determined by the effect (for update, only the declared
+-- columns, each optional).
 #guard ((parse (base ++ r#"
 @effect("update User(admin)")
 action "setAdmin" appliesTo { principal: [User], resource: [User] };
@@ -84,7 +85,7 @@ action "readPost" appliesTo { principal: [User, Anonymous], resource: [Post] };
             appliesToResource := Cedar.Data.Set.make [⟨"Post", []⟩],
             ancestors := Cedar.Data.Set.make [], context := Cedar.Data.Map.make [] }) ] ⟩ : Cedar.Validation.Schema)
 
--- 型環境は cedar-lean の well-formedness 検査に通る。
+-- The type environment passes cedar-lean's well-formedness check.
 #guard (match (parse (base ++ r#"
 @effect("read Post")
 action "readPost" appliesTo { principal: [User, Anonymous], resource: [Post] };
@@ -92,11 +93,11 @@ action "readPost" appliesTo { principal: [User, Anonymous], resource: [Post] };
   | .ok s => (match s.types.validateWellFormed with | .ok _ => true | .error _ => false)
   | .error _ => false)
 
--- コメント、省略可の属性、集合、親、tags、アクションの親と context、1 宣言での複数の名前、修飾した効果の対象
--- (最上位の名前空間)。
+-- Comments, optional attributes, sets, parents, tags, action parents and context, multiple names in one declaration,
+-- and a qualified effect target (top-level namespace).
 #guard ((parse r#"
-/* ブロック
-   コメント */
+// line
+// comment
 entity Group;
 @parents("group")
 entity Doc in [Group] = { "group": Group, "tags": Set<String>, "note"?: String } tags String;
@@ -111,16 +112,18 @@ action "edit", "edit2" in [Action::"readDoc"] appliesTo { principal: [Group], re
   , ⟨⟨⟨"Action", []⟩, "edit"⟩, ⟨.update ["b", "a"], ⟨"Note", []⟩⟩⟩
   , ⟨⟨⟨"Action", []⟩, "edit2"⟩, ⟨.update ["b", "a"], ⟨"Note", []⟩⟩⟩ ]
 
--- コメントは CR でも終わる(Cedar の字句規則 `//[^\n\r]*`)。CR の後のアクションを落とさない。
+-- A comment also ends at CR (Cedar's lexical rule `//[^\n\r]*`). The action after the CR is not dropped.
 #guard ((parse (base ++ "@effect(\"read Post\")\naction \"readPost\" appliesTo { principal: [User], resource: [Post] };" ++
   "// c\r@effect(\"delete Post\") action \"deletePost\" appliesTo { principal: [User], resource: [Post] };\n")).toOption.map
   (·.actions.map (·.action.eid))) == some ["readPost", "deletePost"]
 
-/-! ## 実体の親
+/-! ## Entity parents
 
-`entity T in [P]` は型環境の祖先の型になり、`@parents("列, …")` が親を指す列を定める。列は親の型 `P` か `Set<P>`。
-`in` に `@parents` が無い・`@parents` に `in` が無い・無い列・親でない型の列・空や重複の名前・2 つ以上の注釈・
-予約型 Anonymous の親・自己参照の親・多段の親(親の型がさらに親を持つ)は拒む。 -/
+`entity T in [P]` becomes the ancestor types in the type environment, and `@parents("column, …")` names the parent
+columns. The columns have the parent type `P` or `Set<P>`. Rejected: `in` without `@parents`, `@parents` without `in`,
+missing columns, columns of a non-parent type, empty or duplicated names, two or more annotations, the reserved type
+Anonymous as a parent or with parents, self-referencing parents, and multi-level parents (a parent type that itself has
+parents). -/
 
 def parentBase : String := r#"
 entity Org = { "name": String };
@@ -137,60 +140,62 @@ action "readDoc" appliesTo { principal: [User, Anonymous], resource: [Doc] };
 #guard ((parse parentBase).toOption.map (·.parents)) == some [(⟨"User", []⟩, ["orgs"]), (⟨"Doc", []⟩, ["org"])]
 #guard ((parse parentBase).toOption.map (·.tables)) == some
   [(⟨"Org", []⟩, ["name"]), (⟨"User", []⟩, ["orgs", "admin"]), (⟨"Doc", []⟩, ["org", "shared", "title"])]
--- 型環境の祖先の型は宣言どおりで、well-formed
+-- The ancestor types in the type environment are as declared, and it is well-formed
 #guard (((parse parentBase).toOption.bind fun s => s.types.ets.find? ⟨"User", []⟩).map (·.ancestors))
   == some (Cedar.Data.Set.make [⟨"Org", []⟩])
 #guard (match parse parentBase with
   | .ok s => (match s.types.validateWellFormed with | .ok _ => true | .error _ => false)
   | .error _ => false)
--- 親を宣言しないエンティティは parents に現れない
+-- An entity that declares no parents does not appear in parents
 #guard ((parse base).toOption.map (·.parents)) == some []
--- 2 つの親の型(Org と User が親。User は親を持たない形にする)
+-- Two parent types (Org and User are parents; User is changed to have no parents)
 #guard accepted (parentBase.replace "@parents(\"orgs\")\nentity User in [Org] = { \"orgs\": Set<Org>, \"admin\": Bool };"
   "entity User = { \"admin\": Bool };" |>.replace "@parents(\"org\")\nentity Doc in [Org]" "@parents(\"org, shared\")\nentity Doc in [Org, User]")
--- `in` に親を指す列の宣言が無い
+-- `in` without a parent-column declaration
 #guard rejectedWith (parentBase.replace "@parents(\"orgs\")\n" "") "@parents"
--- `@parents` があるのに `in` が無い
-#guard rejectedWith (parentBase.replace "entity User in [Org]" "entity User") "in [親の型]"
--- 無い列・親でない型の列(Bool / String / 親に無い型の集合)
-#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"nope\")") "に無い"
-#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"admin\")") "親の型"
-#guard rejectedWith (parentBase.replace "@parents(\"org\")" "@parents(\"title\")") "親の型"
-#guard rejectedWith (parentBase.replace "@parents(\"org\")" "@parents(\"org, shared\")") "親の型"
--- 空・重複の名前、2 つ以上の注釈
-#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"orgs,\")") "空の名前"
-#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"orgs, orgs\")") "重複"
-#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"orgs\")\n@parents(\"orgs\")") "2 つ以上"
--- 予約型 Anonymous は親にできず、親も持てない
+-- `@parents` present but no `in`
+#guard rejectedWith (parentBase.replace "entity User in [Org]" "entity User") "in [ParentType]"
+-- Missing column; columns of a non-parent type (Bool / String / a set of a type that is not a parent)
+#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"nope\")") "is not in"
+#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"admin\")") "parent type"
+#guard rejectedWith (parentBase.replace "@parents(\"org\")" "@parents(\"title\")") "parent type"
+#guard rejectedWith (parentBase.replace "@parents(\"org\")" "@parents(\"org, shared\")") "parent type"
+-- Empty and duplicated names, two or more annotations
+#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"orgs,\")") "empty name"
+#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"orgs, orgs\")") "duplicate"
+#guard rejectedWith (parentBase.replace "@parents(\"orgs\")" "@parents(\"orgs\")\n@parents(\"orgs\")") "more than one"
+-- The reserved type Anonymous cannot be a parent and cannot have parents
 #guard rejectedWith (parentBase.replace "entity Doc in [Org]" "entity Doc in [Org, Anonymous]") "Anonymous"
 #guard rejectedWith (parentBase.replace "entity Anonymous;" "@parents(\"o\")\nentity Anonymous in [Org] = { \"o\": Org };") "Anonymous"
--- 省略可の列(`"org"?: Org`)も親を指せる
+-- An optional column (`"org"?: Org`) can also point at a parent
 #guard accepted (parentBase.replace "\"org\": Org" "\"org\"?: Org")
--- 自己参照の親と、多段の親(Doc の親 User がさらに Org を親に持つ)は拒む: 行の実体の祖先は直接の親だけで、Cedar の
--- `in` は祖先の推移閉包を前提にするので、許すと `in`(とくに forbid)の意味がずれる
-#guard rejectedWith (parentBase.replace "entity Org = { \"name\": String };" "@parents(\"parent\")\nentity Org in [Org] = { \"name\": String, \"parent\": Org };") "自分自身"
-#guard rejectedWith (parentBase.replace "@parents(\"org\")\nentity Doc in [Org]" "@parents(\"org, shared\")\nentity Doc in [Org, User]") "多段の親"
+-- Self-referencing parents and multi-level parents (Doc's parent User itself has Org as a parent) are rejected: the
+-- ancestors of a row's entity are only its direct parents, and Cedar's `in` assumes the transitive closure of
+-- ancestors, so allowing them would shift the meaning of `in` (especially in forbid)
+#guard rejectedWith (parentBase.replace "entity Org = { \"name\": String };" "@parents(\"parent\")\nentity Org in [Org] = { \"name\": String, \"parent\": Org };") "itself"
+#guard rejectedWith (parentBase.replace "@parents(\"org\")\nentity Doc in [Org]" "@parents(\"org, shared\")\nentity Doc in [Org, User]") "multi-level parents"
 
--- 名前空間・共通型・enum 型は、cedar-lean の型環境を構成できないので拒む(`PostgresShape` と同じ範囲)。
+-- Namespaces, common types and enum types are rejected because the cedar-lean type environment cannot be built (the
+-- same scope as `PostgresShape`).
 #guard rejectedWith r#"
 namespace App {
   entity Group;
   @effect("read Group")
   action "readGroup" appliesTo { principal: [Group], resource: [Group] };
 }
-"# "名前空間"
+"# "namespace"
 #guard rejectedWith (base ++ r#"
 type Meta = { "tags": Set<String> };
 @effect("read Post")
 action "readPost" appliesTo { principal: [User], resource: [Post] };
-"#) "共通型"
+"#) "common type"
 #guard rejectedWith (base ++ r#"
 entity Color enum ["red", "blue"];
 @effect("read Post")
 action "readPost" appliesTo { principal: [User], resource: [Post] };
 "#) "enum"
 
--- 正本に書かれた `context` は、nyxis が効果から決める文脈の型と一致しなければならない。
+-- A `context` written in the source schema must match the context type nyxis determines from the effect.
 #guard accepted (base ++ r#"
 @effect("insert User")
 action "registerUser" appliesTo { principal: [User], resource: [User], context: { "values": { "admin": Bool } } };
@@ -198,13 +203,13 @@ action "registerUser" appliesTo { principal: [User], resource: [User], context: 
 #guard rejectedWith (base ++ r#"
 @effect("insert User")
 action "registerUser" appliesTo { principal: [User], resource: [User], context: { "values": { "admin": String } } };
-"#) "一致しなければならない"
+"#) "must match"
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 action "readPost" appliesTo { principal: [User], resource: [Post], context: { "ip": ipaddr } };
-"#) "一致しなければならない"
+"#) "must match"
 
--- 一覧の効果(`list T`)。列は書かない。
+-- The list effect (`list T`). No columns are written.
 #guard ((parse (base ++ r#"
 @effect("list Post")
 action "listPosts" appliesTo { principal: [User, Anonymous], resource: [Post] };
@@ -212,155 +217,158 @@ action "listPosts" appliesTo { principal: [User, Anonymous], resource: [Post] };
   [(⟨"User", []⟩, ["admin"]), (⟨"Post", []⟩, ["author", "title", "body", "published"])]
   [⟨⟨⟨"Action", []⟩, "listPosts"⟩, ⟨.list, ⟨"Post", []⟩⟩⟩]
 
--- 空の文書はテーブルもアクションも無いスキーマ。
+-- An empty document is a schema with no tables and no actions.
 #guard ((parse "").toOption.map core) == expected [] []
 
--- 文字列のエスケープはポリシー形式と同じ規則で解く(`\u{…}`・`\xHH`・`\"`)。Unicode の空白も同じ。
+-- String escapes are resolved with the same rules as the policy format (`\u{…}`, `\xHH`, `\"`). Unicode whitespace too.
 #guard (parse r#"entity P = {"a\u{3042}b": Bool, "q\"x": Long, "\x41": String};"#).toOption.map (·.tables) ==
-  some [(⟨"P", []⟩, ["aあb", "q\"x", "A"])]
-#guard accepted "entity P;　entity Q;"
-#guard rejectedWith r#"entity P = {"\q": Bool};"# "エスケープ"
-#guard rejectedWith r#"entity P = {"a\u{D800}": Bool};"# "スカラー値"
+  some [(⟨"P", []⟩, ["a\u3042b", "q\"x", "A"])]
+#guard accepted "entity P;\u3000entity Q;"
+#guard rejectedWith r#"entity P = {"\q": Bool};"# "escape"
+#guard rejectedWith r#"entity P = {"a\u{D800}": Bool};"# "scalar value"
 
-/-! ## 拒む文書 -/
+/-! ## Rejected documents -/
 
--- 効果の宣言が無いアクション。
+-- An action without an effect declaration.
 #guard rejectedWith (base ++ r#"
 action "readPost" appliesTo { principal: [User, Anonymous], resource: [Post] };
-"#) "効果の宣言(@effect)が無い"
+"#) "has no effect declaration (@effect)"
 
--- 存在しない列。
+-- A column that does not exist.
 #guard rejectedWith (base ++ r#"
 @effect("update Post(title, bodyy)")
 action "editPost" appliesTo { principal: [User], resource: [Post] };
-"#) "列 bodyy はテーブル Post に無い"
+"#) "column bodyy is not in table Post"
 
--- 存在しないテーブル。
+-- A table that does not exist.
 #guard rejectedWith (base ++ r#"
 @effect("read Comment")
 action "readComment" appliesTo { principal: [User], resource: [Comment] };
-"#) "がスキーマに無い"
+"#) "is not in the schema"
 
--- update の列が空。
+-- An update with no columns.
 #guard rejectedWith (base ++ r#"
 @effect("update Post()")
 action "editPost" appliesTo { principal: [User], resource: [Post] };
-"#) "列を 1 つ以上"
+"#) "at least one column"
 
--- update の列が重複。
+-- An update with duplicated columns.
 #guard rejectedWith (base ++ r#"
 @effect("update Post(title, title)")
 action "editPost" appliesTo { principal: [User], resource: [Post] };
-"#) "重複"
+"#) "duplicate"
 
--- 効果が 2 つ。
+-- Two effects.
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 @effect("delete Post")
 action "readPost" appliesTo { principal: [User], resource: [Post] };
-"#) "2 つ以上"
+"#) "more than one"
 
--- 効果の種類が無い。
+-- An unknown effect kind.
 #guard rejectedWith (base ++ r#"
 @effect("drop Post")
 action "dropPost" appliesTo { principal: [User], resource: [Post] };
-"#) "効果の種類 drop は無い"
+"#) "unknown effect kind drop"
 
--- 効果の文法の誤り。
+-- A syntax error in the effect.
 #guard rejectedWith (base ++ r#"
 @effect("read Post extra")
 action "readPost" appliesTo { principal: [User], resource: [Post] };
-"#) "の文法"
+"#) "syntax"
 
--- 一覧に列は書けない。
+-- A list cannot have columns.
 #guard rejectedWith (base ++ r#"
 @effect("list Post(title)")
 action "listPosts" appliesTo { principal: [User], resource: [Post] };
-"#) "の文法"
+"#) "syntax"
 
--- 一覧の対象が無いテーブル / appliesTo の resource に無い。
+-- The list target is a missing table / is not in the appliesTo resource.
 #guard rejectedWith (base ++ r#"
 @effect("list Comment")
 action "listComments" appliesTo { principal: [User], resource: [Post] };
-"#) "がスキーマに無い"
+"#) "is not in the schema"
 #guard rejectedWith (base ++ r#"
 @effect("list Post")
 action "listPosts" appliesTo { principal: [User], resource: [User] };
 "#) "resource"
 
--- 効果の対象が予約型 Anonymous。
+-- The effect target is the reserved type Anonymous.
 #guard rejectedWith (base ++ r#"
 @effect("read Anonymous")
 action "x" appliesTo { principal: [User], resource: [Anonymous] };
-"#) "テーブルではない"
+"#) "is not a table"
 
--- 効果の対象が enum 型。
+-- The effect target is an enum type.
 #guard rejectedWith (base ++ r#"
 entity Color enum ["red"];
 @effect("read Color")
 action "x" appliesTo { principal: [User], resource: [Color] };
 "#) "enum"
 
--- 効果の対象が appliesTo の resource に無い。
+-- The effect target is not in the appliesTo resource.
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 action "x" appliesTo { principal: [User], resource: [User] };
 "#) "resource"
 
--- appliesTo が無い。
+-- No appliesTo.
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 action "x";
-"#) "resource が無い"
+"#) "no appliesTo resource"
 
--- アクション以外の @effect(namespace・エンティティ・共通型・属性)。
+-- @effect on something other than an action (namespace, entity, common type, attribute).
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 namespace App { entity Doc = { "a": Long }; }
-"#) "アクションにだけ"
+"#) "only to actions"
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 entity Comment = { "body": String };
-"#) "アクションにだけ"
+"#) "only to actions"
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 type T = { "a": Long };
-"#) "アクションにだけ"
+"#) "only to actions"
 #guard rejectedWith (base ++ r#"
 entity Comment = { @effect("read Post") "body": String };
-"#) "アクションにだけ"
+"#) "only to actions"
 
--- 予約型 Anonymous に属性がある。
+-- The reserved type Anonymous has attributes.
 #guard rejectedWith r#"
 entity Anonymous = { "x": Long };
-"# "予約型 Anonymous"
+"# "reserved type Anonymous"
 
--- 名前空間の外からの修飾の無い参照は解決しない(名前空間の中の型は修飾する)。
+-- An unqualified reference from outside a namespace does not resolve (types inside a namespace must be qualified).
 #guard rejectedWith (base ++ r#"
 namespace App { entity Doc = { "a": Long }; }
 @effect("read Doc")
 action "x" appliesTo { principal: [User], resource: [App::Doc] };
-"#) "がスキーマに無い"
+"#) "is not in the schema"
 
--- 重複するエンティティ型・アクション。
-#guard rejectedWith (base ++ "entity User;\n") "重複"
+-- Duplicated entity types and actions.
+#guard rejectedWith (base ++ "entity User;\n") "duplicate"
 #guard rejectedWith (base ++ r#"
 @effect("read Post")
 action "readPost" appliesTo { principal: [User], resource: [Post] };
 @effect("read Post")
 action "readPost" appliesTo { principal: [User], resource: [Post] };
-"#) "重複"
+"#) "duplicate"
 
--- 文法の誤り(`;` が無い、閉じていないコメント、予期しない文字)。
+-- Syntax errors (missing `;`, block comments, unexpected characters).
 #guard rejectedWith "entity User = { \"admin\": Bool }\nentity Post;" "';'"
-#guard rejectedWith "/* 閉じない" "ブロックコメント"
-#guard rejectedWith "entity User = { \"admin\": Bool }; ★" "予期しない文字"
--- Cedar 4.13 の解析器と同じく、文字列リテラルの中の生の改行は受理し、生の CR は拒否する。
+#guard rejectedWith "/* unclosed" "block comment"
+-- Cedar's schema format has no block comments (cedar-policy-cli 4.13 also reports `/*` as an invalid token). They are
+-- rejected even when closed.
+#guard rejectedWith "entity User;\n/* block */ entity B;" "block comment"
+#guard rejectedWith "entity User = { \"admin\": Bool }; ★" "unexpected character"
+-- Like the Cedar 4.13 parser, a raw line break inside a string literal is accepted and a raw CR is rejected.
 #guard accepted "entity User = { \"a\nb\": Bool };"
-#guard rejectedWith "entity User = { \"a\rb\": Bool };" "生の CR"
-#guard rejectedWith "entity User = { \"admin\": Bool };\n@effect(\"read User\")\naction readUser appliesTo { principal: [User], resource: [User], foo: [] };" "予期しないキー foo"
+#guard rejectedWith "entity User = { \"a\rb\": Bool };" "raw CR"
+#guard rejectedWith "entity User = { \"admin\": Bool };\n@effect(\"read User\")\naction readUser appliesTo { principal: [User], resource: [User], foo: [] };" "unexpected key foo"
 
-/-! ## 一意性と参照整合の宣言 -/
+/-! ## Uniqueness and referential-integrity declarations -/
 
 def c35 : String := r#"
 entity User = { "name": String };
@@ -385,43 +393,46 @@ action "createDoc" appliesTo { principal: [User], resource: [Doc] };
   , references :=
       [ ⟨⟨"Doc", []⟩, "org", ⟨"Org", []⟩, .cascade ⟨⟨"Action", []⟩, "deleteDoc"⟩⟩
       , ⟨⟨"Doc", []⟩, "createdBy", ⟨"User", []⟩, .restrict⟩ ] }
--- 注釈が無ければ制約も無い
+-- No annotations, no constraints
 #guard ((parse (base ++ r#"
 @effect("read Post")
 action "readPost" appliesTo { principal: [User, Anonymous], resource: [Post] };
 "#)).toOption.map (·.constraints)) == some {}
--- 拒むもの: 無い列、空の名前、組の中の重複、テーブルでないエンティティへの注釈、2 つ以上の注釈
-#guard rejectedWith (c35.replace "@unique(\"name\")" "@unique(\"nope\")") "@unique の列 nope"
-#guard rejectedWith (c35.replace "@unique(\"name\")" "@unique(\"name,\")") "空の名前"
-#guard rejectedWith (c35.replace "@unique(\"org, title; slug\")" "@unique(\"org, org\")") "重複"
-#guard rejectedWith (c35.replace "entity Anonymous;" "@unique(\"x\")\nentity Anonymous;") "テーブルではない"
-#guard rejectedWith (c35.replace "@unique(\"name\")" "@unique(\"name\")\n@unique(\"name\")") "2 つ以上"
--- 拒むもの: 実体参照でない列・集合の列の参照、テーブルでない型への参照、無い列、重複の列、形の誤り
-#guard rejectedWith (c35.replace "createdBy restrict" "title restrict") "実体参照"
-#guard rejectedWith (c35.replace "createdBy restrict" "shared restrict") "実体参照"
-#guard rejectedWith (c35.replace "createdBy restrict" "nope restrict") "@references の列 nope"
-#guard rejectedWith (c35.replace "createdBy restrict" "org restrict") "重複"
-#guard rejectedWith (c35.replace "createdBy restrict" "createdBy") "各項目"
-#guard rejectedWith (c35.replace "createdBy restrict" "createdBy cascade") "各項目"
-#guard rejectedWith (c35.replace "\"createdBy\": User" "\"createdBy\": Anonymous") "テーブルではない"
--- 拒むもの: 無いアクション、このテーブルの削除効果でないアクション、cascade の循環(自分自身を含む)
-#guard rejectedWith (c35.replace "org cascade deleteDoc" "org cascade nope") "アクション nope が無い"
+-- Rejected: missing columns, empty names, duplicates within a group, annotations on an entity that is not a table, two
+-- or more annotations
+#guard rejectedWith (c35.replace "@unique(\"name\")" "@unique(\"nope\")") "@unique column nope"
+#guard rejectedWith (c35.replace "@unique(\"name\")" "@unique(\"name,\")") "empty name"
+#guard rejectedWith (c35.replace "@unique(\"org, title; slug\")" "@unique(\"org, org\")") "duplicate"
+#guard rejectedWith (c35.replace "entity Anonymous;" "@unique(\"x\")\nentity Anonymous;") "is not a table"
+#guard rejectedWith (c35.replace "@unique(\"name\")" "@unique(\"name\")\n@unique(\"name\")") "more than one"
+-- Rejected: references from columns that are not entity references or are sets, references to non-table types, missing
+-- columns, duplicated columns, malformed items
+#guard rejectedWith (c35.replace "createdBy restrict" "title restrict") "entity reference"
+#guard rejectedWith (c35.replace "createdBy restrict" "shared restrict") "entity reference"
+#guard rejectedWith (c35.replace "createdBy restrict" "nope restrict") "@references column nope"
+#guard rejectedWith (c35.replace "createdBy restrict" "org restrict") "duplicate"
+#guard rejectedWith (c35.replace "createdBy restrict" "createdBy") "item must be"
+#guard rejectedWith (c35.replace "createdBy restrict" "createdBy cascade") "item must be"
+#guard rejectedWith (c35.replace "\"createdBy\": User" "\"createdBy\": Anonymous") "is not a table"
+-- Rejected: missing actions, actions that are not this table's delete effect, cascade cycles (including self-cycles)
+#guard rejectedWith (c35.replace "org cascade deleteDoc" "org cascade nope") "action nope does not exist"
 #guard rejectedWith (c35.replace "org cascade deleteDoc" "org cascade deleteOrg") "delete Doc"
 #guard rejectedWith (c35.replace "org cascade deleteDoc" "org cascade createDoc") "delete Doc"
 #guard rejectedWith (c35.replace "entity Org = { \"name\": String, \"owners\": Set<User> };"
-  "@references(\"main cascade deleteOrg\")\nentity Org = { \"name\": String, \"owners\": Set<User>, \"main\": Doc };") "循環"
+  "@references(\"main cascade deleteOrg\")\nentity Org = { \"name\": String, \"owners\": Set<User>, \"main\": Doc };") "cycle"
 #guard rejectedWith (c35.replace "\"createdBy\": User" "\"createdBy\": User, \"parent\": Doc"
-  |>.replace "createdBy restrict" "createdBy restrict, parent cascade deleteDoc") "循環"
--- restrict の参照は循環にならない(Org → Doc は cascade、Doc の親の参照が restrict)
+  |>.replace "createdBy restrict" "createdBy restrict, parent cascade deleteDoc") "cycle"
+-- A restrict reference does not form a cycle (Org → Doc is cascade, the reference back to Doc's parent is restrict)
 #guard accepted (c35.replace "entity Org = { \"name\": String, \"owners\": Set<User> };"
   "@references(\"main restrict\")\nentity Org = { \"name\": String, \"owners\": Set<User>, \"main\": Doc };")
 
-/-! ## 所属行
+/-! ## Membership rows
 
-`@memberships("M: 列 -> 列, …; …")` は、`in` を宣言したエンティティに添え、所属行のテーブル `M`(正本のテーブル。
-Anonymous でも自分自身でもない)の所属する側の列(型はこのエンティティの型そのもの)と、親を指す列(宣言した親の型
-`P` か `Set<P>`)を定める。`@parents` と併用でき、`in` には少なくともどちらかが要る。形の誤り・無い列・型違い・
-空や重複の名前・2 つ以上の注釈・`in` の無いエンティティへの注釈は拒む。 -/
+`@memberships("M: column -> column, …; …")` is attached to an entity that declares `in`, and names, in the membership
+table `M` (a table of the source schema; neither Anonymous nor the entity itself), the member-side column (whose type is
+exactly this entity's type) and the parent columns (of a declared parent type `P` or `Set<P>`). It can be combined with
+`@parents`, and `in` needs at least one of the two. Rejected: malformed items, missing columns, wrong types, empty or
+duplicated names, two or more annotations, and the annotation on an entity without `in`. -/
 
 def memBase : String := r#"
 entity Org = { "name": String };
@@ -445,8 +456,8 @@ action "readDoc" appliesTo { principal: [User, Anonymous], resource: [Doc] };
 #guard (match parse memBase with
   | .ok s => (match s.types.validateWellFormed with | .ok _ => true | .error _ => false)
   | .error _ => false)
--- 集合の列(`Set<Org>`)も親を指せる。複数の項目は ; で区切る(同じテーブル・同じ所属する側の列の項目は 1 つにまとめる)。
--- `@parents` との併用
+-- A set column (`Set<Org>`) can also point at parents. Multiple items are separated by ; (items with the same table and
+-- the same member-side column are merged into one). Combined with `@parents`
 #guard accepted (memBase.replace "user -> team, org" "user -> team, orgs")
 #guard accepted (memBase.replace "entity Doc = { \"org\": Org, \"title\": String };"
   "entity Doc = { \"org\": Org, \"title\": String };\nentity Seat = { \"who\": User, \"team\": Team };" |>.replace
@@ -455,31 +466,32 @@ action "readDoc" appliesTo { principal: [User, Anonymous], resource: [Doc] };
   "entity Doc = { \"org\": Org, \"title\": String };\nentity Seat = { \"who\": User, \"team\": Team };" |>.replace
   "user -> team, org" "user -> team, org; Seat: who -> team")).toOption.map (·.memberships))
   == some [(⟨"User", []⟩, [⟨⟨"Membership", []⟩, "user", ["team", "org"]⟩, ⟨⟨"Seat", []⟩, "who", ["team"]⟩])]
-#guard rejectedWith (memBase.replace "user -> team, org" "user -> team; Membership: user -> org") "重複"
+#guard rejectedWith (memBase.replace "user -> team, org" "user -> team; Membership: user -> org") "duplicate"
 #guard accepted (memBase.replace "@memberships(\"Membership: user -> team, org\")\nentity User in [Team, Org] = { \"admin\": Bool };"
   "@memberships(\"Membership: user -> team\")\n@parents(\"org\")\nentity User in [Team, Org] = { \"admin\": Bool, \"org\": Org };")
--- `in` の無いエンティティには添えられない。`in` には @parents か @memberships が要る
-#guard rejectedWith (memBase.replace "entity User in [Team, Org]" "entity User") "in [親の型]"
+-- Cannot be attached to an entity without `in`. `in` needs @parents or @memberships
+#guard rejectedWith (memBase.replace "entity User in [Team, Org]" "entity User") "in [ParentType]"
 #guard rejectedWith (memBase.replace "@memberships(\"Membership: user -> team, org\")\n" "") "@memberships"
--- 形の誤り、空・重複の名前、2 つ以上の注釈
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership user -> team") "各項目"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user") "各項目"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> team,") "空の名前"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> team, team") "重複"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> team; Membership: user -> org; Membership: user -> org") "重複"
+-- Malformed items, empty and duplicated names, two or more annotations
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership user -> team") "item must be"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user") "item must be"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> team,") "empty name"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> team, team") "duplicate"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> team; Membership: user -> org; Membership: user -> org") "duplicate"
 #guard rejectedWith (memBase.replace "@memberships(\"Membership: user -> team, org\")"
-  "@memberships(\"Membership: user -> team\")\n@memberships(\"Membership: user -> org\")") "2 つ以上"
--- 無いテーブル・予約型・自分自身、無い列、所属する側の列の型違い、親でない型の列
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Nope: user -> team") "エンティティ型 Nope が無い"
+  "@memberships(\"Membership: user -> team\")\n@memberships(\"Membership: user -> org\")") "more than one"
+-- Missing table, reserved type, the entity itself, missing columns, wrong member-side column type, columns of a
+-- non-parent type
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Nope: user -> team") "entity type Nope does not exist"
 #guard rejectedWith (memBase.replace "Membership: user -> team, org" "Anonymous: user -> team") "Anonymous"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "User: admin -> team") "自分自身"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: nope -> team") "に無い"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> nope") "に無い"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: team -> org") "このエンティティの型"
-#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> user") "親の型"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "User: admin -> team") "itself"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: nope -> team") "is not in"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> nope") "is not in"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: team -> org") "this entity's type"
+#guard rejectedWith (memBase.replace "Membership: user -> team, org" "Membership: user -> user") "parent type"
 #guard rejectedWith (memBase.replace "entity Doc = { \"org\": Org, \"title\": String };"
-  "entity Doc = { \"org\": Org, \"title\": String };\n@memberships(\"Doc: org -> org\")\nentity Org2 in [Org] = {};") "このエンティティの型"
--- 親の型がさらに親を持つ(多段)ことは所属行でも拒む
-#guard rejectedWith (memBase.replace "entity Team = { \"org\": Org };" "@parents(\"org\")\nentity Team in [Org] = { \"org\": Org };") "多段の親"
+  "entity Doc = { \"org\": Org, \"title\": String };\n@memberships(\"Doc: org -> org\")\nentity Org2 in [Org] = {};") "this entity's type"
+-- A parent type that itself has parents (multi-level) is also rejected for membership rows
+#guard rejectedWith (memBase.replace "entity Team = { \"org\": Org };" "@parents(\"org\")\nentity Team in [Org] = { \"org\": Org };") "multi-level parents"
 
 end Test.Schema

@@ -39,7 +39,7 @@ To add sign-offs to commits you have already made, rebase with `git rebase --sig
 
 Every pull request and every push to `main` runs `.github/workflows/ci.yml` on GitHub-hosted runners (`ubuntu-latest`). It builds the core, the proofs, and the two official samples, checks the axioms of every theorem, validates the Cedar schema and policies of the samples, runs the static checks under `scripts/`, and checks the DCO sign-off of the pull request's commits.
 
-The integration tests that need Docker and a local Supabase are not run by this workflow. Please run them locally before opening a pull request that touches the runtime or the samples; see [docs/local-supabase.md](docs/local-supabase.md) (in Japanese).
+The integration tests that need Docker and a local Supabase are not run by this workflow. Please run them locally before opening a pull request that touches the runtime or the samples; see [docs/local-supabase.md](docs/local-supabase.md).
 
 ## Before you open a pull request
 

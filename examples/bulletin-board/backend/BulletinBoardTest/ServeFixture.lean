@@ -4,12 +4,13 @@ import BulletinBoard.App
 import BulletinBoardTest.Fixture
 
 /-!
-# BulletinBoardTest.ServeFixture — プロセス内の DB で起動する検査用の実行ファイル
+# BulletinBoardTest.ServeFixture — a test executable that starts with an in-process DB
 
-`BulletinBoard.app` を、`BulletinBoardTest.Fixture.store`(利用者 alice・bob・root(管理者)と、alice の公開済み投稿 pub1・
-下書き draft1)を初期状態とするプロセス内の `Store` の上で、本体と同じ HTTP 入口(`PostgresHttp.handleAuthenticatedWith`)
-に載せる。主体は常に匿名。`scripts/check-http.sh` がこれを起動し、HTTP の配線(メソッド・パス・本文がモデルに届き、
-ハンドラのレスポンスがそのまま返ること)を確かめる。PostgreSQL・JWT は使わず、デプロイするものではない。
+Puts `BulletinBoard.app` behind the same HTTP entry point as the real server (`PostgresHttp.handleAuthenticatedWith`),
+on top of an in-process `Store` whose initial state is `BulletinBoardTest.Fixture.store` (users alice, bob, root
+(admin), and alice's published post pub1 and draft draft1). The principal is always anonymous. `scripts/check-http.sh`
+starts it and confirms the HTTP wiring (method, path, and body reach the model, and the handler's response is returned
+unchanged). It uses neither PostgreSQL nor JWT and is not for deployment.
 -/
 
 def main (args : List String) : IO Unit := do
@@ -19,7 +20,8 @@ def main (args : List String) : IO Unit := do
       | some n => if 0 < n && n ≤ 65535 then pure n.toUInt16 else throw (IO.userError s!"port out of range: {s}")
       | none => throw (IO.userError s!"port is not a number: {s}")
   let store ← Std.Mutex.new BulletinBoardTest.Fixture.store
-  -- リクエストは Mutex の下で 1 つずつモデルを進めるので、処理された列は `Runtime.trace` と同じ形になる。
+  -- Requests advance the model one at a time under a Mutex, so the processed sequence has the same shape as
+  -- `Runtime.trace`.
   let backend : Nyxis.Runtime.AuthenticatedRequest → IO Nyxis.Http.Response := fun r =>
     store.atomically do
       let run := Nyxis.Runtime.handleRequest BulletinBoard.app (← get) r

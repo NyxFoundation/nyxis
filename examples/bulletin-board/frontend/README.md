@@ -1,5 +1,5 @@
-# 掲示板フロントエンド
+# Bulletin board frontend
 
-ビルド・ローカル Supabase・OAuth・バックエンドと画面の起動・最初の管理者の用意は、[公式サンプルの README](../README.md) を参照する。
+For building, local Supabase, OAuth, starting the backend and the screens, and preparing the first admin, see the [official sample README](../README.md).
 
-人間提供のデザイン資料は [design/README.md](design/README.md)、静的模型は [mockups/index.html](mockups/index.html) にある。
+The human-provided design materials are in [design/README.md](design/README.md), and the static mockups are in [mockups/index.html](mockups/index.html).

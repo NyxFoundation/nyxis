@@ -2,19 +2,22 @@ import Nyxis.Build
 import Nyxis.Materials
 
 /-!
-# Test.Materials — 判定材料の限定(`Nyxis.Materials` / `Nyxis.Authz.permits`)の検査
+# Test.Materials — checks for restricting decision materials (`Nyxis.Materials` / `Nyxis.Authz.permits`)
 
-`values-fixture.cedarschema` / `values-fixture.cedar`(拡張値の列の検査用正本。アプリケーションのファイルではない)から
-`nyxis_schema` で構成したスキーマ(cedar-lean の型環境 `types` を含む)について、次を `#guard` で確かめる
-(`lake build` で実行される):
+For the schema built with `nyxis_schema` (including cedar-lean's type environment `types`) from
+`values-fixture.cedarschema` / `values-fixture.cedar` (a test schema for extended-value columns, not an application
+file), checks the following with `#guard` (run by `lake build`):
 
-- 型環境が well-formed で、検査用ポリシーが level 1(主体・対象の属性を 1 段だけ参照)で cedar-lean の検証に通り、
-  level 0 では通らないこと(`levelOf` は 1 を返す)。nyxis の文脈の型と一致しない `context` の宣言を拒むこと。
-- 手書きの DB の状態について、認可層の判定(`permits`: 限定した判定材料)と判定材料の全体での判定
-  (`Authorized` の判定)が一致し、期待どおりの許可・拒否になること。
-- level 1 の材料は主体・アクション・対象だけ、level 2 はそれらの属性が参照する実体まで(集合の要素は辿らない)。
-- 判定の実体の構成: アクションの実体を加えないと cedar-lean の実体の検査が通らず、型違いの行は判定の実体に
-  現れないこと。前提の検査: `appliesTo` の外の主体の要求は通らず、`permits` が拒否すること。
+- The type environment is well-formed, and the test policies pass cedar-lean's validation at level 1 (referencing the
+  principal's and resource's attributes only one level deep) and fail at level 0 (`levelOf` returns 1). A `context`
+  declaration that does not match nyxis's context type is rejected.
+- For hand-written DB states, the authorization layer's decision (`permits`: restricted decision materials) and the
+  decision on the whole decision materials (the `Authorized` decision) agree and give the expected permits and denials.
+- Level 1 materials are only the principal, action, and resource; level 2 extends to the entities their attributes
+  reference (set elements are not traversed).
+- Construction of the decision's entities: without adding the action entities, cedar-lean's entity check fails, and rows
+  with wrong types do not appear among the decision's entities. Premise checks: a request whose principal is outside
+  `appliesTo` does not pass, and `permits` rejects it.
 -/
 
 namespace Test.Materials
@@ -26,11 +29,12 @@ open Nyxis.Db
 open Nyxis.Authz
 
 open Lean Elab Command in
-/-- `test_text name from "path"` — 検査用の文書の本文をビルド時に読んで `name : String` として定義する。 -/
+/-- `test_text name from "path"` — reads the contents of a test document at build time and defines it as
+    `name : String`. -/
 elab "test_text " id:ident " from " path:str : command => do
-  let (_, contents) ← Nyxis.Build.readRelative path "検査用の文書"
+  let (_, contents) ← Nyxis.Build.readRelative path "test document"
   Nyxis.Build.defineValue id (mkConst ``String) (toExpr contents)
-    s!"`{path.getString}` の本文(ビルド時に読む)。"
+    s!"The contents of `{path.getString}` (read at build time)."
 
 test_text schemaText from "values-fixture.cedarschema"
 nyxis_schema schema from "values-fixture.cedarschema"
@@ -42,20 +46,21 @@ def isOk : Except ε α → Bool
 
 def ts : Cedar.Validation.Schema := schema.types
 
-/-! ## 型環境 -/
+/-! ## Type environment -/
 
 #guard ts.ets.size == 3 && ts.acts.size == 6
 #guard isOk ts.validateWellFormed
 #guard isOk (Cedar.Validation.validate policies ts)
--- 検査用ポリシーは主体・対象の属性を 1 段だけ参照する: level 1 で通り、level 0 では通らない
+-- The test policies reference the principal's and resource's attributes only one level deep: pass at level 1, fail at
+-- level 0
 #guard isOk (Cedar.Validation.validateWithLevel policies ts 1)
 #guard !isOk (Cedar.Validation.validateWithLevel policies ts 0)
 #guard Nyxis.Materials.levelOf policies ts == some 1
--- 正本の context が、nyxis が効果から決める文脈の型と一致しなければ拒む
+-- Reject if the approved schema's context does not match the context type nyxis decides from the effect
 #guard !isOk (Nyxis.CedarSchema.parse
   (schemaText.replace "\"values\": { \"admin\": Bool }" "\"values\": { \"admin\": String }"))
 
-/-- 読み取りのアクションに `context` を書いた小さな文書。 -/
+/-- A small document that writes a `context` for a read action. -/
 def tiny (extra : String) : String :=
   r#"entity User = { "admin": Bool };
 entity Anonymous;
@@ -66,7 +71,7 @@ action "readUser" appliesTo { principal: [User, Anonymous], resource: [User]"# +
 #guard isOk (Nyxis.CedarSchema.parse (tiny ", context: {}"))
 #guard !isOk (Nyxis.CedarSchema.parse (tiny ", context: { \"values\": { \"admin\": Bool } }"))
 
-/-! ## 手書きの DB の状態 -/
+/-! ## Hand-written DB states -/
 
 def userT : EntityType := ⟨"User", []⟩
 def docT : EntityType := ⟨"Doc", []⟩
@@ -83,7 +88,7 @@ def boolV (b : Bool) : Value := .prim (.bool b)
 def strV (s : String) : Value := .prim (.string s)
 def setV (vs : List Value) : Value := .set (Set.make vs)
 def recV (kvs : List (Attr × Value)) : Value := .record (Map.make kvs)
-/-- 解析できなければ文字列にして、型違いとして検査に掛ける。 -/
+/-- If it does not parse, makes it a string so it is checked as a wrong type. -/
 def dateV (s : String) : Value :=
   match Ext.Datetime.parse s with
   | some d => .ext (.datetime d)
@@ -96,8 +101,9 @@ def row (kvs : List (Attr × Value)) : Row := Map.make kvs
 
 def userRow (admin : Bool) : Row := row [("admin", boolV admin)]
 
-/-- 検査用の固定のサーバー生成値。検査用正本のアクションは `context` に `now` / `id` を宣言していないので、
-    判定の文脈には現れない(下の「サーバー生成値」の節で宣言した場合を検査する)。 -/
+/-- Fixed server-generated values for the checks. The test schema's actions do not declare `now` / `id` in `context`, so
+    they do not appear in the decision context (the case where they are declared is checked in the "Server-generated
+    values" section below). -/
 def gen : Generated := { now := ⟨1700000000000⟩, id := "00000000-0000-4000-8000-000000000001" }
 
 def docRow (owner : EntityUID) (viewers : List EntityUID) (labels : List String) (editor : EntityUID)
@@ -106,7 +112,8 @@ def docRow (owner : EntityUID) (viewers : List EntityUID) (labels : List String)
        ("created", dateV "2024-01-01"), ("expires", dateV "2030-01-01"), ("price", decV price),
        ("meta", recV [("editor", uidV editor), ("pinned", boolV pinned)])]
 
-/-- alice の文書 2 つ: `pub` は公開ラベルつきで carol を pinned の編集者に、`priv` は非公開。bob は両方の共有先。 -/
+/-- Two documents of alice: `pub` has the public label with carol as the pinned editor, and `priv` is private. bob is a
+    sharee of both. -/
 def store : Store := Map.make
   [ (alice, userRow false), (bob, userRow false), (carol, userRow true)
   , (doc "pub", docRow alice [bob] ["public"] carol true)
@@ -115,39 +122,40 @@ def store : Store := Map.make
 def request (p : Principal) (action : String) (op : Operation) : Request :=
   judgementRequest schema p gen (act action) op
 
-/-- 判定材料の全体(`Authorized` の判定に使う実体)。 -/
+/-- The whole decision materials (the entities used for the `Authorized` decision). -/
 def full (p : Principal) (op : Operation) : Entities :=
   judgementEntities schema p store op
 
-/-- 限定した判定材料。 -/
+/-- The restricted decision materials. -/
 def slice (p : Principal) (action : String) (op : Operation) (level : Nat := 1) : Entities :=
   materials schema p gen store (act action) op level
 
-/-- 認可層の判定(限定した材料)と判定材料の全体での判定が一致して `expected` になる。 -/
+/-- The authorization layer's decision (restricted materials) and the decision on the whole decision materials agree and
+    equal `expected`. -/
 def agrees (p : Principal) (action : String) (op : Operation) (expected : Bool) : Bool :=
   permits schema policies p gen store (act action) op == expected &&
   isPermitted policies (request p action op) (full p op) == expected
 
-/-- 指定した level の材料でも同じ判定になる。 -/
+/-- The decision is also the same on the materials of the given level. -/
 def agreesAt (p : Principal) (action : String) (op : Operation) (expected : Bool) (level : Nat) : Bool :=
   isPermitted policies (request p action op) (slice p action op level) == expected
 
-/-! ### 読み取り・一覧 -/
+/-! ### Reads and lists -/
 
-#guard agrees (.user alice) "readDoc" (.read docT "pub") true          -- 所有者
-#guard agrees (.user bob) "readDoc" (.read docT "pub") true            -- 共有先(Set<User> の contains)
-#guard agrees (.user carol) "readDoc" (.read docT "pub") true          -- pinned の編集者(レコード属性)
-#guard agrees .anonymous "readDoc" (.read docT "pub") true             -- 公開ラベルと datetime の大小
-#guard agrees (.user dave) "readDoc" (.read docT "pub") true           -- 行の無い主体でも公開は読める
+#guard agrees (.user alice) "readDoc" (.read docT "pub") true          -- owner
+#guard agrees (.user bob) "readDoc" (.read docT "pub") true            -- sharee (contains on Set<User>)
+#guard agrees (.user carol) "readDoc" (.read docT "pub") true          -- pinned editor (record attribute)
+#guard agrees .anonymous "readDoc" (.read docT "pub") true             -- public label and datetime ordering
+#guard agrees (.user dave) "readDoc" (.read docT "pub") true           -- a principal with no row can still read public documents
 #guard agrees (.user alice) "listDocs" (.read docT "priv") true
 #guard agrees (.user bob) "readDoc" (.read docT "priv") true
-#guard agrees (.user carol) "readDoc" (.read docT "priv") false        -- pinned でない
+#guard agrees (.user carol) "readDoc" (.read docT "priv") false        -- not pinned
 #guard agrees (.user dave) "readDoc" (.read docT "priv") false
 #guard agrees .anonymous "readDoc" (.read docT "priv") false
 #guard agrees .anonymous "listDocs" (.read docT "priv") false
-#guard agrees (.user alice) "readDoc" (.read docT "none") false         -- 無い行
+#guard agrees (.user alice) "readDoc" (.read docT "none") false         -- missing row
 
-/-! ### 挿入・更新・削除(文脈に提案される値) -/
+/-! ### Insert, update, delete (values proposed in the context) -/
 
 #guard agrees (.user alice) "createDoc" (.insert docT "new" (docRow alice [] [] alice false)) true
 #guard agrees (.user alice) "createDoc" (.insert docT "new" (docRow alice [] [] alice false "150.0")) false
@@ -162,77 +170,81 @@ def agreesAt (p : Principal) (action : String) (op : Operation) (expected : Bool
 #guard agrees (.user dave) "registerUser" (.insert userT "dave" (userRow true)) false
 #guard agrees (.user bob) "registerUser" (.insert userT "dave" (userRow false)) false
 
-/-! ### 一覧は行ごとに判定する -/
+/-! ### Lists decide per row -/
 
 #guard (listRows schema policies .anonymous gen store (act "listDocs") docT {}).map (·.1) == ["pub"]
 #guard (listRows schema policies (.user bob) gen store (act "listDocs") docT {}).map (·.1) == ["priv", "pub"]
 #guard (listRows schema policies (.user carol) gen store (act "listDocs") docT {}).map (·.1) == ["pub"]
 
-/-! ### 材料の範囲 -/
+/-! ### Scope of the materials -/
 
--- 判定材料の全体は 5 行 + 6 アクション
+-- The whole decision materials are 5 rows + 6 actions
 #guard (full (.user alice) (.read docT "pub")).size == 11
--- level 1: 主体・アクション・対象の実体だけ
+-- level 1: only the principal, action, and resource entities
 #guard (slice (.user alice) "readDoc" (.read docT "pub")).keys == Set.make [alice, act "readDoc", doc "pub"]
--- level 2: 対象の属性が参照する実体(owner の alice、meta.editor の carol)まで。集合 viewers の要素は辿らない
+-- level 2: up to the entities the resource's attributes reference (alice of owner, carol of meta.editor). Elements of
+-- the set viewers are not traversed
 #guard (slice (.user bob) "readDoc" (.read docT "pub") 2).keys
   == Set.make [alice, bob, carol, act "readDoc", doc "pub"]
--- 行の無い主体・対象は材料に現れない(存在を仮定しない)
+-- A principal or resource with no row does not appear in the materials (its existence is not assumed)
 #guard (slice (.user dave) "readDoc" (.read docT "none")).keys == Set.make [act "readDoc"]
--- 挿入では提案される行が対象の実体として材料に入る(主体自身の行は入らない)
+-- For inserts, the proposed row enters the materials as the resource entity (the principal's own row does not)
 #guard (slice (.user alice) "createDoc" (.insert docT "new" (docRow alice [] [] alice false))).keys
   == Set.make [alice, act "createDoc", doc "new"]
 #guard (slice (.user dave) "registerUser" (.insert userT "dave" (userRow false))).keys
   == Set.make [act "registerUser"]
--- level 2 でも判定は一致する
+-- The decision also agrees at level 2
 #guard agreesAt (.user bob) "readDoc" (.read docT "pub") true 2
 #guard agreesAt (.user carol) "readDoc" (.read docT "priv") false 2
 
-/-! ### 判定の実体の構成と前提の検査に効き目があること -/
+/-! ### The construction of the decision's entities and the premise checks are effective -/
 
--- アクションの実体を加えなければ cedar-lean の実体の検査(全アクションの存在)は通らない
+-- Without adding the action entities, cedar-lean's entity check (all actions exist) does not pass
 #guard !isOk (Cedar.Validation.validateEntities ts (Map.make (Nyxis.Materials.rowEntries ts schema.parents schema.memberships store)))
 #guard isOk (Cedar.Validation.validateEntities ts (Nyxis.Materials.entities ts schema.parents schema.memberships store))
--- 型違いの行(admin が文字列)は適合せず、判定の実体に現れない
+-- A row with a wrong type (admin is a string) does not conform and does not appear among the decision's entities
 #guard !Nyxis.Materials.conforms ts alice (row [("admin", strV "yes")])
 #guard (Nyxis.Materials.entities ts schema.parents schema.memberships (Map.make [(alice, row [("admin", strV "yes")])])).find? alice == none
 #guard isOk (Cedar.Validation.validateEntities ts
   (Nyxis.Materials.entities ts schema.parents schema.memberships (Map.make [(alice, row [("admin", strV "yes")]), (bob, userRow false)])))
--- 検査用正本の Doc は所有者を親に持つ(`@parents("owner")`): 行の実体の祖先は owner の値。User は祖先を持たない
+-- The test schema's Doc has its owner as parent (`@parents("owner")`): the row entity's ancestors are the value of
+-- owner. User has no ancestors
 #guard schema.parents == [(docT, ["owner"])]
 #guard ((full (.user alice) (.read docT "pub")).find? (doc "pub")).map (·.ancestors) == some (Set.make [alice])
 #guard ((full (.user alice) (.read docT "pub")).find? alice).map (·.ancestors) == some Set.empty
--- 列が足りない行・余分な列のある行も適合しない
+-- Rows with missing columns or extra columns do not conform either
 #guard !Nyxis.Materials.conforms ts alice (row [])
 #guard !Nyxis.Materials.conforms ts alice (row [("admin", boolV false), ("extra", boolV true)])
 #guard Nyxis.Materials.conforms ts alice (userRow false)
--- 匿名は createDoc の主体になれない(appliesTo の外): 要求の検査が通らず、判定は拒否になる
+-- Anonymous cannot be the principal of createDoc (outside appliesTo): the request check does not pass, and the decision
+-- is a denial
 #guard !isOk (Cedar.Validation.validateRequest ts
   (request .anonymous "createDoc" (.insert docT "new" (docRow alice [] [] alice false))))
 #guard !Nyxis.Materials.premisesHold ts (request .anonymous "createDoc" (.insert docT "new" (docRow alice [] [] alice false)))
 #guard !permits schema policies .anonymous gen store (act "createDoc") (.insert docT "new" (docRow alice [] [] alice false))
 #guard isOk (Cedar.Validation.validateRequest ts (request .anonymous "readDoc" (.read docT "pub")))
--- 型違いの提案値(price が文字列)は文脈の型に合わず、判定は拒否になる
+-- A proposed value with a wrong type (price is a string) does not match the context type, and the decision is a denial
 #guard !permits schema policies (.user alice) gen store (act "createDoc")
   (.insert docT "new" (docRow alice [] [] alice false "not-a-decimal"))
--- `step` も同じ判定で発行する
+-- `step` also issues with the same decision
 #guard (step schema policies (.user alice) gen store (act "readDoc") "pub" Map.empty {}).issued.length == 1
 #guard (step schema policies (.user dave) gen store (act "readDoc") "priv" Map.empty {}).issued.isEmpty
 #guard (step schema policies .anonymous gen store (act "listDocs") "" Map.empty {}).issued.length == 1
 
-/-! ### 部分的な取得(接続層のための一致)
+/-! ### Partial fetch (agreement for the connection layer)
 
-全体の状態 `store` から主キーの点検索で取得した行(と無いと分かった実体)だけの `Known` について、検査
-`coversOp` / `coversStep` の効き目と、`step` の結果・発行が全体と一致すること(`step_eq_of_covers` の実例)。 -/
+For a `Known` containing only the rows fetched from the whole state `store` by primary key point lookups (and the
+entities known not to exist), checks that the checks `coversOp` / `coversStep` are effective and that `step`'s result
+and issuance agree with the whole (instances of `step_eq_of_covers`). -/
 
 deriving instance DecidableEq for Nyxis.Outcome
 deriving instance DecidableEq for Nyxis.Db.Operation
 
-/-- `store` から `uids` の行だけを取得し、`absent` を「無い」と記録した部分的な取得。 -/
+/-- A partial fetch that fetches only the rows of `uids` from `store` and records `absent` as "missing". -/
 def known (uids : List EntityUID) (absent : List EntityUID := []) : Nyxis.Materials.Known :=
   ⟨Map.make (uids.filterMap fun u => (Map.find? store u).map (u, ·)), absent, []⟩
 
-/-- 部分的な取得での `step` の結果と発行(アクション・操作)が全体の状態での `step` と一致する。 -/
+/-- `step`'s result and issuance (action, operation) on the partial fetch agree with `step` on the whole state. -/
 def stepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) (key : Key)
     (values : Row := Map.empty) : Bool :=
   let sP := step schema policies p gen k.rows (act action) key values {}
@@ -240,47 +252,52 @@ def stepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) (ke
   sP.outcome == sS.outcome &&
     sP.issued.map (fun i => (i.action, i.op)) == sS.issued.map (fun i => (i.action, i.op))
 
--- 読み取り: 主体と対象の行だけで全体と同じ結果(許可)
+-- Read: the principal's and resource's rows alone give the same result as the whole (permit)
 #guard coversStep schema policies (known [alice, doc "pub"]) (.user alice) gen (act "readDoc") "pub" Map.empty {}
 #guard stepAgrees (known [alice, doc "pub"]) (.user alice) "readDoc" "pub"
-#guard stepAgrees (known [carol, doc "priv"]) (.user carol) "readDoc" "priv"     -- 拒否も一致
--- 対象の行を引いていなければ検査に通らない(主体の行だけでは足りない)
+#guard stepAgrees (known [carol, doc "priv"]) (.user carol) "readDoc" "priv"     -- denials agree too
+-- Without looking up the resource's row, the check does not pass (the principal's row alone is not enough)
 #guard !coversOp schema policies (known [alice]) (.user alice) gen (act "readDoc") (.read docT "pub")
 #guard !coversOp schema policies (known [doc "pub"]) (.user alice) gen (act "readDoc") (.read docT "pub")
--- 無い行は「無い」と記録すれば通り、結果(拒否)も一致する。記録が無ければ通らない
+-- A missing row passes if recorded as "missing", and the result (denial) also agrees. Without the record it does not
+-- pass
 #guard coversStep schema policies (known [alice] [doc "none"]) (.user alice) gen (act "readDoc") "none" Map.empty {}
 #guard stepAgrees (known [alice] [doc "none"]) (.user alice) "readDoc" "none"
 #guard !coversOp schema policies (known [alice]) (.user alice) gen (act "readDoc") (.read docT "none")
--- アクションは型環境のテーブルでないので取得しなくてよい。匿名の予約型 `Anonymous` は型環境にある(要求の検査の
--- ため)がテーブルは無いので、接続層は「無い」と記録する(記録しなければ検査に通らない)
+-- Actions are not tables of the type environment, so they need not be fetched. The anonymous reserved type `Anonymous`
+-- is in the type environment (for the request check) but has no table, so the connection layer records it as "missing"
+-- (the check does not pass otherwise)
 #guard !coversOp schema policies (known [doc "pub"]) .anonymous gen (act "readDoc") (.read docT "pub")
 #guard coversStep schema policies (known [doc "pub"] [anonymousUID]) .anonymous gen (act "readDoc") "pub" Map.empty {}
 #guard stepAgrees (known [doc "pub"] [anonymousUID]) .anonymous "readDoc" "pub"
--- 挿入: 主体の行と対象の不在が分かれば通る(自己登録では主体の行も無い)
+-- Insert: passes if the principal's row and the resource's absence are known (for self-registration the principal's row
+-- is missing too)
 #guard coversStep schema policies (known [] [dave]) (.user dave) gen (act "registerUser") "dave" (userRow false) {}
 #guard stepAgrees (known [] [dave]) (.user dave) "registerUser" "dave" (userRow false)
 #guard coversStep schema policies (known [alice] [doc "new"]) (.user alice) gen (act "createDoc") "new"
   (docRow alice [] [] alice false) {}
 #guard stepAgrees (known [alice] [doc "new"]) (.user alice) "createDoc" "new" (docRow alice [] [] alice false)
-#guard stepAgrees (known [alice, doc "pub"]) (.user alice) "createDoc" "pub" (docRow alice [] [] alice false)  -- 競合
--- 更新・削除
+#guard stepAgrees (known [alice, doc "pub"]) (.user alice) "createDoc" "pub" (docRow alice [] [] alice false)  -- conflict
+-- Update and delete
 #guard stepAgrees (known [alice, doc "pub"]) (.user alice) "editDoc" "pub" (row [("expires", dateV "2031-01-01")])
 #guard stepAgrees (known [bob, doc "pub"]) (.user bob) "editDoc" "pub" (row [("expires", dateV "2031-01-01")])
 #guard stepAgrees (known [alice, doc "pub"]) (.user alice) "deleteDoc" "pub"
 #guard stepAgrees (known [bob, doc "pub"]) (.user bob) "deleteDoc" "pub"
--- 一覧: 対象テーブルの全行と主体の行で、各行の判定が一致する
+-- List: with all rows of the target table and the principal's row, each row's decision agrees
 #guard coversStep schema policies (known [bob, doc "pub", doc "priv"]) (.user bob) gen (act "listDocs") "" Map.empty {}
 #guard stepAgrees (known [bob, doc "pub", doc "priv"]) (.user bob) "listDocs" ""
 #guard stepAgrees (known [doc "pub", doc "priv"] [anonymousUID]) .anonymous "listDocs" ""
--- 一覧で対象テーブルの行が欠けると、検査は取得した行しか見ないので結果が違う: 全行の取得は定理の前提(`htable`)
+-- If rows of the target table are missing in a list, the result differs because the check only sees the fetched rows:
+-- fetching all rows is a premise of the theorem (`htable`)
 #guard coversStep schema policies (known [bob, doc "pub"]) (.user bob) gen (act "listDocs") "" Map.empty {}
 #guard !stepAgrees (known [bob, doc "pub"]) (.user bob) "listDocs" ""
 
-/-! ### 一覧の絞り込み・並べ替え・ページ・件数
+/-! ### List filters, sorting, pages, and counts
 
-`store` に alice の文書を 2 つ足した `store4`(`old`: 2020 年作成・price 5.0・非公開、`big`: price 90.0・公開)で、
-問い合わせ(`ListQuery`)の絞り込みが判定の前に、並べ替えとページが permit された行に対して行われ、件数が
-permit された行だけを数えることを確かめる。bob は 4 件すべて(共有先または公開)、匿名は公開の 2 件を読める。 -/
+With `store4`, which adds two documents of alice to `store` (`old`: created in 2020, price 5.0, private; `big`: price
+90.0, public), checks that the query's (`ListQuery`) filters apply before the decision, that sorting and paging apply to
+the permitted rows, and that the count counts only permitted rows. bob can read all 4 (as a sharee or because they are
+public), and anonymous can read the 2 public ones. -/
 
 def store4 : Store := Map.make (store.toList ++
   [ (doc "old", (docRow alice [bob] ["team"] carol false "5.0").patch (row [("created", dateV "2020-01-01")]))
@@ -289,41 +306,45 @@ def store4 : Store := Map.make (store.toList ++
 def eqF (column : Attr) (value : Value) : Filter := ⟨column, .eq, value⟩
 def cmpF (column : Attr) (comparison : Comparison) (value : Value) : Filter := ⟨column, comparison, value⟩
 
-/-- 一覧の結果(返した主キーの列, 件数)。 -/
+/-- A list's result (the sequence of returned primary keys, the count). -/
 def listed (p : Principal) (q : ListQuery) (s : Store := store4) : List Key × Nat :=
   match (step schema policies p gen s (act "listDocs") "" Map.empty q).outcome with
   | .list rows total => (rows.map (·.1), total)
   | _ => ([], 0)
 
--- 問い合わせ無し: permit された行を主キーの順で全部、件数はその数
+-- No query: all permitted rows in primary key order, and the count is their number
 #guard listed (.user bob) {} == (["big", "old", "priv", "pub"], 4)
 #guard listed .anonymous {} == (["big", "pub"], 2)
--- 絞り込み(等値: 集合の値そのもの / 大小: decimal・datetime)は判定の前に行い、件数も絞った後の permit 数
+-- Filters (equality: the set value itself / ordering: decimal, datetime) apply before the decision, and the count is
+-- the number of permits after filtering
 #guard listed (.user bob) { filters := [eqF "labels" (setV [strV "public"])] } == (["big", "pub"], 2)
 #guard listed (.user bob) { filters := [cmpF "price" .lt (decV "20.0")] } == (["old", "priv", "pub"], 3)
 #guard listed (.user bob) { filters := [cmpF "price" .le (decV "10.0"), cmpF "created" .ge (dateV "2024-01-01")] }
   == (["priv", "pub"], 2)
-#guard listed .anonymous { filters := [cmpF "price" .lt (decV "20.0")] } == (["pub"], 1)   -- old は非公開で拒否
--- 無い列・比べられない値(decimal の列を文字列と比べる)・集合の大小は合わない
+#guard listed .anonymous { filters := [cmpF "price" .lt (decV "20.0")] } == (["pub"], 1)   -- old is private and denied
+-- Missing columns, values that cannot be compared (comparing a decimal column with a string), and ordering on sets do
+-- not match
 #guard listed (.user bob) { filters := [eqF "nope" (strV "x")] } == ([], 0)
 #guard listed (.user bob) { filters := [cmpF "price" .lt (strV "x")] } == ([], 0)
 #guard listed (.user bob) { filters := [cmpF "labels" .lt (setV [])] } == ([], 0)
--- 並べ替え: price の降順、同じなら主キーの順
+-- Sorting: price descending, primary key order on ties
 #guard listed (.user bob) { orderBy := [{ column := "price", direction := .desc }] } == (["big", "priv", "pub", "old"], 4)
 #guard listed (.user bob) { orderBy := [{ column := "created" }, { column := "price", direction := .desc }] }
   == (["old", "big", "priv", "pub"], 4)
--- ページ: 並べ替えた permit 済みの行列の offset 番目から limit 件。件数はページを切る前
+-- Page: `limit` rows starting at position `offset` of the sorted sequence of permitted rows. The count is before paging
 #guard listed (.user bob) { orderBy := [{ column := "price", direction := .desc }], offset := 1, limit := some 2 }
   == (["priv", "pub"], 4)
 #guard listed (.user bob) { offset := 3, limit := some 5 } == (["pub"], 4)
 #guard listed (.user bob) { offset := 4 } == ([], 4)
--- 拒否された行の分だけページが欠けることはない: 匿名の 2 件目は pub(bob の 2 件目 old は匿名には無い)
+-- The page is never short by the number of denied rows: anonymous's 2nd row is pub (bob's 2nd row old does not exist
+-- for anonymous)
 #guard listed .anonymous { offset := 1, limit := some 1 } == (["pub"], 2)
 #guard listed .anonymous { offset := 0, limit := some 1 } == (["big"], 2)
--- 発行するのは返した行の読み取りだけ(件数の分は発行しない)
+-- Only reads of the returned rows are issued (none for the count)
 #guard (step schema policies (.user bob) gen store4 (act "listDocs") "" Map.empty { limit := some 1 }).issued.map
   (fun i => i.op) == [.read docT "big"]
--- 部分的な取得: 絞り込みに合う行だけを取得すれば、検査に通り結果(行と件数)が全体と一致する
+-- Partial fetch: fetching only the rows that match the filters passes the check, and the result (rows and count) agrees
+-- with the whole
 def known4 (uids : List EntityUID) (absent : List EntityUID := []) : Nyxis.Materials.Known :=
   ⟨Map.make (uids.filterMap fun u => (Map.find? store4 u).map (u, ·)), absent, []⟩
 def cheap : ListQuery := { filters := [cmpF "price" .lt (decV "20.0")], orderBy := [{ column := "price" }], limit := some 2 }
@@ -333,9 +354,11 @@ def cheap : ListQuery := { filters := [cmpF "price" .lt (decV "20.0")], orderBy 
     Map.empty cheap).outcome
   == (step schema policies (.user bob) gen store4 (act "listDocs") "" Map.empty cheap).outcome
 #guard listed (.user bob) cheap == (["old", "priv"], 3)
--- 絞り込みに合わない行(big)を余分に取得していても結果は同じ(絞り込みは取得した行にも掛かる)
+-- Fetching an extra row that does not match the filters (big) gives the same result (the filters also apply to the
+-- fetched rows)
 #guard listed (.user bob) cheap (known4 [bob, doc "old", doc "priv", doc "pub", doc "big"]).rows == (["old", "priv"], 3)
--- level 2 の閉包: 対象の属性が参照する実体(owner の alice、meta.editor の carol)まで取得して初めて通る
+-- Level 2 closure: passes only once the entities the resource's attributes reference (alice of owner, carol of
+-- meta.editor) are fetched
 #guard !Nyxis.Materials.closedAt
   (judgementEntities schema (.user bob) (known [bob, doc "pub"]).rows (.read docT "pub"))
   ((known [bob, doc "pub"]).knows ts schema.memberships) (request (.user bob) "readDoc" (.read docT "pub")) 2
@@ -343,18 +366,20 @@ def cheap : ListQuery := { filters := [cmpF "price" .lt (decV "20.0")], orderBy 
   (judgementEntities schema (.user bob) (known [bob, doc "pub", alice, carol]).rows (.read docT "pub"))
   ((known [bob, doc "pub", alice, carol]).knows ts schema.memberships) (request (.user bob) "readDoc" (.read docT "pub")) 2
 
-/-! ### サーバー生成値
+/-! ### Server-generated values
 
-正本のアクションの `context` が `now: datetime` / `id: String` を宣言したときだけ、nyxis が要求ごとに決めた値が
-`context.now` / `context.id` として判定に渡る。宣言していない検査用正本では文脈に現れない。 -/
+Only when the `context` of an action in the approved schema declares `now: datetime` / `id: String` are the values nyxis
+decided per request passed to the decision as `context.now` / `context.id`. In the test schema, which does not declare
+them, they do not appear in the context. -/
 
--- 検査用正本は宣言していないので、文脈は提案される値だけ(読み取りでは空)
+-- The test schema does not declare them, so the context is only the proposed values (empty for reads)
 #guard (request (.user alice) "readDoc" (.read docT "pub")).context == Map.empty
 #guard ((request (.user alice) "createDoc" (.insert docT "new" (docRow alice [] [] alice false))).context.keys
   == Set.make ["values"])
 #guard !schema.contextHas (act "readDoc") "now" && !schema.contextHas (act "createDoc") "id"
 
-/-- `now` と `id` を宣言した小さな正本: 期限前の文書だけ読め、作成時刻が `context.now` の文書だけ作れる。 -/
+/-- A small approved schema declaring `now` and `id`: only documents before their expiry can be read, and only documents
+    whose creation time is `context.now` can be created. -/
 def timedSchemaText : String := r#"
 entity User = { "admin": Bool };
 entity Doc = { "owner": User, "created": datetime, "expires": datetime, "token": String };
@@ -383,14 +408,14 @@ def timedPolicies : Policies := (Nyxis.CedarPolicy.parse timedPoliciesText).toOp
 #guard isOk (Nyxis.CedarPolicy.parse timedPoliciesText)
 #guard isOk (Cedar.Validation.validate timedPolicies timedSchema.types)
 #guard Nyxis.Materials.levelOf timedPolicies timedSchema.types == some 1
--- 宣言は型環境に写り、宣言していないアクションには無い
+-- The declarations carry over to the type environment and are absent for actions that do not declare them
 #guard timedSchema.contextHas (act "readDoc") "now" && !timedSchema.contextHas (act "readDoc") "id"
 #guard timedSchema.contextHas (act "createDoc") "now" && timedSchema.contextHas (act "createDoc") "id"
 #guard !timedSchema.contextHas (act "deleteDoc") "now" && !timedSchema.contextHas (act "deleteDoc") "id"
--- 宣言の型が違えば拒む(`now` が String、`id` が Long)
+-- Reject if the declared type differs (`now` as String, `id` as Long)
 #guard !isOk (Nyxis.CedarSchema.parse (timedSchemaText.replace "\"now\": datetime }" "\"now\": String }"))
 #guard !isOk (Nyxis.CedarSchema.parse (timedSchemaText.replace "\"id\": String," "\"id\": Long,"))
--- 省略可の宣言(`"now"?: datetime`)と、宣言外の属性(`"foo": Long`)も拒む
+-- Also reject optional declarations (`"now"?: datetime`) and undeclared attributes (`"foo": Long`)
 #guard !isOk (Nyxis.CedarSchema.parse (timedSchemaText.replace "\"now\": datetime }" "\"now\"?: datetime }"))
 #guard !isOk (Nyxis.CedarSchema.parse (timedSchemaText.replace "\"now\": datetime }" "\"now\": datetime, \"foo\": Long }"))
 
@@ -405,35 +430,39 @@ def timedPermits (p : Principal) (g : Generated) (action : String) (op : Operati
 def newDoc (created : String) (token : String) : Row :=
   row [("owner", uidV alice), ("created", dateV created), ("expires", dateV "2030-01-01"), ("token", strV token)]
 
--- 文脈に `now` が置かれ、判定はその値に依存する(同じ主体・同じ行で、時刻だけが違う)
+-- `now` is placed in the context, and the decision depends on its value (same principal, same row, only the time
+-- differs)
 #guard (judgementRequest timedSchema .anonymous early (act "readDoc") (.read docT "d")).context.keys
   == Set.make ["now"]
 #guard timedPermits .anonymous early "readDoc" (.read docT "d")
 #guard !timedPermits .anonymous late "readDoc" (.read docT "d")
--- 挿入では `values` と `now` と `id` が並び、提案された作成時刻と token が生成値と一致するときだけ permit
+-- For inserts, `values`, `now`, and `id` sit side by side, and it is permitted only when the proposed creation time and
+-- token match the generated values
 #guard (judgementRequest timedSchema (.user alice) early (act "createDoc") (.insert docT "n" (newDoc "2024-06-01" "k1"))).context.keys
   == Set.make ["id", "now", "values"]
 #guard timedPermits (.user alice) early "createDoc" (.insert docT "n" (newDoc "2024-06-01" "k1"))
-#guard !timedPermits (.user alice) early "createDoc" (.insert docT "n" (newDoc "2024-06-02" "k1"))  -- 時刻を偽る
-#guard !timedPermits (.user alice) early "createDoc" (.insert docT "n" (newDoc "2024-06-01" "k9"))  -- ID を偽る
-#guard !timedPermits (.user alice) late "createDoc" (.insert docT "n" (newDoc "2024-06-01" "k1"))   -- 別の要求の値
--- 宣言していないアクションの文脈は空のまま
+#guard !timedPermits (.user alice) early "createDoc" (.insert docT "n" (newDoc "2024-06-02" "k1"))  -- forging the time
+#guard !timedPermits (.user alice) early "createDoc" (.insert docT "n" (newDoc "2024-06-01" "k9"))  -- forging the ID
+#guard !timedPermits (.user alice) late "createDoc" (.insert docT "n" (newDoc "2024-06-01" "k1"))   -- another request's values
+-- The context of an action that does not declare them stays empty
 #guard (judgementRequest timedSchema (.user alice) early (act "deleteDoc") (.delete docT "d")).context == Map.empty
 #guard timedPermits (.user alice) early "deleteDoc" (.delete docT "d")
--- `step` の発行の記録は、その呼び出しの生成値を持つ
+-- The records `step` issues carry that call's generated values
 #guard (step timedSchema timedPolicies .anonymous early timedStore (act "readDoc") "d" Map.empty {}).issued.all
   (fun i => i.generated == early)
 #guard (step timedSchema timedPolicies .anonymous late timedStore (act "readDoc") "d" Map.empty {}).issued.isEmpty
--- 部分的な取得の検査も生成値を文脈に含めて閉包を見る(`now` / `id` は実体を参照しないので主体と対象で閉じる)
+-- The partial fetch check also includes the generated values in the context when checking closure (`now` / `id`
+-- reference no entities, so it closes with the principal and resource)
 #guard coversStep timedSchema timedPolicies ⟨timedStore, [anonymousUID], []⟩ .anonymous early (act "readDoc") "d" Map.empty {}
 
-/-! ### 実体の親
+/-! ### Entity parents
 
-`entity User in [Org]` と `@parents("orgs")`(`Set<Org>` の列。多対多の所属)、`entity Doc in [Org]` と `@parents("org")`
-を宣言した小さな正本で、行の実体が親を指す列の値を祖先に持ち、ポリシーの `principal in resource.org`(主体が対象の
-組織のメンバーなら)と `resource.shared.contains(principal)`(共有先に含まれていれば)が期待どおり許可・拒否になる
-こと。祖先は行自身の列だけから決まるので、親の行(Org)を取得しなくても部分的な取得の検査に通り、判定は全体と
-一致する。 -/
+With a small approved schema declaring `entity User in [Org]` with `@parents("orgs")` (a `Set<Org>` column; many-to-many
+membership) and `entity Doc in [Org]` with `@parents("org")`, checks that row entities have the values of the columns
+pointing to parents as ancestors, and that the policies' `principal in resource.org` (if the principal is a member of
+the resource's organization) and `resource.shared.contains(principal)` (if included among the sharees) permit and deny
+as expected. Ancestors are determined only from the row's own columns, so the partial fetch check passes without
+fetching the parent rows (Org), and the decision agrees with the whole. -/
 
 def orgSchemaText : String := r#"
 entity Org = { "name": String };
@@ -472,7 +501,8 @@ def org (id : String) : EntityUID := ⟨orgT, id⟩
 def docIn (o : String) (shared : List EntityUID) (title : String) : Row :=
   row [("org", uidV (org o)), ("shared", setV (shared.map uidV)), ("title", strV title)]
 
-/-- alice は acme と zen に、bob は zen だけに属し、carol はどこにも属さないが a2 を個別に共有されている。 -/
+/-- alice belongs to acme and zen, bob only to zen, and carol belongs nowhere but has a2 shared with her individually.
+    -/
 def orgStore : Store := Map.make
   [ (org "acme", row [("name", strV "Acme")]), (org "zen", row [("name", strV "Zen")])
   , (alice, row [("orgs", setV [uidV (org "acme"), uidV (org "zen")])])
@@ -482,16 +512,18 @@ def orgStore : Store := Map.make
 
 def orgEntities : Entities := Nyxis.Materials.entities orgSchema.types orgSchema.parents orgSchema.memberships orgStore
 
--- 行の実体の祖先は親を指す列の値(集合の要素も)。親を指す列の無いテーブル(Org)は祖先を持たない
+-- A row entity's ancestors are the values of the columns pointing to parents (including set elements). A table with no
+-- column pointing to parents (Org) has no ancestors
 #guard (orgEntities.find? alice).map (·.ancestors) == some (Set.make [org "acme", org "zen"])
 #guard (orgEntities.find? bob).map (·.ancestors) == some (Set.make [org "zen"])
 #guard (orgEntities.find? carol).map (·.ancestors) == some Set.empty
 #guard (orgEntities.find? (doc "a2")).map (·.ancestors) == some (Set.make [org "acme"])
 #guard (orgEntities.find? (org "acme")).map (·.ancestors) == some Set.empty
 #guard isOk (Cedar.Validation.validateEntities orgSchema.types orgEntities)
--- 親を指す列の宣言が無ければ(同じ型環境でも)祖先は空
+-- Without the declaration of columns pointing to parents, the ancestors are empty (even with the same type environment)
 #guard ((Nyxis.Materials.entities orgSchema.types [] [] orgStore).find? alice).map (·.ancestors) == some Set.empty
--- 宣言された親の型でない実体の参照は祖先にならない(列の型の検査の外でも構成が守る)
+-- A reference to an entity that is not of a declared parent type does not become an ancestor (the construction enforces
+-- this even outside the column type check)
 #guard Nyxis.Materials.rowAncestors orgSchema.types orgSchema.parents orgSchema.memberships orgStore alice
   (row [("orgs", setV [uidV (org "acme"), uidV bob])]) == Set.make [org "acme"]
 
@@ -500,22 +532,23 @@ def orgAgrees (p : Principal) (action : String) (op : Operation) (expected : Boo
   isPermitted orgPolicies (judgementRequest orgSchema p gen (act action) op)
     (judgementEntities orgSchema p orgStore op) == expected
 
-#guard orgAgrees (.user alice) "readDoc" (.read docT "a1") true    -- 所属組織の文書
-#guard orgAgrees (.user alice) "readDoc" (.read docT "z1") true    -- 複数の組織に属する
+#guard orgAgrees (.user alice) "readDoc" (.read docT "a1") true    -- a document of an organization the principal belongs to
+#guard orgAgrees (.user alice) "readDoc" (.read docT "z1") true    -- belongs to several organizations
 #guard orgAgrees (.user bob) "readDoc" (.read docT "z1") true
-#guard orgAgrees (.user bob) "readDoc" (.read docT "a1") false     -- 他組織の文書
-#guard orgAgrees (.user carol) "readDoc" (.read docT "a1") false   -- 組織に属さず、共有もされていない
-#guard orgAgrees (.user carol) "readDoc" (.read docT "a2") true    -- 個別に共有された文書
-#guard orgAgrees (.user dave) "readDoc" (.read docT "a1") false    -- 行の無い主体
+#guard orgAgrees (.user bob) "readDoc" (.read docT "a1") false     -- a document of another organization
+#guard orgAgrees (.user carol) "readDoc" (.read docT "a1") false   -- belongs to no organization and nothing is shared
+#guard orgAgrees (.user carol) "readDoc" (.read docT "a2") true    -- an individually shared document
+#guard orgAgrees (.user dave) "readDoc" (.read docT "a1") false    -- a principal with no row
 #guard orgAgrees .anonymous "readDoc" (.read docT "a1") false
 #guard (listRows orgSchema orgPolicies (.user alice) gen orgStore (act "listDocs") docT {}).map (·.1) == ["a1", "a2", "z1"]
 #guard (listRows orgSchema orgPolicies (.user bob) gen orgStore (act "listDocs") docT {}).map (·.1) == ["z1"]
 #guard (listRows orgSchema orgPolicies (.user carol) gen orgStore (act "listDocs") docT {}).map (·.1) == ["a2"]
--- 挿入では提案される行の親を指す列が祖先になる: 所属組織の文書だけ作れる
+-- For inserts, the proposed row's columns pointing to parents become ancestors: only documents of organizations the
+-- principal belongs to can be created
 #guard orgAgrees (.user bob) "createDoc" (.insert docT "n" (docIn "zen" [] "n")) true
 #guard orgAgrees (.user bob) "createDoc" (.insert docT "n" (docIn "acme" [] "n")) false
 
-/-- `orgStore` からの部分的な取得。 -/
+/-- A partial fetch from `orgStore`. -/
 def orgKnown (uids : List EntityUID) (absent : List EntityUID := []) : Nyxis.Materials.Known :=
   ⟨Map.make (uids.filterMap fun u => (Map.find? orgStore u).map (u, ·)), absent, []⟩
 
@@ -526,7 +559,8 @@ def orgStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
   sP.outcome == sS.outcome &&
     sP.issued.map (fun i => (i.action, i.op)) == sS.issued.map (fun i => (i.action, i.op))
 
--- 判定材料は主体と対象だけ(`in` の判定は主体の祖先を見る。親 Org の行は材料に入らず、取得も要らない)
+-- The decision materials are only the principal and resource (the `in` decision looks at the principal's ancestors. The
+-- parent Org rows do not enter the materials and need not be fetched)
 #guard (materials orgSchema (.user alice) gen orgStore (act "readDoc") (.read docT "a1") 1).keys
   == Set.make [alice, act "readDoc", doc "a1"]
 #guard coversStep orgSchema orgPolicies (orgKnown [alice, doc "a1"]) (.user alice) gen (act "readDoc") "a1" Map.empty {}
@@ -536,12 +570,13 @@ def orgStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
 #guard orgStepAgrees (orgKnown [bob] [doc "n"]) (.user bob) "createDoc" "n" (docIn "zen" [] "n")
 #guard orgStepAgrees (orgKnown [bob, doc "a1", doc "a2", doc "z1"]) (.user bob) "listDocs" ""
 
-/-! ## 一意性と参照整合、削除の連鎖
+/-! ## Uniqueness, referential integrity, and cascading deletes
 
-`@unique` / `@references` を宣言した小さな正本で、認可層の判定(`step`)が、permit された操作について一意性と参照整合の
-違反を `conflict` にし、参照される行の削除を `restrict` で競合に、`cascade` で参照する行の削除(各行を宣言された
-アクションで判定。深い行から順に発行、1 行でも permit されなければ要求全体を拒否)にすることと、部分的な取得との一致を
-確かめる。 -/
+With a small approved schema declaring `@unique` / `@references`, checks that the authorization layer's decision
+(`step`) turns uniqueness and referential integrity violations of permitted operations into `conflict`, turns the delete
+of a referenced row into a conflict under `restrict` and into deletes of the referencing rows under `cascade` (each row
+is decided by the declared action; issued from the deepest rows first; if even one row is not permitted, the whole
+request is rejected), and that it agrees with partial fetches. -/
 
 def intSchemaText : String := r#"
 entity User = { "name": String };
@@ -597,8 +632,8 @@ def intDoc (o title creator : String) : Row :=
 def intOrg (name : String) (owners : List EntityUID) : Row := row [("name", strV name), ("owners", setV (owners.map uidV))]
 def noteRow (d : String) : Row := row [("doc", uidV (doc d)), ("text", strV d)]
 
-/-- alice と bob が acme の owner、alice と(行の無い)ghost が zen の owner。a1・z1 は alice、a2 は bob の文書。
-    n1 は a1 の、n2 は a2 の、zn は z1 のメモ。carol は文書を持たない。 -/
+/-- alice and bob are owners of acme, and alice and ghost (who has no row) are owners of zen. a1 and z1 are alice's
+    documents and a2 is bob's. n1 is a note on a1, n2 on a2, and zn on z1. carol has no documents. -/
 def intStore : Store := Map.make
   [ (alice, row [("name", strV "Alice")]), (bob, row [("name", strV "Bob")]), (carol, row [("name", strV "Carol")])
   , (org "acme", intOrg "Acme" [alice, bob]), (org "zen", intOrg "Zen" [alice, ghost])
@@ -614,51 +649,58 @@ def outConflict : Outcome → Bool | .conflict => true | _ => false
 def issuedOps (r : StepResult) : List (String × String × String) :=
   r.issued.map fun i => (i.action.eid, i.op.target.ty.id, i.op.target.eid)
 
--- 一意性: 同じ組織に同じ題名の文書は作れず(競合)、別の組織なら作れる。permit されない主体は拒否(存在を漏らさない)
+-- Uniqueness: a document with the same title cannot be created in the same organization (conflict), but can in another
+-- organization. A principal that is not permitted is denied (existence is not leaked)
 #guard outConflict (intStep (.user alice) "createDoc" "new" (intDoc "acme" "t1" "alice")).outcome
 #guard (intStep (.user alice) "createDoc" "new" (intDoc "acme" "t1" "alice")).issued.isEmpty
 #guard (intStep (.user alice) "createDoc" "new" (intDoc "acme" "t1" "alice")).store == intStore
 #guard outOk (intStep (.user alice) "createDoc" "new" (intDoc "acme" "t3" "alice")).outcome
 #guard outOk (intStep (.user alice) "createDoc" "new" (intDoc "zen" "t2" "alice")).outcome
 #guard outDenied (intStep (.user carol) "createDoc" "new" (intDoc "acme" "t1" "carol")).outcome
--- 更新でも同じ(題名を既にある題名に変えると競合。自分の行とはぶつからない)
+-- The same for updates (changing the title to an existing title is a conflict; it does not clash with its own row)
 #guard outConflict (intStep (.user alice) "renameDoc" "a1" (row [("title", strV "t2")])).outcome
 #guard outOk (intStep (.user alice) "renameDoc" "a1" (row [("title", strV "t1")])).outcome
 #guard outOk (intStep (.user alice) "renameDoc" "a1" (row [("title", strV "t9")])).outcome
 #guard outConflict (intStep (.user alice) "createOrg" "new" (intOrg "Acme" [alice])).outcome
 #guard outOk (intStep (.user alice) "createOrg" "new" (intOrg "New" [alice])).outcome
--- 参照整合(挿入): 参照先の行が無ければ競合(permit の後。ghost は zen の owner だが User の行が無い)
+-- Referential integrity (insert): a conflict if the referenced row does not exist (after the permit; ghost is an owner
+-- of zen but has no User row)
 #guard outConflict (intStep (.user ghost) "createDoc" "new" (intDoc "zen" "g" "ghost")).outcome
 #guard outDenied (intStep (.user alice) "createDoc" "new" (intDoc "nope" "g" "alice")).outcome
--- 参照整合(削除、restrict): 文書を作った利用者は消せない(競合)。文書の無い利用者は消せる。他人は拒否
+-- Referential integrity (delete, restrict): a user who created documents cannot be deleted (conflict). A user with no
+-- documents can be deleted. Others are denied
 #guard outConflict (intStep (.user alice) "deleteUser" "alice").outcome
 #guard outConflict (intStep (.user bob) "deleteUser" "bob").outcome
 #guard outOk (intStep (.user carol) "deleteUser" "carol").outcome
 #guard outDenied (intStep (.user bob) "deleteUser" "alice").outcome
--- 連鎖(cascade): 文書を消すとそのメモも消える(メモは deleteNote で判定)。発行は深い行から、最後に文書
+-- Cascade: deleting a document also deletes its notes (notes are decided by deleteNote). Issued from the deepest rows,
+-- with the document last
 #guard issuedOps (intStep (.user alice) "deleteDoc" "a1") == [("deleteNote", "Note", "n1"), ("deleteDoc", "Doc", "a1")]
 #guard outOk (intStep (.user alice) "deleteDoc" "a1").outcome
 #guard ((intStep (.user alice) "deleteDoc" "a1").store.find? noteT "n1").isNone
 #guard ((intStep (.user alice) "deleteDoc" "a1").store.find? docT "a1").isNone
 #guard ((intStep (.user alice) "deleteDoc" "a1").store.find? noteT "n2").isSome
--- 組織を消すと文書とメモが消える(2 段の連鎖)。zen の文書はすべて alice のもの
+-- Deleting an organization deletes its documents and notes (a two-level cascade). All of zen's documents are alice's
 #guard issuedOps (intStep (.user alice) "deleteOrg" "zen")
   == [("deleteNote", "Note", "zn"), ("deleteDoc", "Doc", "z1"), ("deleteOrg", "Org", "zen")]
 #guard ((intStep (.user alice) "deleteOrg" "zen").store.find? orgT "zen").isNone
 #guard ((intStep (.user alice) "deleteOrg" "zen").store.find? docT "a1").isSome
--- acme には bob の文書 a2 があり、alice には deleteDoc が permit されないので、要求全体が拒否され何も消えない
+-- acme has bob's document a2, and deleteDoc is not permitted to alice, so the whole request is denied and nothing is
+-- deleted
 #guard outDenied (intStep (.user alice) "deleteOrg" "acme").outcome
 #guard (intStep (.user alice) "deleteOrg" "acme").issued.isEmpty
 #guard (intStep (.user alice) "deleteOrg" "acme").store == intStore
 #guard outDenied (intStep (.user bob) "deleteOrg" "acme").outcome
--- owner でなければ連鎖の前に拒否
+-- If not an owner, denied before the cascade
 #guard outDenied (intStep (.user carol) "deleteOrg" "zen").outcome
--- 連鎖の記録はすべてその主体のもので、判定アクションは呼んだものか宣言された連鎖のもの(主定理の (1)(5) の実例)
+-- All cascade records belong to that principal, and the deciding action is the one called or a declared cascade's (an
+-- instance of (1)(5) of the main theorem)
 #guard (intStep (.user alice) "deleteOrg" "zen").issued.all fun i =>
   i.principal == .user alice && i.generated == gen &&
   (i.action == act "deleteOrg" || intSchema.constraints.references.any fun r =>
     r.onDelete == .cascade i.action && i.op.target.ty == r.table)
--- 部分的な取得との一致: 主体・対象・連鎖で消える行とそれを参照する行・判定材料があれば検査に通り、全体と一致する
+-- Agreement with partial fetches: with the principal, the resource, the rows deleted by the cascade, the rows
+-- referencing them, and the decision materials, the check passes and agrees with the whole
 def intKnown (uids : List EntityUID) (absent : List EntityUID := []) : Nyxis.Materials.Known :=
   ⟨Map.make (uids.filterMap fun u => (Map.find? intStore u).map (u, ·)), absent, []⟩
 def intAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) (key : Key)
@@ -669,7 +711,8 @@ def intAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) (key
 #guard coversStep intSchema intPolicies (intKnown [alice, org "zen", doc "z1", note "zn"]) (.user alice) gen
   (act "deleteOrg") "zen" Map.empty {}
 #guard intAgrees (intKnown [alice, org "zen", doc "z1", note "zn"]) (.user alice) "deleteOrg" "zen"
--- 連鎖で消える a2 の判定材料(作成者 bob の行)も要る。無ければ検査に通らない
+-- The decision materials of a2, deleted by the cascade (the row of its creator bob), are also needed. Without them the
+-- check does not pass
 #guard !coversStep intSchema intPolicies (intKnown [alice, org "acme", doc "a1", doc "a2", note "n1", note "n2"])
   (.user alice) gen (act "deleteOrg") "acme" Map.empty {}
 #guard coversStep intSchema intPolicies (intKnown [alice, bob, org "acme", doc "a1", doc "a2", note "n1", note "n2"])
@@ -682,20 +725,22 @@ def intAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) (key
 #guard coversStep intSchema intPolicies (intKnown [alice, doc "a1", doc "z1"]) (.user alice) gen (act "deleteUser") "alice"
   Map.empty {}
 #guard intAgrees (intKnown [alice, doc "a1", doc "z1"]) (.user alice) "deleteUser" "alice"
--- 参照先の行の有無が分からなければ検査に通らない(createdBy の alice を引いていない)
+-- If whether the referenced row exists is unknown, the check does not pass (alice of createdBy has not been looked up)
 #guard !coversStep intSchema intPolicies (intKnown [org "zen"] [doc "new"]) (.user ghost) gen (act "createDoc") "new"
   (intDoc "zen" "g" "ghost") {}
 #guard coversStep intSchema intPolicies (intKnown [org "zen"] [doc "new", ghost]) (.user ghost) gen (act "createDoc") "new"
   (intDoc "zen" "g" "ghost") {}
 #guard intAgrees (intKnown [org "zen"] [doc "new", ghost]) (.user ghost) "createDoc" "new" (intDoc "zen" "g" "ghost")
 
-/-! ## 所属行
+/-! ## Membership rows
 
-`@memberships("Membership: user -> team, org")` を添えた `entity User in [Team, Org]` の小さな正本で、利用者の実体の祖先が
-所属行(`Membership` の行のうち `user` がその利用者のもの)の `team` と `org` の値から決まり、ポリシーの
-`principal in resource.org`(主体が対象の組織のメンバーなら)と `principal in resource.editors`(役割の組)が期待どおり
-許可・拒否になること、所属行の挿入・削除と連鎖(組の削除で所属行も消える)が判定されること、部分的な取得は所属行を
-すべて取得した記録(`Known.fetched`)が無ければ検査に通らず、あれば判定と発行が全体と一致することを確かめる。 -/
+With a small approved schema of `entity User in [Team, Org]` with `@memberships("Membership: user -> team, org")`,
+checks that a user entity's ancestors are determined from the `team` and `org` values of its membership rows (the
+`Membership` rows whose `user` is that user); that the policies' `principal in resource.org` (if the principal is a
+member of the resource's organization) and `principal in resource.editors` (a role team) permit and deny as expected;
+that inserts and deletes of membership rows and cascades (deleting a team also deletes its membership rows) are decided;
+and that a partial fetch does not pass the check without the record of having fetched all membership rows
+(`Known.fetched`), and with it the decision and issuance agree with the whole. -/
 
 def memSchemaText : String := r#"
 entity Org = { "name": String, "owner": User };
@@ -758,8 +803,9 @@ def teamRow (o role : String) : Row := row [("org", uidV (org o)), ("role", strV
 def memDoc (o editors : String) (shared : List EntityUID) (title : String) : Row :=
   row [("org", uidV (org o)), ("editors", uidV (team editors)), ("shared", setV (shared.map uidV)), ("title", strV title)]
 
-/-- acme(owner alice)に編集者の組 acme-ed と閲覧者の組 acme-vw、zen(owner bob)に zen-ed。所属行: alice は acme-ed、
-    bob は acme-vw と zen-ed、carol は zen-ed。dave は行が無い。a2 は carol に個別に共有されている。 -/
+/-- acme (owner alice) has the editor team acme-ed and the viewer team acme-vw, and zen (owner bob) has zen-ed.
+    Membership rows: alice is in acme-ed, bob in acme-vw and zen-ed, and carol in zen-ed. dave has no row. a2 is shared
+    with carol individually. -/
 def memStore : Store := Map.make
   [ (org "acme", row [("name", strV "Acme"), ("owner", uidV alice)])
   , (org "zen", row [("name", strV "Zen"), ("owner", uidV bob)])
@@ -772,17 +818,19 @@ def memStore : Store := Map.make
 
 def memEntities : Entities := Nyxis.Materials.entities memSchema.types memSchema.parents memSchema.memberships memStore
 
--- 利用者の実体の祖先は所属行の team と org の値。所属行が無い利用者の祖先は空。所属行自身・組・組織は祖先を持たない
+-- A user entity's ancestors are the team and org values of its membership rows. A user with no membership rows has no
+-- ancestors. Membership rows themselves, teams, and organizations have no ancestors
 #guard (memEntities.find? alice).map (·.ancestors) == some (Set.make [team "acme-ed", org "acme"])
 #guard (memEntities.find? bob).map (·.ancestors) == some (Set.make [team "acme-vw", org "acme", team "zen-ed", org "zen"])
 #guard (memEntities.find? carol).map (·.ancestors) == some (Set.make [team "zen-ed", org "zen"])
 #guard (memEntities.find? (mem "m1")).map (·.ancestors) == some Set.empty
 #guard (memEntities.find? (doc "a1")).map (·.ancestors) == some (Set.make [org "acme"])
 #guard isOk (Cedar.Validation.validateEntities memSchema.types memEntities)
--- 所属行の宣言が無ければ(同じ型環境でも)祖先は空
+-- Without the membership-row declaration, the ancestors are empty (even with the same type environment)
 #guard ((Nyxis.Materials.entities memSchema.types memSchema.parents [] memStore).find? alice).map (·.ancestors)
   == some Set.empty
--- 所属行の親を指す列の値のうち、宣言された親の型でない参照は祖先にならない(構成が守る)
+-- Among the values of the membership rows' columns pointing to parents, references not of a declared parent type do not
+-- become ancestors (the construction enforces this)
 #guard Nyxis.Materials.rowAncestors memSchema.types memSchema.parents memSchema.memberships
   (memStore.put memT "bad" (row [("user", uidV alice), ("team", uidV (doc "a1")), ("org", uidV (org "zen"))]))
   alice (row [("name", strV "Alice")]) == Set.make [team "acme-ed", org "acme", org "zen"]
@@ -792,26 +840,27 @@ def memAgrees (p : Principal) (action : String) (op : Operation) (expected : Boo
   isPermitted memPolicies (judgementRequest memSchema p gen (act action) op)
     (judgementEntities memSchema p memStore op) == expected
 
-#guard memAgrees (.user alice) "readDoc" (.read docT "a1") true    -- 所属組織の文書(編集者の組)
-#guard memAgrees (.user bob) "readDoc" (.read docT "a1") true      -- 所属組織の文書(閲覧者の組)
-#guard memAgrees (.user bob) "readDoc" (.read docT "z1") true      -- 複数の組織に属する
-#guard memAgrees (.user alice) "readDoc" (.read docT "z1") false   -- 他組織の文書
-#guard memAgrees (.user carol) "readDoc" (.read docT "a1") false   -- 共有されていない他組織の文書
-#guard memAgrees (.user carol) "readDoc" (.read docT "a2") true    -- 個別に共有された文書
-#guard memAgrees (.user dave) "readDoc" (.read docT "a1") false    -- 行の無い主体
+#guard memAgrees (.user alice) "readDoc" (.read docT "a1") true    -- a document of an organization the principal belongs to (editor team)
+#guard memAgrees (.user bob) "readDoc" (.read docT "a1") true      -- a document of an organization the principal belongs to (viewer team)
+#guard memAgrees (.user bob) "readDoc" (.read docT "z1") true      -- belongs to several organizations
+#guard memAgrees (.user alice) "readDoc" (.read docT "z1") false   -- a document of another organization
+#guard memAgrees (.user carol) "readDoc" (.read docT "a1") false   -- a document of another organization that is not shared
+#guard memAgrees (.user carol) "readDoc" (.read docT "a2") true    -- an individually shared document
+#guard memAgrees (.user dave) "readDoc" (.read docT "a1") false    -- a principal with no row
 #guard memAgrees .anonymous "readDoc" (.read docT "a1") false
-#guard memAgrees (.user alice) "editDoc" (.update docT "a1" (row [("title", strV "x")])) true   -- 編集者の組
-#guard memAgrees (.user bob) "editDoc" (.update docT "a1" (row [("title", strV "x")])) false    -- 閲覧者の組
+#guard memAgrees (.user alice) "editDoc" (.update docT "a1" (row [("title", strV "x")])) true   -- editor team
+#guard memAgrees (.user bob) "editDoc" (.update docT "a1" (row [("title", strV "x")])) false    -- viewer team
 #guard memAgrees (.user bob) "editDoc" (.update docT "z1" (row [("title", strV "x")])) true
-#guard memAgrees (.user carol) "editDoc" (.update docT "a2" (row [("title", strV "x")])) false  -- 共有だけでは編集できない
+#guard memAgrees (.user carol) "editDoc" (.update docT "a2" (row [("title", strV "x")])) false  -- sharing alone does not allow editing
 #guard (listRows memSchema memPolicies (.user alice) gen memStore (act "listDocs") docT {}).map (·.1) == ["a1", "a2"]
 #guard (listRows memSchema memPolicies (.user bob) gen memStore (act "listDocs") docT {}).map (·.1) == ["a1", "a2", "z1"]
 #guard (listRows memSchema memPolicies (.user carol) gen memStore (act "listDocs") docT {}).map (·.1) == ["a2", "z1"]
--- 所属行の挿入: 組のメンバーだけが同じ組織の組に加えられる(提案される所属行は判定の実体になる)
+-- Inserting a membership row: only team members can add to a team of the same organization (the proposed membership row
+-- becomes an entity of the decision)
 #guard memAgrees (.user alice) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "acme")) true
 #guard memAgrees (.user bob) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "acme")) false
 #guard memAgrees (.user alice) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "zen")) false
--- 所属行の削除: 本人か組織の owner
+-- Deleting a membership row: the user themselves or the organization's owner
 #guard memAgrees (.user bob) "removeMember" (.delete memT "m2") true
 #guard memAgrees (.user alice) "removeMember" (.delete memT "m2") true
 #guard memAgrees (.user carol) "removeMember" (.delete memT "m2") false
@@ -819,19 +868,22 @@ def memAgrees (p : Principal) (action : String) (op : Operation) (expected : Boo
 def memStep (p : Principal) (action : String) (key : Key) (values : Row := Map.empty) : StepResult :=
   step memSchema memPolicies p gen memStore (act action) key values {}
 
--- 組の削除は所属行に連鎖する(各所属行を removeMember で判定。owner は本人でない所属行も消せる)。消えた後の状態でも
--- owner の判定は変わらないので成立する。bob は zen の owner ではないので zen-ed を消せない
+-- Deleting a team cascades to its membership rows (each membership row is decided by removeMember; the owner can delete
+-- membership rows of other users too). It holds because the owner decision does not change in the state after deletion.
+-- bob is not the owner of zen, so he cannot delete zen-ed
 #guard (match (memStep (.user alice) "deleteTeam" "acme-ed").outcome with | .ok none => true | _ => false)
 #guard (memStep (.user alice) "deleteTeam" "acme-ed").issued.map (fun i => (i.action, i.op))
   == [(act "removeMember", .delete memT "m1"), (act "deleteTeam", .delete teamT "acme-ed")]
 #guard (memStep (.user alice) "deleteTeam" "acme-ed").store.find? memT "m1" == none
 #guard (match (memStep (.user carol) "deleteTeam" "zen-ed").outcome with | .denied => true | _ => false)
 #guard (memStep (.user carol) "deleteTeam" "zen-ed").issued.isEmpty
--- 所属行を消すと、その利用者はその組織の文書を読めなくなる(祖先が所属行から決まる)
+-- Deleting a membership row means that user can no longer read that organization's documents (ancestors are determined
+-- by membership rows)
 #guard (listRows memSchema memPolicies (.user alice) gen (memStep (.user alice) "deleteTeam" "acme-ed").store
   (act "listDocs") docT {}).map (·.1) == []
--- 所属行の挿入が通れば、その利用者はその組織の文書を読める(carol が acme-ed に加わる)。行の無い dave は所属行が
--- あっても実体が無いので読めない(主体の実体は常に DB の現在の行)
+-- Once a membership-row insert goes through, that user can read that organization's documents (carol joins acme-ed).
+-- dave, who has no row, cannot read even with a membership row, because there is no entity (the principal's entity is
+-- always the DB's current row)
 #guard (listRows memSchema memPolicies (.user carol) gen
   (memStep (.user alice) "addMember" "m5" (memRow "carol" "acme-ed" "acme")).store (act "listDocs") docT {}).map (·.1)
   == ["a1", "a2", "z1"]
@@ -839,7 +891,8 @@ def memStep (p : Principal) (action : String) (key : Key) (values : Row := Map.e
   (memStep (.user alice) "addMember" "m5" (memRow "dave" "acme-ed" "acme")).store (act "listDocs") docT {}).map (·.1)
   == []
 
-/-- `memStore` からの部分的な取得: `uids` の行と、`members` の利用者の所属行(すべて取得したと記録する)。 -/
+/-- A partial fetch from `memStore`: the rows of `uids`, and the membership rows of the users in `members` (recorded as
+    fully fetched). -/
 def memKnown (uids : List EntityUID) (members : List EntityUID) (absent : List EntityUID := []) :
     Nyxis.Materials.Known :=
   let fetched := members.flatMap fun u =>
@@ -855,7 +908,8 @@ def memStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
   sP.outcome == sS.outcome &&
     sP.issued.map (fun i => (i.action, i.op)) == sS.issued.map (fun i => (i.action, i.op))
 
--- 主体の所属行をすべて取得した記録が無ければ検査に通らない(行があっても)。記録があれば通り、判定と発行は全体と一致する
+-- Without the record of having fetched all the principal's membership rows, the check does not pass (even if the rows
+-- are present). With the record it passes, and the decision and issuance agree with the whole
 #guard !coversStep memSchema memPolicies (memKnown [alice, doc "a1", org "acme", team "acme-ed", mem "m1"] [])
   (.user alice) gen (act "readDoc") "a1" Map.empty {}
 #guard coversStep memSchema memPolicies (memKnown [alice, doc "a1", org "acme", team "acme-ed"] [alice])
@@ -866,14 +920,15 @@ def memStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
   (row [("title", strV "x")])
 #guard memStepAgrees (memKnown [bob, doc "a1", doc "a2", doc "z1", org "acme", org "zen", team "acme-ed", team "zen-ed",
   alice, carol] [bob, alice, carol]) (.user bob) "listDocs" ""
--- 挿入: 提案される所属行の利用者(dave)は行が無く、所属行も無い(記録は要る)
+-- Insert: the user of the proposed membership row (dave) has no row and no membership rows (the record is still needed)
 #guard !coversStep memSchema memPolicies (memKnown [alice, org "acme", team "acme-ed"] [alice] [mem "m5"])
   (.user alice) gen (act "addMember") "m5" (memRow "dave" "acme-ed" "acme") {}
 #guard coversStep memSchema memPolicies (memKnown [alice, org "acme", team "acme-ed"] [alice, dave] [mem "m5", dave])
   (.user alice) gen (act "addMember") "m5" (memRow "dave" "acme-ed" "acme") {}
 #guard memStepAgrees (memKnown [alice, org "acme", team "acme-ed"] [alice, dave] [mem "m5", dave]) (.user alice)
   "addMember" "m5" (memRow "dave" "acme-ed" "acme")
--- 連鎖: 組を消すと所属行が消える。消した後の状態でも主体の所属行の記録は保たれ、検査に通り一致する
+-- Cascade: deleting a team deletes its membership rows. The record of the principal's membership rows is kept in the
+-- state after deletion, and the check passes and agrees
 #guard coversStep memSchema memPolicies (memKnown [alice, org "acme", team "acme-ed", mem "m1"] [alice])
   (.user alice) gen (act "deleteTeam") "acme-ed" Map.empty {}
 #guard memStepAgrees (memKnown [alice, org "acme", team "acme-ed", mem "m1"] [alice]) (.user alice) "deleteTeam" "acme-ed"

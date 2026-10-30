@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ホーム ゲスト</title>
+<title>Home Guest</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -46,50 +46,50 @@ h1,h2,h3,p{margin:0}
 <body>
 <div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
 <header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
-  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
-  <nav class="nav" aria-label="メニュー">
-    <a class="on" href="post-list-anonymous.html">ホーム</a>
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis Board</a>
+  <nav class="nav" aria-label="Menu">
+    <a class="on" href="post-list-anonymous.html">Home</a>
   </nav>
   <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
-    <a class="who" href="me.html" aria-label="いまはゲストです"><span class="avatar guest"></span>ゲスト</a>
-    <a class="btn sm" href="login.html">Googleでログイン</a>
+    <a class="who" href="me.html" aria-label="You are a guest"><span class="avatar guest"></span>Guest</a>
+    <a class="btn sm" href="login.html">Sign in with Google</a>
   </div>
 </header>
 <div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
 <main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 28px; padding-top: 36px; padding-bottom: 56px">
   <div style="display: flex; align-items: baseline; gap: 14px">
-    <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">ホーム</h1>
+    <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">Home</h1>
     <span class="mono" style="color: #6E7177">3</span>
   </div>
   <div class="list">
     <article class="row">
       <span class="num">01</span>
-      <a class="title" href="post-detail-author.html">Nyxis 掲示板へようこそ</a>
-      <span class="tags"><span class="tag pub">公開中</span></span>
-      <p class="excerpt">この掲示板では、見ていい人だけが見られ、できる人だけができます。試してみてください。</p>
+      <a class="title" href="post-detail-author.html">Welcome to Nyxis Board</a>
+      <span class="tags"><span class="tag pub">Published</span></span>
+      <p class="excerpt">On this board, only people allowed to view can view, and only people allowed to act can act. Try it out.</p>
       <div class="by"><span>6c0fe2a1</span></div>
     </article>
     <article class="row">
       <span class="num">02</span>
-      <a class="title" href="post-detail-author.html">ルールの読み方</a>
-      <span class="tags"><span class="tag pub">公開中</span></span>
-      <p class="excerpt">書かれていないことは、すべてできません。</p>
+      <a class="title" href="post-detail-author.html">How to read the rules</a>
+      <span class="tags"><span class="tag pub">Published</span></span>
+      <p class="excerpt">Anything not written down is not allowed.</p>
       <div class="by"><span>3f2a9c1e</span></div>
     </article>
     <article class="row">
       <span class="num">03</span>
-      <a class="title" href="post-detail-author.html">手元で動かすメモ</a>
-      <span class="tags"><span class="tag pub">公開中</span></span>
-      <p class="excerpt">Google アカウントでログインすると、自分の投稿を書けます。</p>
+      <a class="title" href="post-detail-author.html">Notes on running it locally</a>
+      <span class="tags"><span class="tag pub">Published</span></span>
+      <p class="excerpt">Sign in with a Google account to write your own posts.</p>
       <div class="by"><span>b7d104af</span></div>
     </article>
   </div>
   <form style="display: flex; align-items: flex-end; gap: 12px; max-width: 460px">
     <div style="flex: 1; display: flex; flex-direction: column; gap: 4px">
-      <label for="open-id" style="font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #6E7177">IDで開く</label>
-      <input class="input mono" id="open-id" type="text" placeholder="投稿のID">
+      <label for="open-id" style="font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #6E7177">Open by ID</label>
+      <input class="input mono" id="open-id" type="text" placeholder="Post ID">
     </div>
-    <button class="btn line" type="button">開く</button>
+    <button class="btn line" type="button">Open</button>
   </form>
 </main>
 </div>

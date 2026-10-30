@@ -6,16 +6,17 @@ import Nyxis.Internal.PostgresShape
 import Nyxis.Internal.ExternalSend
 import Nyxis.Internal.Outbox
 
-/-! モデルから SQL への内部の境界(A4。未証明)。ハンドラ向けの API は無い。
-操作を生成するのはモデルだけ。スナップショット・再生・checked COMMIT は 1 つの SERIALIZABLE
-トランザクションを共有する。SQL との不一致は応答を返さずに中断する。
+/-! The internal boundary from the model to SQL (A4; unproved). There is no handler-facing API. Only the model generates
+operations. The snapshot, replay and checked COMMIT share one SERIALIZABLE transaction. A disagreement with SQL aborts
+without returning a response.
 
-2 つの経路がある。`handleStaged`(実起動 `PostgresHttp.handleVerified` が使う経路)はハンドラのアクション
-呼び出しごとに判定に必要な実体だけを点検索で取得(`PostgresMaterials.load`)し、取得が判定材料を覆っているかを
-検査してから判定・再生・照合し、結果で続きを進める(「段階的な実行」の節)。`handle` は全テーブルを取得
-(`PostgresLoad.collect`)してから `Runtime.handleRequest` を純粋に計算し、発行された操作を SQL へ再生して照合する
-参照経路で、実起動は使わない(検査 `scripts/check-postgres-values.py` が両経路をそれぞれ別の実 DB で同じ期待値に
-照らして確かめる)。
+There are two paths. `handleStaged` (the path used by the real startup `PostgresHttp.handleVerified`) fetches, per
+handler action call, only the entities needed for the decision by point lookups (`PostgresMaterials.load`), checks that
+the fetch covers the decision materials, then decides, replays and matches, and continues with the result (the "Staged
+execution" section). `handle` is a reference path that fetches all tables (`PostgresLoad.collect`), then computes
+`Runtime.handleRequest` purely, and replays the issued operations to SQL and matches them; the real startup does not use
+it (the check `scripts/check-postgres-values.py` verifies both paths, each against a separate real DB, against the same
+expected values).
 -/
 namespace Nyxis.Internal.PostgresRun
 open Nyxis Db Nyxis.Runtime
@@ -25,16 +26,18 @@ private def invalid : IO α := throw (IO.userError "PostgreSQL/model disagreemen
 structure Driver where
   read : PostgresSql.Command → IO PostgresResult.Reader
   write : PostgresSql.Command → IO PostgresWrite.Reader
-  /-- 外部効果(添付の署名付き URL の発行。メール送信。外部 API 呼び出し): 認可層の記録
-      (`Authz.External`: 主体・生成値・アクション・対象・内容 `Authz.Payload`)についてだけ呼ばれる。署名付き URL の発行では
-      `signed url` は発行した URL、`none` はオブジェクトが無い。メールは送って `none`。`sync` の呼び出しは送って応答
-      (`called` / `calledError`)。`async` の呼び出しは送らず、同じ接続(要求のトランザクション)でアウトボックスに記録を
-      1 行書いて `none`(`Nyxis.Internal.Outbox.enqueue`。COMMIT の後に内部ループが送る)。失敗は例外(要求全体が 503)。
-      設定の無い種類は実行できない(例外)。 -/
+  /-- External effects (issuing signed URLs for attachments, sending mail, external API calls): called only for records
+      from the authorization layer (`Authz.External`: principal, generated values, action, target, content
+      `Authz.Payload`). For signed-URL issuance, `signed url` is the issued URL and `none` means the object does not
+      exist. Mail is sent and returns `none`. A `sync` call is sent and returns the response (`called` / `calledError`).
+      An `async` call is not sent; instead it writes one record row to the outbox on the same connection (the request's
+      transaction) and returns `none` (`Nyxis.Internal.Outbox.enqueue`; the internal loop sends it after COMMIT).
+      Failure is an exception (the whole request becomes 503). Kinds with no configuration cannot be executed
+      (exception). -/
   external : Authz.External → IO Authz.ExternalResult := fun _ => throw (IO.userError "external effects are not configured")
 
-/-- 主キーの読み取りの完全な一致。行の不在も含む。余分な・誤った主キーと変化した属性は拒む。
-抽出では状態・メタデータ・NULL・符号化も検査する。
+/-- Exact match of a primary-key read, including row absence. Extra or wrong primary keys and changed attributes are
+rejected. Extraction also checks status, metadata, NULL and encoding.
 -/
 def verifyRead (schema : Authz.Schema) (op : Operation) (expected : Outcome)
     (reader : PostgresResult.Reader) : IO Unit := do
@@ -47,10 +50,10 @@ def verifyRead (schema : Authz.Schema) (op : Operation) (expected : Outcome)
     unless uid == op.target && uid.eid == key && row == expectedRow do invalid
   | _, _ => invalid
 
-/-- 日本語: 読取り照合の正常終了には、同じ開始状態からの結果抽出成功と
-復元成功が必要であり、復元行は不在なら空、存在するなら要求対象を主キーとする
-期待行ちょうど1行である。照合自体は抽出後のIO状態を変えない。
-extract/tableRows内部や外部DB実状態の正しさはこの定理に含まない。 -/
+/-- Normal termination of read matching requires successful result extraction from the same starting state and
+successful restoration; the restored rows are empty if absent, and if present exactly one expected row whose primary key
+is the requested target. The matching itself does not change the IO state after extraction. The correctness of the
+extract/tableRows internals and of the external DB's actual state is not included in this theorem. -/
 theorem verifyRead_success (schema : Authz.Schema) (op : Operation) (expected : Outcome)
     (reader : PostgresResult.Reader) (w w' : Void IO.RealWorld)
     (h : verifyRead schema op expected reader w = .ok () w') :
@@ -112,12 +115,12 @@ theorem verifyRead_success (schema : Authz.Schema) (op : Operation) (expected : 
                 cases h
     · cases h
 
-/-- SQL実行前の純粋な計画。StoreやSQLの結果を応答へ追加しない。 -/
+/-- The pure plan before SQL execution. The Store and SQL results are not added to the response. -/
 structure Plan where
   commands : List (Authz.Issued × PostgresSql.Command)
   response : Http.Response
 
-/-- issuedの順序を保って全操作を事前検査する。 -/
+/-- Pre-checks all operations, preserving the order of issued. -/
 def planCommands (schema : Authz.Schema) (shape : PostgresShape.Shape) :
     List Authz.Issued → Except String (List (Authz.Issued × PostgresSql.Command))
   | [] => .ok []
@@ -127,7 +130,7 @@ def planCommands (schema : Authz.Schema) (shape : PostgresShape.Shape) :
     let tail ← planCommands schema shape rest
     return (issued, command) :: tail
 
-/-- 実接続が使う計画器。全検査成功までSQLを発行しない。 -/
+/-- The planner used by the real connection. No SQL is issued until all checks succeed. -/
 def prepare (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) : Except String Plan := do
   PostgresShape.validateSchema shape app.schema
@@ -136,7 +139,7 @@ def prepare (app : App) (shape : PostgresShape.Shape) (store : Store)
   let commands ← planCommands app.schema shape run.issued
   return ⟨commands, run.result⟩
 
-/-- 日本語: 成功したSQL計画は、モデルのissuedを欠落・追加・並べ替えせず保持する。 -/
+/-- A successful SQL plan keeps the model's issued list without dropping, adding or reordering. -/
 theorem planCommands_issued (schema : Authz.Schema) (shape : PostgresShape.Shape)
     (issued : List Authz.Issued) (commands : List (Authz.Issued × PostgresSql.Command))
     (h : planCommands schema shape issued = .ok commands) :
@@ -151,8 +154,9 @@ theorem planCommands_issued (schema : Authz.Schema) (shape : PostgresShape.Shape
     subst commands
     simp [ih _ ht]
 
-/-- 日本語: 成功計画の各SQLコマンドは、対応する操作のSQL生成成功値であり、
-その操作直前のStoreに対する形状検査も通っている。SQL文字列の意味論は述べない。 -/
+/-- Each SQL command of a successful plan is the successful SQL-generation value of the corresponding operation, and it
+has also passed the shape check against the Store just before that operation. Nothing is said about the semantics of the
+SQL strings. -/
 theorem planCommands_compiled (schema : Authz.Schema) (shape : PostgresShape.Shape)
     (issued : List Authz.Issued) (commands : List (Authz.Issued × PostgresSql.Command))
     (h : planCommands schema shape issued = .ok commands) :
@@ -174,8 +178,9 @@ theorem planCommands_compiled (schema : Authz.Schema) (shape : PostgresShape.Sha
       exact ⟨hv, hc⟩
     · exact ih _ ht j command hm
 
-/-- 日本語: 実接続の計画成功時、応答はモデル応答そのもので、SQLに渡す操作列は
-モデルのissuedそのもの。認可判定用snapshotやSQL結果を応答へ直接載せない。 -/
+/-- When planning on the real connection succeeds, the response is exactly the model response, and the list of
+operations passed to SQL is exactly the model's issued list. The snapshot used for the authorization decision and the
+SQL results are never put directly into the response. -/
 theorem prepare_model (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) (plan : Plan)
     (h : prepare app shape store request = .ok plan) :
@@ -188,9 +193,10 @@ theorem prepare_model (app : App) (shape : PostgresShape.Shape) (store : Store)
   subst plan
   exact ⟨rfl, planCommands_issued _ _ _ _ hc⟩
 
-/-- 日本語: 成功した実接続計画では、SQL実行対象は同じ要求の主体について認可され、
-応答はStoreを受け取らない再生器で再現できる。継続へ渡る各行はこの計画中の
-認可済みreadの直前Storeの対象行。SQL/FFI/COMMIT/HTTP輸送の正しさは含まない。 -/
+/-- In a successful real-connection plan, what SQL executes is authorized for the principal of the same request, and the
+response can be reproduced by a replayer that does not receive the Store. Each row passed to the continuation is the
+target row, in the Store just before it, of an authorized read in this plan. The correctness of SQL/FFI/COMMIT/HTTP
+transport is not included. -/
 theorem prepare_read_safety (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) (plan : Plan)
     (h : prepare app shape store request = .ok plan) :
@@ -207,9 +213,9 @@ theorem prepare_read_safety (app : App) (shape : PostgresShape.Shape) (store : S
     fun i hi => let ⟨hp, _, ha⟩ := handleRequest_authorized app store request i hi; ⟨hp, ha⟩,
     (ReadSafety.handleRequest_read_safety app store request).2⟩
 
-/-- 日本語: 成功した実接続計画の各SQLコマンドには、同じ要求の主体について
-認可されたモデル操作が対応し、その操作のSQL生成と形状検査は成功している。
-SQL生成器の意味論・外界での実行・COMMIT・HTTP輸送の正しさは含まない。 -/
+/-- Each SQL command of a successful real-connection plan corresponds to a model operation authorized for the principal
+of the same request, and SQL generation and the shape check for that operation succeeded. The semantics of the SQL
+generator and the correctness of external execution, COMMIT and HTTP transport are not included. -/
 theorem prepare_sql_authorized (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) (plan : Plan)
     (h : prepare app shape store request = .ok plan) :
@@ -233,8 +239,8 @@ theorem prepare_sql_authorized (app : App) (shape : PostgresShape.Shape) (store 
   obtain ⟨hp, ha⟩ := (prepare_read_safety app shape store request plan h).2.1 i hi
   exact ⟨hp, ha, compiled i command hm⟩
 
-/-- スナップショットのトランザクションの中でだけ実行する。検査済みの SQL の結果は捨て、
-応答は計画したモデルの応答で、外側の COMMIT の後に公開する。 -/
+/-- Runs only inside the snapshot's transaction. The checked SQL results are discarded; the response is the planned
+model response, exposed after the outer COMMIT. -/
 def process (app : App) (shape : PostgresShape.Shape) (store : Store) (request : AuthenticatedRequest)
     (driver : Driver) : IO Http.Response := do
   let .ok plan := prepare app shape store request | invalid
@@ -245,8 +251,8 @@ def process (app : App) (shape : PostgresShape.Shape) (store : Store) (request :
     | _ => PostgresWrite.verify issued.op expected (← driver.write command)
   return plan.response
 
-/-- 1 つの SQL の呼び出しとその結果の照合。IO 状態は連続する。
-Lean の返り値だけを述べ、外部の SQL の意味は A4 に残る。 -/
+/-- One SQL call and the matching of its result, with consecutive IO states. This states only Lean return values; the
+meaning of the external SQL remains under A4. -/
 def Checked (schema : Authz.Schema) (driver : Driver) (issued : Authz.Issued)
     (command : PostgresSql.Command) (w w' : Void IO.RealWorld) : Prop :=
   let expected := (issued.store.apply issued.op).2
@@ -258,7 +264,7 @@ def Checked (schema : Authz.Schema) (driver : Driver) (issued : Authz.Issued)
       driver.write command w = .ok reader wm ∧
       PostgresWrite.verify issued.op expected reader wm = .ok () w'
 
-/-- 計画したすべてのコマンドが、リストの順に実行され、照合を通る。 -/
+/-- Every planned command is executed in list order and passes matching. -/
 inductive Executes (schema : Authz.Schema) (driver : Driver) :
     List (Authz.Issued × PostgresSql.Command) → Void IO.RealWorld → Void IO.RealWorld → Prop where
   | nil (w) : Executes schema driver [] w w
@@ -267,10 +273,10 @@ inductive Executes (schema : Authz.Schema) (driver : Driver) :
       Executes schema driver commands wm w' →
       Executes schema driver ((issued, command) :: commands) w w'
 
-/-- 1 つの SQL の呼び出しと、それに続く Store.apply と完全に一致する抽出。
-読み取りの照合では、Reader の呼び出しと、行の不在または期待する対象行ちょうど 1 行のタグ別の復号を
-取り出す。書き込みの照合では、行を含まない期待の Outcome を返し、成功した Reader の呼び出しを取り出す。
-終了状態は抽出の状態。 -/
+/-- One SQL call followed by an extraction that exactly matches Store.apply. For read matching, extracts the Reader
+calls and the per-tag decoding of either row absence or exactly one expected target row. For write matching, returns the
+expected Outcome containing no row and extracts the successful Reader calls. The final state is the extraction's state.
+-/
 def Extracted (schema : Authz.Schema) (driver : Driver) (issued : Authz.Issued)
     (command : PostgresSql.Command) (w w' : Void IO.RealWorld) : Prop :=
   let expected := (issued.store.apply issued.op).2
@@ -314,15 +320,14 @@ def Extracted (schema : Authz.Schema) (driver : Driver) (issued : Authz.Issued)
           | .insert _ _ _ => .conflict
           | .update _ _ _ | .delete _ _ | .read _ _ => .notFound)
 
-/-- 日本語: 各Driver呼出しの結果は、同じ直前Store.applyの期待値に一致する
-抽出結果を持つ。読み取りでは同じReaderのstatus→行数→列数→投影メタデータ→
-全セルのNULL/値/UTF-8バイト長取得が連続し、行列数を保存する。同じ結果の全行は
-ValueRowのタグ別JSON復号関係を満たし、不在または対象主キーの期待行ちょうど1行。
-書き込みは
-行なし成功・競合・不在のいずれか。書込みのstatus→行数→列数→件数→タグ取得は
-連続し、commandOk・行列数0・正規件数0/1・操作別タグと期待Outcomeが対応する。
-照合後の状態は抽出終了状態のままである。
-外部DBの実状態やSQLの意味論は含まない。 -/
+/-- The result of each Driver call has an extraction result matching the expected value of Store.apply just before it.
+For a read, the same Reader's status → row count → column count → projection metadata → NULL/value/UTF-8 byte-length
+fetches of all cells are consecutive, preserving the row and column counts. All rows of the same result satisfy
+ValueRow's per-tag JSON decoding relation, and are either absent or exactly one expected row with the target primary
+key. A write is one of: success without rows, conflict, or absent. The write's status → row count → column count →
+affected count → tag fetches are consecutive, and commandOk, zero rows and columns, a canonical count of 0/1, the
+per-operation tag and the expected Outcome correspond. The state after matching remains the state at the end of
+extraction. The external DB's actual state and SQL semantics are not included. -/
 theorem Checked.extracted (schema : Authz.Schema) (driver : Driver)
     (issued : Authz.Issued) (command : PostgresSql.Command) (w w' : Void IO.RealWorld)
     (h : Checked schema driver issued command w w') :
@@ -341,7 +346,7 @@ theorem Checked.extracted (schema : Authz.Schema) (driver : Driver)
     obtain ⟨hx, ha⟩ := PostgresWrite.verify_success _ _ reader wm w' hv
     exact ⟨reader, wm, hr, hx, ha, PostgresWrite.extract_success _ _ _ _ _ hx⟩
 
-/-- すべてのコマンドについての、実行順の抽出とモデルとの完全な一致。 -/
+/-- For every command, extraction in execution order and an exact match with the model. -/
 inductive Extracts (schema : Authz.Schema) (driver : Driver) :
     List (Authz.Issued × PostgresSql.Command) → Void IO.RealWorld → Void IO.RealWorld → Prop where
   | nil (w) : Extracts schema driver [] w w
@@ -350,8 +355,9 @@ inductive Extracts (schema : Authz.Schema) (driver : Driver) :
       Extracts schema driver commands wm w' →
       Extracts schema driver ((issued, command) :: commands) w w'
 
-/-- 日本語: 計画順の実行・照合成功列から、同じSQL列・開始/終了IO状態を持つ
-抽出結果一致列を得る。隣接するSQLのIO状態も連続し、操作の欠落や追加はない。 -/
+/-- From the successful execution/matching sequence in plan order, obtains the extraction-match sequence with the same
+SQL list and the same start/end IO states. The IO states of adjacent SQL statements are also consecutive, and no
+operation is dropped or added. -/
 theorem Executes.extracts (schema : Authz.Schema) (driver : Driver)
     (commands : List (Authz.Issued × PostgresSql.Command)) (w w' : Void IO.RealWorld)
     (h : Executes schema driver commands w w') :
@@ -414,11 +420,11 @@ private theorem commands_success (schema : Authz.Schema) (driver : Driver)
       exact .cons hc (ih wm h)
     · cases h
 
-/-- 日本語: 実processが正常終了したなら、全SQLの事前計画に成功し、計画順に
-各Driver呼出しと直前Store.applyのOutcomeとの結果照合が成功している。
-最初の呼出しはprocess開始状態から始まり、隣接段階のIO状態は一致する。
-返る応答は計画の応答であり、SQL結果を応答へ追加しない。
-照合器内部・SQLの意味論・外界の効果・COMMIT・HTTP輸送は含まない。 -/
+/-- If the real process terminates normally, the up-front plan of all SQL succeeded, and in plan order each Driver call
+and the matching of its result against the Outcome of Store.apply just before it succeeded. The first call starts from
+the state at the start of process, and the IO states of adjacent stages agree. The returned response is the plan's
+response, and SQL results are not added to it. The matcher internals, SQL semantics, external effects, COMMIT and HTTP
+transport are not included. -/
 theorem process_success (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) (driver : Driver)
     (w w' : Void IO.RealWorld) (response : Http.Response)
@@ -443,9 +449,10 @@ theorem process_success (app : App) (shape : PostgresShape.Shape) (store : Store
       exact ⟨plan, rfl, commands_success app.schema driver plan.commands w w' hs, rfl⟩
     · cases h
 
-/-- 日本語: 実processの正常終了時、実行・検査に成功した計画中の全SQLは、
-同じ要求主体について認可済みの操作から生成され、直前Storeの形状検査も通る。
-返却値は同じStore/要求のモデル応答。SQL文字列の意味やFFIの外部効果は含まない。 -/
+/-- On normal termination of the real process, every SQL statement in the successfully executed and checked plan is
+generated from an operation authorized for the same request principal, and also passes the shape check against the Store
+just before it. The return value is the model response for the same Store/request. The meaning of the SQL strings and
+the external effects of the FFI are not included. -/
 theorem process_sql_authorized (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) (driver : Driver)
     (w w' : Void IO.RealWorld) (response : Http.Response)
@@ -461,9 +468,9 @@ theorem process_sql_authorized (app : App) (shape : PostgresShape.Shape) (store 
   exact ⟨plan, hp, he, hr.trans (prepare_model app shape store request plan hp).1,
     prepare_sql_authorized app shape store request plan hp⟩
 
-/-- 日本語: 任意のDriverとIO開始状態について、実際のprocessが正常終了したなら、
-計画は成功しており、返した応答は同じ要求のモデル応答そのものである。
-IOのbind/例外の定義を直接扱う。FFIやSQLの意味論・COMMIT・HTTP輸送は含まない。 -/
+/-- For any Driver and starting IO state, if the actual process terminates normally, planning succeeded and the returned
+response is exactly the model response for the same request. This works directly with the definitions of IO
+bind/exceptions. FFI and SQL semantics, COMMIT and HTTP transport are not included. -/
 theorem process_model (app : App) (shape : PostgresShape.Shape) (store : Store)
     (request : AuthenticatedRequest) (driver : Driver)
     (world world' : Void IO.RealWorld) (response : Http.Response)
@@ -485,10 +492,10 @@ theorem process_model (app : App) (shape : PostgresShape.Shape) (store : Store)
       exact ⟨plan, rfl, rfl, (prepare_model app shape store request plan hp).1⟩
     · cases h
 
-/-- 日本語: 同じApp/認証済み要求について、継続へのモデル結果列が等しく、
-二つの実際のprocessが正常終了したなら、その応答全体(status/body)は等しい。
-内部Store・shape・Driver・IO状態はそれぞれ異なってよい。正常終了と結果列の
-同一性は前提であり、SQL失敗時の可用性やpermit/deny不変性は主張しない。 -/
+/-- For the same App/authenticated request, if the model result lists passed to the continuation are equal and two
+actual process runs terminate normally, their whole responses (status/body) are equal. The internal Store, shape, Driver
+and IO states may each differ. Normal termination and equality of the result lists are hypotheses; availability on SQL
+failure and permit/deny invariance are not claimed. -/
 theorem process_response_eq_of_outcomes_eq (app : App) (request : AuthenticatedRequest)
     (s₁ s₂ : Store) (shape₁ shape₂ : PostgresShape.Shape) (driver₁ driver₂ : Driver)
     (w₁ w₁' w₂ w₂' : Void IO.RealWorld) (r₁ r₂ : Http.Response)
@@ -500,8 +507,9 @@ theorem process_response_eq_of_outcomes_eq (app : App) (request : AuthenticatedR
   obtain ⟨_, _, _, hr₂⟩ := process_model app shape₂ s₂ request driver₂ w₂ w₂' r₂ h₂
   exact hr₁.trans ((ReadSafety.response_eq_of_outcomes_eq app request s₁ s₂ ho).trans hr₂.symm)
 
-/-- 実 DB のドライバ。外部効果は記録の内容で振り分ける: `async` の呼び出しは同じ接続(要求のトランザクション)で
-    アウトボックスに書き(`Outbox.enqueue`)、他は送る・発行する(`ExternalSend.send`)。 -/
+/-- The real DB driver. External effects are dispatched by the record's content: an `async` call is written to the
+    outbox on the same connection (the request's transaction) (`Outbox.enqueue`); everything else is sent or issued
+    (`ExternalSend.send`). -/
 def driver (conn : LeanPq.Handle) (external : ExternalSend.Config := {}) : Driver where
   read := fun command => do
     return PostgresResult.reader (← Postgres.exec conn command.sql command.parameters .tuplesOk)
@@ -514,20 +522,20 @@ def driver (conn : LeanPq.Handle) (external : ExternalSend.Config := {}) : Drive
       pure .none
     | payload => ExternalSend.send external payload
 
-/-- 新しい接続。checked COMMIT の後に、選別済みのハンドラの応答だけを返す。
-認証は別のコアの責務であり、ハンドラが選んだ主体は受け入れない。
+/-- A new connection. Returns only the filtered handler response, after a checked COMMIT. Authentication is the
+responsibility of a separate part of the core; a principal chosen by the handler is not accepted.
 -/
 def handle (conninfo : String) (app : App) (shape : PostgresShape.Shape) (request : AuthenticatedRequest) : IO Http.Response := do
   let .ok () := PostgresShape.validateSchema shape app.schema | invalid
   PostgresLoad.withSnapshot conninfo app.schema fun conn store =>
     process app shape store request (driver conn)
 
-/-- 日本語: 実handleが正常終了したなら、同じ接続のcollectで得られたStoreから
-実processが正常終了し、返る応答はそのStoreでのモデル応答そのもの。
-応答はStoreを受け取らない結果列再生器で再現でき、計画内の各操作は要求主体に
-ついて認可済みで、継続に渡る各行は計画内の認可済みreadの対象行に由来する。
-BEGIN/collect/process/COMMITの順序はwithSnapshot_successが別途示す。
-SQL/FFIの外部効果・取得Storeと実DBの一致・HTTP輸送は主張しない。 -/
+/-- If the real handle terminates normally, the real process terminates normally from the Store obtained by collect on
+the same connection, and the returned response is exactly the model response on that Store. The response can be
+reproduced by a result-list replayer that does not receive the Store, each operation in the plan is authorized for the
+request principal, and each row passed to the continuation comes from the target row of an authorized read in the plan.
+The order BEGIN/collect/process/COMMIT is shown separately by withSnapshot_success. Nothing is claimed about the
+external effects of SQL/FFI, agreement between the fetched Store and the real DB, or HTTP transport. -/
 theorem handle_read_safety (conninfo : String) (app : App) (shape : PostgresShape.Shape)
     (request : AuthenticatedRequest) (w w' : Void IO.RealWorld) (response : Http.Response)
     (h : handle conninfo app shape request w = .ok response w') :
@@ -559,25 +567,25 @@ theorem handle_read_safety (conninfo : String) (app : App) (shape : PostgresShap
     exact ⟨conn, store, wa, wb, wc, plan, hcollect, hp, hplan, hmodel,
       by simpa [← hr] using hreplay, ha, hrow⟩
 
-/-- 日本語: 実handleが正常終了したなら、新規接続からidle、BEGIN/inTransaction、
-全SELECTの事前生成と実Readerのメタデータ・NULL/値/バイト長取得、Store復元、
-同じStoreによるprocess、健全性検査、COMMIT/idleまでが連続するIO状態で成功する。
-同じ抽出結果の全行はタグ別JSON復号関係を満たし、そのMap.makeがモデルの入力Store。
-応答はそのStoreでのモデル応答に等しく、Storeなしの結果列再生器で再現できる。
-計画順の各Driver呼出しと直前Store.applyの期待結果との照合が、process開始から
-終了まで連続するIO状態で成功する。各SQLの抽出結果は、読み取りなら不在または
-対象主キーの期待行ちょうど1行、書き込みなら期待Outcomeそのものである。照合後の
-状態は抽出終了状態のままであり、この抽出結果一致列も同じ順序とIO状態を持つ。
-各読み取りは同じReaderのstatus→行数→列数→投影メタデータ→全セル取得が連続し、
-NULL/値/UTF-8バイト長と行列数が対応する。同じ結果の全行はValueRowのタグ別
-JSON復号関係を持ち、上記の期待行との一致まで結合される。
-各書込みは同じReaderのstatus→行数→列数→件数→タグ取得が連続し、commandOk・
-行列数0・正規件数0/1・操作別タグが期待Outcomeに対応する。
-同じ計画の各SQLは要求主体について認可済みの
-操作から生成され、操作の形状検査も成功する。結果列に現れる各行はその計画の
-認可済みreadが直前のモデルStoreで指す行に由来する。
-JSON解析器内部・Map検索・SQL意味論・外部DB実状態/永続化・FFI・HTTP輸送との
-一致は含まない。要求主体のJWTによる決定は別の接続境界の責務である。 -/
+/-- If the real handle terminates normally, everything from the new connection through idle, BEGIN/inTransaction,
+up-front generation of all SELECTs and the real Reader's metadata and NULL/value/byte-length fetches, Store restoration,
+process on the same Store, the health check, and COMMIT/idle succeeds in consecutive IO states. All rows of the same
+extraction results satisfy the per-tag JSON decoding relation, and their Map.make is the model's input Store. The
+response equals the model response on that Store and can be reproduced by a result-list replayer without the Store. Each
+Driver call in plan order and its matching against the expected result of Store.apply just before it succeed in
+consecutive IO states from the start to the end of process. Each SQL statement's extraction result is, for a read,
+either absent or exactly one expected row with the target primary key, and for a write, exactly the expected Outcome.
+The state after matching remains the state at the end of extraction, and this extraction-match sequence also has the
+same order and IO states. For each read, the same Reader's status → row count → column count → projection metadata → all
+cell fetches are consecutive, and NULL/value/UTF-8 byte length and the row and column counts correspond. All rows of the
+same result have ValueRow's per-tag JSON decoding relation, tied all the way to the match with the expected row above.
+For each write, the same Reader's status → row count → column count → affected count → tag fetches are consecutive, and
+commandOk, zero rows and columns, a canonical count of 0/1 and the per-operation tag correspond to the expected Outcome.
+Each SQL statement of the same plan is generated from an operation authorized for the request principal, and the
+operation's shape check also succeeds. Each row appearing in the result list comes from the row that an authorized read
+in that plan points to in the model Store just before it. Agreement with the JSON parser internals, Map lookup, SQL
+semantics, the external DB's actual state/persistence, FFI and HTTP transport is not included. Determining the request
+principal from the JWT is the responsibility of a separate connection boundary. -/
 theorem handle_cells_read_safety (conninfo : String) (app : App) (shape : PostgresShape.Shape)
     (request : AuthenticatedRequest) (w w' : Void IO.RealWorld) (response : Http.Response)
     (h : handle conninfo app shape request w = .ok response w') :
@@ -641,43 +649,50 @@ theorem handle_cells_read_safety (conninfo : String) (app : App) (shape : Postgr
       rfl, hc, hi, hb, hs, hcollect, distinct, compiled, selected, restored, related, constructed,
       hp, hh, hm, he, hplan, hexec, Executes.extracts _ _ _ _ _ hexec, hsql, hmodel, by simpa only [hr, ← hmodel] using hreplay, ha, hrow⟩
 
-/-! ## 段階的な実行(点検索)
+/-! ## Staged execution (point lookups)
 
-`handle` は全テーブルを取得してから `handleRequest` を純粋に計算し、発行された操作を SQL へ再生する。要求ごとの
-コストが DB 全体の大きさに比例する。`handleStaged` はハンドラのアクション呼び出しごとに:
+`handle` fetches all tables, then computes `handleRequest` purely and replays the issued operations to SQL. The
+per-request cost is proportional to the size of the whole DB. `handleStaged`, for each handler action call:
 
-1. 判定に必要な実体だけを点検索で取得して部分的な取得 `Known` を組む(`PostgresMaterials.load`。一覧では対象
-   テーブルの行のうち問い合わせの絞り込みに合う行。制約の判定が見る行 — 一意性の組と同じ値の行、参照先の行、
-   削除で消える行を参照する行 — も)。
-2. 取得した行の形状を検査し(`PostgresShape.validateStore`)、取得が判定材料を覆っているかを実行可能な検査
-   `Authz.coversStep` で確かめる(通らなければ要求全体を閉じる)。
-3. 取得した行だけで認可層の判定 `Authz.step` を行い、発行された操作を事前検査(`planCommands`)して SQL へ
-   再生し、直前の状態(取得した行)からの期待値と照合する(`handle` と同じ `verifyRead` / `PostgresWrite.verify`)。
-4. 判定が外部効果(添付の署名付き URL の発行。メール送信。外部 API 呼び出し)を記録していれば、その
-   記録についてだけ Storage に発行を求める・メールを送る・外部 API を呼ぶ・`async` の呼び出しを同じトランザクションで
-   アウトボックスに書く(`Driver.external`。失敗は例外で要求全体が 503、トランザクションは取り消される)。
-5. 判定の結果(外部効果ではその発行の結果つき)でハンドラの続きを進める。
+1. Fetches only the entities needed for the decision by point lookups and assembles the partial fetch `Known`
+   (`PostgresMaterials.load`; for a list, the rows of the target table that match the query filters; also the rows seen
+   by constraint decisions — rows with the same values for a uniqueness tuple, referenced rows, and rows referencing the
+   rows removed by a delete).
+2. Checks the shape of the fetched rows (`PostgresShape.validateStore`), and checks with the executable check
+   `Authz.coversStep` that the fetch covers the decision materials (if it fails, the whole request is closed).
+3. Makes the authorization layer's decision `Authz.step` using only the fetched rows, pre-checks the issued operations
+   (`planCommands`), replays them to SQL, and matches them against the expected values from the preceding state (the
+   fetched rows) (the same `verifyRead` / `PostgresWrite.verify` as `handle`).
+4. If the decision recorded an external effect (issuing a signed URL for an attachment, sending mail, an external API
+   call), then for that record only, asks Storage to issue, sends the mail, calls the external API, or writes an `async`
+   call to the outbox in the same transaction (`Driver.external`; failure is an exception and the whole request becomes
+   503, and the transaction is rolled back).
+5. Continues the handler with the decision's result (for an external effect, together with the issuance result).
 
-全テーブルの `Store` は Lean 上に存在しない。`StagedRun` は正常終了の記録(各段の取得・検査・判定・実行・発行)、
-`Chain` は各段の取得がその時点の全体の状態(前段までの操作を適用した状態)と整合すること(接続層では「点検索の結果は
-DB の現在の行」という A4 の信頼)で、`StagedRun.model` が両者から、応答と発行(主体・アクション・操作)・外部効果の記録
-(主体・生成値・アクション・種類・対象・パス)が `runHandler`(したがって `handleRequest`)と一致することを
-`Authz.step_eq_of_covers` で導く。`StagedRun.sql` と `StagedRun.external` は信頼なしに、実行した各 SQL(`commands`。
-`Driver.external` の中でアウトボックスに書く INSERT は含まない)と求めた各発行・送信・アウトボックスへの記録が取得した材料に
-ついて認可済みであることを述べる。定期処理の起動(`AuthenticatedRequest.job`)も同じ経路
-(`App.handlerOf` が定期処理を選ぶ)で流れる。 -/
+No `Store` of all tables exists in Lean. `StagedRun` is the record of normal termination (each stage's fetch, checks,
+decision, execution and issuance), and `Chain` states that each stage's fetch is consistent with the whole state at that
+point (the state after applying the operations of the preceding stages) (at the connection layer, the A4 trust that "the
+results of point lookups are the DB's current rows"); from both, `StagedRun.model` derives with
+`Authz.step_eq_of_covers` that the response, the issued list (principal, action, operation) and the external-effect
+records (principal, generated values, action, kind, target, path) match `runHandler` (and hence `handleRequest`).
+`StagedRun.sql` and `StagedRun.external` state, without trust, that each executed SQL statement (`commands`; this
+excludes the INSERT written to the outbox inside `Driver.external`) and each requested issuance, send and outbox record
+is authorized on the fetched materials. Starting a scheduled job (`AuthenticatedRequest.job`) also flows through the
+same path (`App.handlerOf` selects the scheduled job). -/
 
 open Nyxis.Materials (Known)
 
-/-- 外部効果の記録があれば、その記録についてだけ発行・送信(`async` の呼び出しではアウトボックスへの書き込み)を行う
-    (1 回の呼び出しの記録は多くとも 1 つ)。記録が無ければ何もせず、結果も無い。 -/
+/-- If there is an external-effect record, performs the issuance/send (for an `async` call, the write to the outbox) for
+    that record only (one call has at most one record). If there is no record, does nothing and has no result. -/
 def sendExternal (driver : Driver) : List Authz.External → IO Authz.ExternalResult
   | [] => pure .none
   | e :: _ => driver.external e
 
-/-- ハンドラを段階的に解釈する。各呼び出しで点検索 → 形状検査 → 閉包の検査 → 判定 → SQL の再生と照合 → 外部効果の
-    発行 → 続き。外部効果の結果の値は判定(発行する操作・記録)を変えないので(`Authz.step_external_indep`)、結果を得る
-    前の判定の記録で SQL と発行を行い、結果を得てから同じ呼び出しを結果つきで進める。 -/
+/-- Interprets the handler in stages. For each call: point lookups → shape check → closure check → decision → SQL replay
+    and matching → external-effect issuance → continuation. The value of an external effect's result does not change the
+    decision (the issued operations and records) (`Authz.step_external_indep`), so SQL and issuance are performed with
+    the decision's records from before the result is obtained, and after obtaining the result the same call proceeds
+    with the result. -/
 def runStaged (app : App) (shape : PostgresShape.Shape) (driver : Driver) (principal : Authz.Principal)
     (generated : Authz.Generated) : Handler Http.Response → IO Http.Response
   | .pure a => pure a
@@ -697,11 +712,13 @@ def runStaged (app : App) (shape : PostgresShape.Shape) (driver : Driver) (princ
     runStaged app shape driver principal generated
       (k (Authz.step app.schema app.policies principal generated known.rows action key values query ext).outcome)
 
-/-- 段階的な実行の正常終了の記録: 各呼び出しで使った部分的な取得(`knowns`)、実行した SQL とその操作(`commands`、
-    実行順)、記録した外部効果(`externals`、発生順)、Storage から得た外部効果の結果(`exts`、呼び出しごとに 1 つ)。
-    各段は、取得の成功、取得した行の形状検査、閉包の検査、取得した行だけでの `step` の発行の事前検査、計画順の実行と
-    照合(`Executes`)、記録した外部効果についての発行・送信の成功(`sendExternal`)、`step` の結果(発行の結果つき)で進めた
-    続きの記録から成り、IO 状態は連続する。 -/
+/-- The record of normal termination of staged execution: the partial fetch used by each call (`knowns`), the executed
+    SQL and its operations (`commands`, in execution order), the recorded external effects (`externals`, in order of
+    occurrence), and the external-effect results obtained from Storage (`exts`, one per call). Each stage consists of a
+    successful fetch, the shape check of the fetched rows, the closure check, the pre-check of `step`'s issuance using
+    only the fetched rows, execution and matching in plan order (`Executes`), successful issuance/send for the recorded
+    external effects (`sendExternal`), and the record of the continuation advanced with `step`'s result (together with
+    the issuance result), with consecutive IO states. -/
 inductive StagedRun (app : App) (shape : PostgresShape.Shape) (driver : Driver) (principal : Authz.Principal)
     (generated : Authz.Generated) :
     Handler Http.Response → List Known → List (Authz.Issued × PostgresSql.Command) → List Authz.External →
@@ -733,10 +750,12 @@ inductive StagedRun (app : App) (shape : PostgresShape.Shape) (driver : Driver) 
           ++ externals)
         (ext :: exts) response w w'
 
-/-- 日本語: 実runStagedが正常終了したなら、各呼び出しについて点検索の成功、取得した行の形状検査、
-閉包の検査、取得した行だけでのstepの発行の事前検査、計画順のSQL実行と直前状態からの期待値との照合、
-記録した外部効果についてのStorageへの発行の成功が連続するIO状態で成功し、stepの結果(発行の結果つき)で
-続きが進んでいる(`StagedRun`)。取得と外部DBの一致・SQLの意味論・Storageの振る舞い・COMMIT・HTTP輸送は含まない。 -/
+/-- If the real runStaged terminates normally, then for each call, successful point lookups, the shape check of the
+fetched rows, the closure check, the pre-check of step's issuance using only the fetched rows, SQL execution in plan
+order and matching against the expected values from the preceding state, and successful issuance to Storage for the
+recorded external effects succeed in consecutive IO states, and the continuation advances with step's result (together
+with the issuance result) (`StagedRun`). Agreement between the fetch and the external DB, SQL semantics, Storage
+behavior, COMMIT and HTTP transport are not included. -/
 theorem runStaged_success (app : App) (shape : PostgresShape.Shape) (driver : Driver)
     (principal : Authz.Principal) (generated : Authz.Generated) (h : Handler Http.Response) :
     ∀ (w w' : Void IO.RealWorld) (response : Http.Response),
@@ -788,11 +807,14 @@ theorem runStaged_success (app : App) (shape : PostgresShape.Shape) (driver : Dr
           · rw [← hi]; exact hp
           · rw [← he]; exact hsign
 
-/-- 各段の取得が、その時点の全体の状態と整合すること: 取得は全体の状態と整合し(`Known.Consistent`)、判定が絞り込みで
-    見る行(一覧の候補、一意性の組と同じ値の行、削除で消える行を参照する行。`Authz.rowFilters`)をすべて取得して
-    おり(絞り込んだ行列の一致)、続きは全体の状態で判定した結果(整合すれば取得した行での結果と同じ。外部効果の結果は
-    同じ値 `ext`)とその操作を適用した状態について同じ。接続層では「点検索(絞り込みでは WHERE 句つきの SELECT)の結果は
-    DB の現在の行である」という信頼(`ASSUMPTIONS.md` A4)に当たり、Lean の上では検査できない。 -/
+/-- Each stage's fetch is consistent with the whole state at that point: the fetch is consistent with the whole state
+    (`Known.Consistent`), it has fetched all rows the decision sees through filters (list candidates, rows with the same
+    values for a uniqueness tuple, rows referencing the rows removed by a delete; `Authz.rowFilters`) (the filtered row
+    lists agree), and the same holds for the continuation with respect to the result decided on the whole state (if
+    consistent, the same as the result on the fetched rows; the external-effect result is the same value `ext`) and the
+    state after applying its operations. At the connection layer this corresponds to the trust that "the results of
+    point lookups (for filters, the SELECT with a WHERE clause) are the DB's current rows" (`ASSUMPTIONS.md` A4), which
+    cannot be checked in Lean. -/
 inductive Chain (schema : Authz.Schema) (policies : Cedar.Spec.Policies) (principal : Authz.Principal)
     (generated : Authz.Generated) : Store → Handler α → List Known → List Authz.ExternalResult → Prop where
   | pure (full : Store) (a : α) : Chain schema policies principal generated full (.pure a) [] []
@@ -807,11 +829,12 @@ inductive Chain (schema : Authz.Schema) (policies : Cedar.Spec.Policies) (princi
         (k (Authz.step schema policies principal generated full action key values query ext).outcome) knowns exts →
       Chain schema policies principal generated full (.call action key values query k) (known :: knowns) (ext :: exts)
 
-/-- 日本語: 段階的な実行の記録の各段の取得が、その時点の全体の状態と整合する(`Chain`)なら、
-応答は同じ初期状態と同じ外部効果の結果の列からの純粋なrunHandlerの返り値そのもので、実行した各SQLに対応する
-操作の列(主体・生成値・アクション・操作)と記録した外部効果の列(主体・生成値・アクション・種類・対象・パス)も
-runHandlerの発行列・記録列と順序を含めて一致する(`Authz.step_eq_of_covers`)。
-記録の各操作・外部効果のstoreだけは取得した行の状態であり、全体の状態とは異なる。 -/
+/-- If each stage's fetch in the staged-execution record is consistent with the whole state at that point (`Chain`), the
+response is exactly the return value of the pure runHandler from the same initial state and the same list of
+external-effect results, and the list of operations corresponding to each executed SQL statement (principal, generated
+values, action, operation) and the list of recorded external effects (principal, generated values, action, kind, target,
+path) also match runHandler's issued list and record list, including order (`Authz.step_eq_of_covers`). Only the store
+of each recorded operation and external effect is the state of the fetched rows, which differs from the whole state. -/
 theorem StagedRun.model {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {principal : Authz.Principal} {generated : Authz.Generated} {h : Handler Http.Response} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -840,11 +863,12 @@ theorem StagedRun.model {app : App} {shape : PostgresShape.Shape} {driver : Driv
       simp only [runHandler, List.map_append, planCommands_issued _ _ _ _ hplan, List.headD_cons, List.tail_cons]
       exact ⟨hr, by rw [hi, hissued], by rw [he, hext]⟩
 
-/-- 日本語: 段階的な実行の記録で発行した操作のSQL(`commands`。判定材料の点検索のSELECTは
-記録の外で、`PostgresMaterials.load`の中にある)は、同じ要求の主体について、その段で取得した材料に
-ついて認可済みの操作から生成され、その操作は取得した行の状態に対する形状検査も通っている。
-これは取得と外部DBの一致を信頼しない主張である(全体の状態での認可は`StagedRun.model`と
-`Authz.step_eq_of_covers`が結ぶ)。SQL文字列の意味論は含まない。 -/
+/-- The SQL of the operations issued in the staged-execution record (`commands`; the point-lookup SELECTs for decision
+materials are outside the record, inside `PostgresMaterials.load`) is generated from operations authorized for the
+principal of the same request on the materials fetched at that stage, and those operations also pass the shape check
+against the state of the fetched rows. This is a claim that does not trust agreement between the fetch and the external
+DB (authorization on the whole state is connected by `StagedRun.model` and `Authz.step_eq_of_covers`). SQL string
+semantics are not included. -/
 theorem StagedRun.sql {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {principal : Authz.Principal} {generated : Authz.Generated} {h : Handler Http.Response} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -868,12 +892,13 @@ theorem StagedRun.sql {app : App} {shape : PostgresShape.Shape} {driver : Driver
       exact ⟨hp, ha, planCommands_compiled _ _ _ _ hplan i command hm⟩
     · exact ih i command hm
 
-/-- 日本語: 段階的な実行の記録で記録した外部効果(添付の署名付きURLの発行。メール送信。外部API呼び出し)は、
-同じ要求の主体とサーバー生成値について、その段で取得した材料について認可済み(`Authz.ExternalAuthorized`: 宣言された効果、
-対象の行についてのpermit、nyxisが決めた内容)である。Storageへの発行・メールの送信・外部APIの呼び出し・`async`の呼び出しの
-アウトボックスへの記録(`Driver.external`)は各段でこの記録についてだけ行った(`sendExternal`)。これは取得と外部DBの一致を
-信頼しない主張である。Storage・中継・送り先の振る舞い、`Driver.external`の中身(送信の内容・アウトボックスのINSERTが記録
-どおりであること)は含まない。 -/
+/-- The external effects recorded in the staged-execution record (issuing signed URLs for attachments, sending mail,
+external API calls) are authorized for the principal and server-generated values of the same request on the materials
+fetched at that stage (`Authz.ExternalAuthorized`: a declared effect, a permit on the target row, content determined by
+nyxis). Issuance to Storage, sending mail, calling the external API, and recording an `async` call in the outbox
+(`Driver.external`) were performed at each stage for this record only (`sendExternal`). This is a claim that does not
+trust agreement between the fetch and the external DB. The behavior of Storage, the relay and the destination, and the
+internals of `Driver.external` (that the sent content and the outbox INSERT match the record), are not included. -/
 theorem StagedRun.external {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {principal : Authz.Principal} {generated : Authz.Generated} {h : Handler Http.Response} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -890,12 +915,14 @@ theorem StagedRun.external {app : App} {shape : PostgresShape.Shape} {driver : D
       exact ⟨hp, hg, ha⟩
     · exact ih e he
 
-/-- 日本語: 段階的な実行の記録には、各段のstep(取得した行だけでの判定)が続きに渡した結果の列があり、
-応答はStoreを受け取らない再生器(`ReadSafety.replay`)でハンドラとその結果列だけから再現できる。
-その結果列に現れる各行は、同じ記録で発行した(SQLに対応する)操作のうち同じ主体について認可済みの読み取りが、
-その段で取得した行(操作の`store`)で指す行である。これは取得と外部DBの一致を信頼しない主張で、
-認可判定用に取得した行が応答へ渡る別の入力は無い(`handle`経路の`replayRequest`/行の出所と同じ性質)。
-結果タグの観測・ハンドラの定数・要求由来の値・署名付きURLの中身は制限しない。 -/
+/-- The staged-execution record has the list of results that each stage's step (the decision using only the fetched
+rows) passed to the continuation, and the response can be reproduced by a replayer that does not receive the Store
+(`ReadSafety.replay`) from only the handler and that result list. Each row appearing in that result list is the row that
+an authorized read for the same principal, among the operations issued in the same record (corresponding to SQL), points
+to in the rows fetched at that stage (the operation's `store`). This is a claim that does not trust agreement between
+the fetch and the external DB, and there is no other input through which rows fetched for the authorization decision
+reach the response (the same property as `replayRequest`/row provenance on the `handle` path). Observation of result
+tags, handler constants, request-derived values and the content of signed URLs are not restricted. -/
 theorem StagedRun.replay {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {principal : Authz.Principal} {generated : Authz.Generated} {h : Handler Http.Response} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -926,30 +953,34 @@ theorem StagedRun.replay {app : App} {shape : PostgresShape.Shape} {driver : Dri
     · obtain ⟨i, hi, hrest'⟩ := hrow row ho
       exact ⟨i, by rw [List.map_append]; exact List.mem_append_right _ hi, hrest'⟩
 
-/-- 外部 API 呼び出し(`sync`)の 2xx の応答が宣言した型に合わなかったときの固定の応答。診断や応答の本文は含まない。
-    トランザクションは取り消されている(`Postgres.transaction` の失敗の経路)。 -/
+/-- The fixed response when a 2xx response of an external API call (`sync`) did not match its declared type. It contains
+    no diagnostics or response body. The transaction has been rolled back (the failure path of `Postgres.transaction`).
+    -/
 def gatewayResponse : Http.Response := { status := .badGateway, body := "external response invalid" }
 
-/-- 1 つの接続の上のトランザクションの本体: ルーティング(定期処理の起動ならその選択。`App.handlerOf`)でハンドラを選び、
-    段階的に解釈する。 -/
+/-- The body of the transaction on one connection: selects the handler by routing (for a scheduled-job start, that
+    selection; `App.handlerOf`) and interprets it in stages. -/
 def stagedBody (app : App) (shape : PostgresShape.Shape) (external : ExternalSend.Config)
     (request : AuthenticatedRequest) (conn : LeanPq.Handle) : IO Http.Response :=
   match app.handlerOf request with
   | none => pure { status := .notFound, body := "not found" }
   | some handler => runStaged app shape (driver conn external) request.principal request.generated handler
 
-/-- 新しい接続。ルーティング(定期処理の起動ならその選択。`App.handlerOf`)でハンドラを選び、段階的に解釈し、checked COMMIT
-    の後に選別済みの応答だけを返す。認証は別のコアの責務であり、ハンドラが選んだ主体は受け入れない。外部効果の設定
-   が無い種類の効果は失敗し(例外。要求全体が 503)、他の効果は影響を受けない。外部 API 呼び出しの応答が
-    宣言した型に合わなかった失敗(`CallSend.invalidResponse`)だけは、トランザクションの取り消しの後に固定の 502
-    (`gatewayResponse`)に写す。他の例外はそのまま(入口で固定の 503)。 -/
+/-- A new connection. Selects the handler by routing (for a scheduled-job start, that selection; `App.handlerOf`),
+    interprets it in stages, and returns only the filtered response after a checked COMMIT. Authentication is the
+    responsibility of a separate part of the core; a principal chosen by the handler is not accepted. An effect of a
+    kind with no external-effect configuration fails (exception; the whole request becomes 503), and other effects are
+    unaffected. Only the failure where an external API call's response did not match its declared type
+    (`CallSend.invalidResponse`) is mapped, after rolling back the transaction, to the fixed 502 (`gatewayResponse`).
+    Other exceptions propagate unchanged (the fixed 503 at the entry point). -/
 def handleStaged (conninfo : String) (app : App) (shape : PostgresShape.Shape)
     (external : ExternalSend.Config) (request : AuthenticatedRequest) : IO Http.Response := do
   let .ok () := PostgresShape.validateSchema shape app.schema | invalid
   try Postgres.withTransaction conninfo (stagedBody app shape external request)
   catch e => if CallSend.isInvalidResponse e then pure gatewayResponse else throw e
 
-/-- 1 つの要求の段階的な実行の記録。ルーティングに無ければ取得も SQL も発行も無く 404。 -/
+/-- The staged-execution record of one request. If routing has no match, there is no fetch, no SQL and no issuance, and
+    the response is 404. -/
 def StagedRequest (app : App) (shape : PostgresShape.Shape) (driver : Driver) (request : AuthenticatedRequest)
     (knowns : List Known) (commands : List (Authz.Issued × PostgresSql.Command)) (externals : List Authz.External)
     (exts : List Authz.ExternalResult) (response : Http.Response) (w w' : Void IO.RealWorld) : Prop :=
@@ -960,17 +991,18 @@ def StagedRequest (app : App) (shape : PostgresShape.Shape) (driver : Driver) (r
   | some handler =>
     StagedRun app shape driver request.principal request.generated handler knowns commands externals exts response w w'
 
-/-- 1 つの要求について、各段の取得がその時点の全体の状態と整合すること(`Chain`)。 -/
+/-- For one request, each stage's fetch is consistent with the whole state at that point (`Chain`). -/
 def ChainRequest (app : App) (full : Store) (request : AuthenticatedRequest) (knowns : List Known)
     (exts : List Authz.ExternalResult) : Prop :=
   match app.handlerOf request with
   | none => knowns = [] ∧ exts = []
   | some handler => Chain app.schema app.policies request.principal request.generated full handler knowns exts
 
-/-- 日本語: 1つの要求の段階的な実行の記録の各段の取得が全体の状態と整合するなら、応答は同じ
-初期状態でStorageから得た外部効果の結果の列を伴う純粋なhandleRequestの応答そのもので、実行した各SQLに対応する
-操作の列(主体・生成値・アクション・操作)と記録した外部効果の列(主体・生成値・アクション・種類・対象・パス)は
-handleRequestの発行列・記録列と一致する。 -/
+/-- If each stage's fetch in the staged-execution record of one request is consistent with the whole state, the response
+is exactly the response of the pure handleRequest on the same initial state together with the list of external-effect
+results obtained from Storage, and the list of operations corresponding to each executed SQL statement (principal,
+generated values, action, operation) and the list of recorded external effects (principal, generated values, action,
+kind, target, path) match handleRequest's issued list and record list. -/
 theorem StagedRequest.model {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {request : AuthenticatedRequest} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -995,9 +1027,10 @@ theorem StagedRequest.model {app : App} {shape : PostgresShape.Shape} {driver : 
     simp only [hr] at hc ⊢
     exact hs.model full hc
 
-/-- 日本語: 1つの要求の段階的な実行の記録について、応答はStoreを受け取らない再生器
-(`ReadSafety.replayRequest`)で要求と各段の結果列だけから再現でき、結果列の各行は同じ記録で発行した
-同じ主体について認可済みの読み取りがその段で取得した行で指す行である(ルーティングに無ければ結果列は空)。 -/
+/-- For the staged-execution record of one request, the response can be reproduced by a replayer that does not receive
+the Store (`ReadSafety.replayRequest`) from only the request and each stage's result list, and each row in the result
+list is the row that an authorized read for the same principal, issued in the same record, points to in the rows fetched
+at that stage (if routing has no match, the result list is empty). -/
 theorem StagedRequest.replay {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {request : AuthenticatedRequest} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -1017,8 +1050,8 @@ theorem StagedRequest.replay {app : App} {shape : PostgresShape.Shape} {driver :
     obtain ⟨os, hreplay, hrow⟩ := hs.replay
     exact ⟨os, by simp only [ReadSafety.replayRequest, hr]; exact hreplay, hrow⟩
 
-/-- 日本語: 1つの要求の段階的な実行の記録で記録した外部効果は、同じ要求の主体とサーバー生成値について、その段で取得した
-材料について認可済みである(信頼なし)。 -/
+/-- The external effects recorded in the staged-execution record of one request are authorized for the principal and
+server-generated values of the same request on the materials fetched at that stage (no trust). -/
 theorem StagedRequest.external {app : App} {shape : PostgresShape.Shape} {driver : Driver}
     {request : AuthenticatedRequest} {knowns : List Known}
     {commands : List (Authz.Issued × PostgresSql.Command)} {externals : List Authz.External}
@@ -1032,20 +1065,27 @@ theorem StagedRequest.external {app : App} {shape : PostgresShape.Shape} {driver
     intro e he; simp at he
   · exact hs.external
 
-/-- 日本語: 実handleStagedが正常終了したなら、モデルと形状の一致検査に成功し、新規接続からidle、
-BEGIN/inTransaction、ルーティングした要求の段階的な実行の記録(各呼び出しの点検索・形状検査・閉包の検査・
-取得した行だけでの判定・発行の事前検査・計画順のSQL実行と照合・記録した外部効果の発行・送信)、健全性検査、COMMIT/idleまでが
-連続するIO状態で成功する。発行した操作のSQL(`commands`。判定材料の点検索のSELECTは各段の`load`の中)は同じ要求の
-主体についてその段で取得した材料について認可済みの操作から生成され、形状検査も通る。記録した外部効果(`externals`)は
-同じ要求の主体と生成値についてその段で取得した材料について認可済みで、Storageへの発行・メールの送信・外部APIの呼び出しはその内容に
-ついてだけ行った。応答はStoreを受け取らない再生器で要求と各段の結果列だけから再現でき、結果列の各行は同じ主体について認可済みの
-読み取りがその段で取得した行で指す行である(信頼なし)。各段の取得がその時点の全体の状態と整合する(接続層ではA4の
-信頼)なら、応答は同じ初期状態とStorageから得た結果の列でのhandleRequestの応答そのもので、SQLに対応する操作の列
-(主体・生成値・アクション・操作)と外部効果の記録の列はhandleRequestの発行列・記録列と一致する。取得と外部DB実状態の
-一致・SQLの意味論・Storageの振る舞い・永続化・HTTP輸送は含まない。要求主体のJWTによる決定は別の接続境界の責務である。
-もう1つの正常終了は、外部API呼び出しの応答が宣言した型に合わなかった失敗(`CallSend.invalidResponse`)だけを写した固定の
-502(`gatewayResponse`)で、そのときは同じ本体のトランザクションがその例外で失敗している(COMMITは無く、応答は固定値で
-内部取得行や診断を含まない)。 -/
+/-- If the real handleStaged terminates normally, the model/shape consistency check succeeds, and everything from the
+new connection through idle, BEGIN/inTransaction, the staged-execution record of the routed request (for each call:
+point lookups, shape check, closure check, decision using only the fetched rows, pre-check of issuance, SQL execution in
+plan order and matching, issuance/send of the recorded external effects), the health check, and COMMIT/idle succeeds in
+consecutive IO states. The SQL of the issued operations (`commands`; the point-lookup SELECTs for decision materials are
+inside each stage's `load`) is generated from operations authorized for the principal of the same request on the
+materials fetched at that stage, and also passes the shape check. The recorded external effects (`externals`) are
+authorized for the principal and generated values of the same request on the materials fetched at that stage, and
+issuance to Storage, sending mail and calling the external API were performed only for that content. The response can be
+reproduced by a replayer that does not receive the Store from only the request and each stage's result list, and each
+row in the result list is the row that an authorized read for the same principal points to in the rows fetched at that
+stage (no trust). If each stage's fetch is consistent with the whole state at that point (trusted as A4 at the
+connection layer), the response is exactly the response of handleRequest on the same initial state and the list of
+results obtained from Storage, and the list of operations corresponding to the SQL (principal, generated values, action,
+operation) and the list of external-effect records match handleRequest's issued list and record list. Agreement between
+the fetch and the external DB's actual state, SQL semantics, Storage behavior, persistence and HTTP transport are not
+included. Determining the request principal from the JWT is the responsibility of a separate connection boundary. The
+other normal termination is the fixed 502 (`gatewayResponse`) that maps only the failure where an external API call's
+response did not match its declared type (`CallSend.invalidResponse`); in that case the transaction of the same body has
+failed with that exception (there is no COMMIT, and the response is a fixed value containing no internally fetched rows
+or diagnostics). -/
 theorem handleStaged_success (conninfo : String) (app : App) (shape : PostgresShape.Shape)
     (external : ExternalSend.Config) (request : AuthenticatedRequest) (w w' : Void IO.RealWorld)
     (response : Http.Response)

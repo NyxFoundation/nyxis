@@ -1,54 +1,65 @@
 import Nyxis.Materials
 
 /-!
-# Nyxis.Authz — 認可層
+# Nyxis.Authz — the authorization layer
 
-ハンドラが呼ぶアクションごとに、そのリクエストの認証された主体と、DB の現在の行から構成した対象
-(挿入・更新では提案される値も含む)について Cedar の判定を行い、permit のときだけ宣言された効果を
-DB 層で実行する。
+For each action a handler calls, makes a Cedar decision about the request's authenticated principal and the resource
+built from the DB's current rows (including the proposed values for inserts and updates), and executes the declared
+effect in the DB layer only when the decision is permit.
 
-- 主体はそのリクエストの JWT から、対象は DB の現在の行から、効果はスキーマの宣言から、nyxis が決める。
-  ハンドラはこれらを指定も差し替えもできない。
-- 判定は cedar-spec の `Cedar.Spec.isAuthorized` に委ね、自前で再実装しない。
-- Cedar に渡す判定材料の組み立て方(`judgementRequest` / `judgementEntities`):
-  - 主体: 認証された主体のエンティティ UID。匿名は予約型 `Anonymous::"anonymous"`。
-  - アクション: ハンドラが呼んだアクション。
-  - 対象: 操作の対象(テーブルと主キー)。
-  - 実体: DB の現在の行のうちスキーマに適合する行がそのまま実体になる(テーブル = 型、主キー = ID、
-    列 = 属性。正本が `entity T in [P]` と `@parents("列, …")` で親を指す列を宣言していれば、その列の値が
-    実体の祖先 — ポリシーの `in` の判定材料)。それにスキーマの全アクションの実体を加える
-    (`Nyxis.Materials.entities`)。
-    挿入で現在の行が無ければ、提案される行を対象の実体として加える。ただし主体自身の実体は常に
-    DB の現在の行から決まり、提案される値で置き換えない。
-  - 文脈: 挿入・更新では提案される値を `context.values` に置く。読み取り・一覧・削除では無い。正本のアクションの
-    `context` が `now`(datetime)/ `id`(String)を宣言していれば、nyxis が要求ごとに決めたサーバー生成値
-    (`Generated`: 現在時刻と新しい一意 ID)を `context.now` / `context.id` に置く。ハンドラはこの値を
-    指定も差し替えもできない(判定に使う値は `Runtime.AuthenticatedRequest` のもの)。
-- 判定は判定材料の全体ではなく、要求に現れる実体から有限の段数で到達できる実体だけ(`materials` =
-  cedar-lean の `Entities.sliceAtLevel`。段数は正本のポリシーが level 検証に通る最小の level)で行う(`permits`)。
-  その判定が判定材料の全体での判定と一致することは `permits_authorized` が cedar-lean の slicing 定理から導き、
-  主定理(`Nyxis.Runtime.authorization_safety`)の「正当な権限」(`Authorized`)は判定材料の全体での判定で述べる。
-  一致の前提(型環境の well-formedness・要求のインスタンス性・level 検証)は判定ごとに実行可能な検査と
-  して確かめ、通らなければ拒否する。実 DB では、限定した材料を主キーの点検索で取得することになる: 部分的な取得
-  (`Nyxis.Materials.Known`)が全体の状態と整合し、実行可能な検査 `coversOp` / `coversStep` に通れば、取得した行
-  だけでの判定と `step` の結果は全体の状態でのものと一致する(`permits_eq_of_covers` / `step_eq_of_covers`)。
-- 一覧(効果 `list`)は、対象テーブルの現在の行のうちハンドラの問い合わせ(`Nyxis.Db.ListQuery`)の絞り込みに
-  合う各行について、その行の読み取りと同じ判定材料で Cedar の判定を行い、permit された行(`permittedRows`。件数は
-  その数)を並べ替えてページを切ったものを返す(`listRows`)。発行する DB 操作は返す行ごとの読み取りで、
-  ハンドラが渡した主キーと値は使わない。絞り込み・並べ替え・ページは判定を変えない(判定は行ごとに同じ材料で行う)。
-- 宣言された外部効果(効果 `upload` / `download` — 添付の署名付き URL の発行。`mail` — メール送信。`call` —
-  外部 API 呼び出し)は、対象の行の読み取りと同じ判定材料(主体・対象 = その行・文脈。`context.values` を取る
-  呼び出しでは提案値を文脈に置く)で Cedar の判定を行い、permit されたときだけ外部効果の記録(`External`: 主体・生成値・
-  判定時の状態・アクション・対象の行・提案値・nyxis が決めた内容 `payloadOf` — オブジェクトのパス、行の宣言された列から
-  決めた宛先と件名・本文、または正本の送り先の宣言と行の列と提案値から決めた送り先・メソッド・URL・本文)を残す
-  (`externalStep`)。DB 操作は発行せず状態も変えない。ハンドラに渡る結果は、署名付き URL の発行では接続層が Storage から
-  得た URL(`Outcome.signed`)、`sync` の呼び出しでは接続層が送り先から得て宣言した型に復号した応答(`Outcome.called` /
-  `calledError`。純粋モデルではいずれも要求の外部効果の結果の列から来る任意の値)、メールと `async` の呼び出しでは
-  `Outcome.ok none` で、行は渡らない。発行・送信の可否はポリシーが決め、パス・バケット・宛先・内容・送り先・URL・ヘッダを
-  ハンドラは名指しできない。
-- サービス主体: 定期処理(`Nyxis.Runtime.Job`)の主体は JWT ではなくコア設定から決まる、予約型 `Service` の
-  実体 `Principal.service id`(= `.user ⟨serviceType, id⟩`。テーブルではないので行は無い)。HTTP の要求の主体は
-  接続層が JWT から利用者の型で作るので、サービス主体にはならない(`Nyxis.Internal.ApprovedServer.readAll_response`)。
+- nyxis decides the principal from the request's JWT, the resource from the DB's current rows, and the effect from the
+  schema's declarations. Handlers can neither specify nor replace them.
+- The decision is delegated to cedar-spec's `Cedar.Spec.isAuthorized` and is not reimplemented.
+- How the decision materials passed to Cedar are assembled (`judgementRequest` / `judgementEntities`):
+  - Principal: the entity UID of the authenticated principal. Anonymous is the reserved type `Anonymous::"anonymous"`.
+  - Action: the action the handler called.
+  - Resource: the target of the operation (table and primary key).
+  - Entities: the DB's current rows that conform to the schema become entities as-is (table = type, primary key = ID,
+    column = attribute. If the sources declare columns pointing to parents with `entity T in [P]` and
+    `@parents("column, …")`, the values of those columns are the entity's ancestors — the materials for `in` in
+    policies). The entities of all actions in the schema are added to them (`Nyxis.Materials.entities`). For an insert
+    with no current row, the proposed row is added as the resource's entity. However, the principal's own entity is
+    always determined from the DB's current row and is never replaced by proposed values.
+  - Context: for inserts and updates, the proposed values are put in `context.values`. None for reads, lists and
+    deletes. If the action's `context` in the sources declares `now` (datetime) / `id` (String), the server-generated
+    values that nyxis decides per request (`Generated`: the current time and a fresh unique ID) are put in `context.now`
+    / `context.id`. Handlers can neither specify nor replace these values (the values used for decisions are those of
+    `Runtime.AuthenticatedRequest`).
+- The decision is made not on the whole of the decision materials but only on the entities reachable within a finite
+  number of steps from the entities appearing in the request (`materials` = cedar-lean's `Entities.sliceAtLevel`; the
+  number of steps is the minimum level at which the sources' policies pass level validation) (`permits`).
+  `permits_authorized` derives from cedar-lean's slicing theorem that this decision agrees with the decision on the
+  whole of the decision materials, and the "legitimate authority" (`Authorized`) of the main theorem
+  (`Nyxis.Runtime.authorization_safety`) is stated in terms of the decision on the whole of the decision materials. The
+  premises of this agreement (well-formedness of the type environment, the request being an instance, level validation)
+  are confirmed by executable checks for each decision, and the request is denied if they fail. On a real DB, the
+  restricted materials are fetched by primary-key point lookups: if the partial fetch (`Nyxis.Materials.Known`) is
+  consistent with the full state and passes the executable checks `coversOp` / `coversStep`, the decision and the result
+  of `step` using only the fetched rows agree with those on the full state (`permits_eq_of_covers` /
+  `step_eq_of_covers`).
+- A list (effect `list`) makes, for each current row of the target table that matches the filter of the handler's query
+  (`Nyxis.Db.ListQuery`), a Cedar decision with the same decision materials as a read of that row, and returns the
+  permitted rows (`permittedRows`; the count is their number) sorted and paged (`listRows`). The DB operations issued
+  are a read per returned row, and the primary key and values passed by the handler are unused. Filtering, sorting and
+  paging do not change decisions (each row is decided with the same materials).
+- Declared external effects (effects `upload` / `download` — issuing signed URLs for attachments; `mail` — sending mail;
+  `call` — external API calls) make a Cedar decision with the same decision materials as a read of the target row
+  (principal, resource = that row, context; for calls that take `context.values`, the proposed values are put in the
+  context), and only when permitted leave a record of the external effect (`External`: the principal, generated values,
+  the state at decision time, the action, the target row, the proposed values, and the content decided by nyxis
+  `payloadOf` — the object path; the recipient, subject and body decided from the row's declared columns; or the
+  destination, method, URL and body decided from the sources' destination declaration, the row's columns and the
+  proposed values) (`externalStep`). No DB operation is issued and the state does not change. The result passed to the
+  handler is the URL the connection layer obtained from Storage (`Outcome.signed`) for issuing signed URLs, the response
+  the connection layer obtained from the destination and decoded into the declared type (`Outcome.called` /
+  `calledError`; in the pure model, either is an arbitrary value coming from the request's sequence of external-effect
+  results) for `sync` calls, and `Outcome.ok none` for mail and `async` calls; no row is passed. Whether to issue or
+  send is decided by the policies, and handlers cannot name the path, bucket, recipient, content, destination, URL or
+  headers.
+- Service principals: the principal of a scheduled job (`Nyxis.Runtime.Job`) is determined not by a JWT but by the core
+  configuration, as the entity `Principal.service id` of the reserved type `Service` (= `.user ⟨serviceType, id⟩`; it is
+  not a table, so it has no row). The principal of an HTTP request is built by the connection layer from the JWT with
+  the user type, so it is never a service principal (`Nyxis.Internal.ApprovedServer.readAll_response`).
 -/
 
 namespace Nyxis.Authz
@@ -56,87 +67,99 @@ namespace Nyxis.Authz
 open Cedar.Spec
 open Nyxis.Db
 
-/-- アクションの宣言。Cedar のアクション(エンティティ UID)と、それに添えられる効果。 -/
+/-- An action declaration. A Cedar action (entity UID) and the effect attached to it. -/
 structure ActionDecl where
   action : EntityUID
   effect : Nyxis.Db.Effect
   deriving Repr, DecidableEq
 
-/-- スキーマ。テーブル(エンティティ型)とその列、アクションの宣言、そして同じ正本から構成した cedar-lean の
-    型環境(属性の型・`appliesTo`・祖先・文脈の型。判定材料の限定の前提検査に使う)。Cedar スキーマ
-    (`.cedarschema`)からビルド時に構成される(`Nyxis.CedarSchema` / `Nyxis.Build` の `nyxis_schema`)。 -/
+/-- The schema. Tables (entity types) and their columns, action declarations, and the cedar-lean type environment built
+    from the same sources (attribute types, `appliesTo`, ancestors, context types; used for the premise checks of
+    restricting the decision materials). Built at build time from the Cedar schema (`.cedarschema`) (`Nyxis.CedarSchema`
+    / `nyxis_schema` in `Nyxis.Build`). -/
 structure Schema where
   tables : List (Table × List Column)
   actions : List ActionDecl
   types : Cedar.Validation.Schema
-  /-- 親を指す列: `entity T in [P]` に `@parents("列, …")` を添えたテーブルごとの列。その列の値のうち宣言された
-      親の型の実体が、行の実体の祖先になる(`Nyxis.Materials.rowAncestors`)。無いテーブルは祖先を持たない。 -/
+  /-- Columns pointing to parents: per table, the columns given with `@parents("column, …")` on `entity T in [P]`. Among
+      the values of those columns, the entities of the declared parent types become ancestors of the row's entity
+      (`Nyxis.Materials.rowAncestors`). Tables without them have no ancestors. -/
   parents : Nyxis.Materials.ParentColumns := []
-  /-- 所属行: `entity T in [P]` に `@memberships("M: 列 -> 列, …")` を添えたテーブルごとの宣言。所属行の
-      テーブル `M` の行のうち所属する側の列が行の実体であるものの、親を指す列の値が、その実体の祖先になる
-      (`Nyxis.Materials.membershipRefs`)。多対多の所属を別テーブルの行で表す形。 -/
+  /-- Membership rows: per table, the declaration given with `@memberships("M: column -> column, …")` on
+      `entity T in [P]`. Among the rows of the membership table `M` whose member-side column is the row's entity, the
+      values of the parent-pointing column become ancestors of that entity (`Nyxis.Materials.membershipRefs`). This
+      represents many-to-many membership as rows of a separate table. -/
   memberships : Nyxis.Materials.MembershipColumns := []
-  /-- 一意性と参照整合の宣言: `@unique` / `@references`。判定は `step` が permit の後に行い、違反は
-      `Outcome.conflict`。参照される行の削除の連鎖(`cascade`)は、参照する各行をそのテーブルの削除効果を持つ
-      宣言済みアクションで判定して発行する。 -/
+  /-- Uniqueness and referential-integrity declarations: `@unique` / `@references`. `step` checks them after permit, and
+      a violation is `Outcome.conflict`. A delete cascade from a referenced row (`cascade`) decides and issues each
+      referencing row with a declared action that has the delete effect for that table. -/
   constraints : Nyxis.Db.Constraints := {}
-  /-- 添付の列: `@attachment("列")` を添えたテーブルごとの、添付のオブジェクトの名を保存する String 列。
-      `download` の効果はこの列の現在の値からオブジェクトのパスを決める(`payloadOf`)。 -/
+  /-- Attachment columns: per table, the String column given with `@attachment("column")` that stores the attachment
+      object's name. The `download` effect determines the object path from the current value of this column
+      (`payloadOf`). -/
   attachments : List (Table × Column) := []
-  /-- 名前付きの送り先: `@external` を添えた予約の仲間ごとの、ベース URL と認証方式。`call` の効果はここから
-      URL を組む(`payloadOf`)。認証ヘッダの値はコア設定で、記録には載らない。 -/
+  /-- Named destinations: per reserved member given with `@external`, the base URL and authentication scheme. The `call`
+      effect builds the URL from here (`payloadOf`). The value of the authentication header is core configuration and is
+      not recorded. -/
   destinations : List (String × Nyxis.Db.Destination) := []
   deriving Repr, DecidableEq
 
-/-- 宣言されたアクションの効果を引く。宣言が無ければ `none`。 -/
+/-- Look up the effect of a declared action. `none` if there is no declaration. -/
 def Schema.effectOf (s : Schema) (action : EntityUID) : Option Nyxis.Db.Effect :=
   (s.actions.find? (fun d => d.action == action)).map (·.effect)
 
-/-- 認証された主体。JWT の検証に成功したときだけ `user`、それ以外(JWT 無し・検証失敗)は `anonymous`。 -/
+/-- The authenticated principal. `user` only when JWT verification succeeds; otherwise (no JWT, verification failure)
+    `anonymous`. -/
 inductive Principal where
   | anonymous
   | user (uid : EntityUID)
   deriving Repr, DecidableEq
 
-/-- 匿名の主体の Cedar エンティティ型 `Anonymous`。nyxis が予約し、テーブルには対応しない。 -/
+/-- The Cedar entity type `Anonymous` of the anonymous principal. Reserved by nyxis; it does not correspond to a table.
+    -/
 def anonymousType : EntityType := ⟨"Anonymous", []⟩
 
-/-- 匿名の主体のエンティティ UID `Anonymous::"anonymous"`。 -/
+/-- The entity UID `Anonymous::"anonymous"` of the anonymous principal. -/
 def anonymousUID : EntityUID := ⟨anonymousType, "anonymous"⟩
 
-/-- 主体の Cedar エンティティ UID。 -/
+/-- The principal's Cedar entity UID. -/
 def Principal.uid : Principal → EntityUID
   | .anonymous => anonymousUID
   | .user uid => uid
 
-/-- サービス主体の Cedar エンティティ型 `Service`。nyxis が予約し、テーブルには対応しない。正本が `entity Service;` と
-    宣言したときだけ、そのアクションの `appliesTo` の主体に書ける。 -/
+/-- The Cedar entity type `Service` of service principals. Reserved by nyxis; it does not correspond to a table. It can
+    be written as a principal in an action's `appliesTo` only when the sources declare `entity Service;`. -/
 def serviceType : EntityType := ⟨"Service", []⟩
 
-/-- サービス主体: JWT ではなくコア設定(`NYXIS_SERVICE_PRINCIPAL`)から決まる ID を持つ `Service` の実体。
-    定期処理(`Nyxis.Runtime.Job`)の主体としてだけ現れ、HTTP の要求の主体にはならない(接続層は JWT の主体を利用者の型
-    `userType ≠ serviceType` で作る)。行は無いので、ポリシーは `principal is Service` / `principal == Service::"…"` で判定する。 -/
+/-- A service principal: a `Service` entity whose ID is determined not by a JWT but by the core configuration
+    (`NYXIS_SERVICE_PRINCIPAL`). It appears only as the principal of a scheduled job (`Nyxis.Runtime.Job`) and never as
+    the principal of an HTTP request (the connection layer builds JWT principals with the user type
+    `userType ≠ serviceType`). It has no row, so policies decide on it with `principal is Service` /
+    `principal == Service::"…"`. -/
 def Principal.service (id : String) : Principal := .user ⟨serviceType, id⟩
 
-/-- サーバー生成値: nyxis が要求ごとに決める現在時刻と新しい一意 ID。ハンドラには値の提案のために
-    渡し、ポリシーには正本のアクションの `context` が宣言していれば `context.now` / `context.id` として渡す。
-    値を決めるのは接続コード(`Nyxis.Internal.Generated.fresh`: 実時計と乱数。A2/A4)で、純粋モデルは任意の値について
-    述べる(一意性や時計の正しさは定理の主張に含まない)。 -/
+/-- Server-generated values: the current time and a fresh unique ID that nyxis decides per request. They are passed to
+    handlers for proposing values, and to policies as `context.now` / `context.id` if the action's `context` in the
+    sources declares them. The values are decided by the connection code (`Nyxis.Internal.Generated.fresh`: the real
+    clock and randomness; A2/A4), and the pure model speaks about arbitrary values (uniqueness and clock correctness are
+    not part of the theorem's claims). -/
 structure Generated where
-  /-- 要求の処理を始めた現在時刻。 -/
+  /-- The current time when processing of the request started. -/
   now : Cedar.Spec.Ext.Datetime
-  /-- この要求のために新しく作った一意 ID(挿入の主キーに使える)。 -/
+  /-- A unique ID newly created for this request (usable as an insert's primary key). -/
   id : String
   deriving Repr, DecidableEq
 
-/-- 正本のアクションの `context` の型に属性 `attr` が宣言されているか(型環境のアクションの項目。
-    `Nyxis.CedarSchema.actionEntry` はサーバー生成値の属性を、正本に書かれたときだけ、その名前と型で型環境に置く)。 -/
+/-- Whether the attribute `attr` is declared in the type of the action's `context` in the sources (the action's entry in
+    the type environment; `Nyxis.CedarSchema.actionEntry` puts server-generated value attributes into the type
+    environment, with that name and type, only when they are written in the sources). -/
 def Schema.contextHas (s : Schema) (action : EntityUID) (attr : Attr) : Bool :=
   match s.types.acts.find? action with
   | some entry => (entry.context.find? attr).isSome
   | none => false
 
-/-- 判定の文脈の属性: 挿入・更新では提案される値 `values`。正本が宣言していればサーバー生成値 `now` / `id`。 -/
+/-- Attributes of the decision context: the proposed values `values` for inserts and updates; the server-generated
+    values `now` / `id` if the sources declare them. -/
 def contextAttrs (schema : Schema) (generated : Generated) (action : EntityUID) (op : Operation) :
     List (Attr × Value) :=
   (match op.proposed with
@@ -145,8 +168,9 @@ def contextAttrs (schema : Schema) (generated : Generated) (action : EntityUID) 
   (if schema.contextHas action "now" then [("now", Value.ext (.datetime generated.now))] else []) ++
   (if schema.contextHas action "id" then [("id", Value.prim (.string generated.id))] else [])
 
-/-- Cedar に渡すリクエスト。主体・アクション・対象と、文脈(挿入・更新で提案される値 `context.values`、
-    正本が宣言していればサーバー生成値 `context.now` / `context.id`)。 -/
+/-- The request passed to Cedar. The principal, action and resource, and the context (the proposed values
+    `context.values` for inserts and updates; the server-generated values `context.now` / `context.id` if the sources
+    declare them). -/
 def judgementRequest (schema : Schema) (principal : Principal) (generated : Generated) (action : EntityUID)
     (op : Operation) : Request :=
   { principal := principal.uid
@@ -154,9 +178,9 @@ def judgementRequest (schema : Schema) (principal : Principal) (generated : Gene
     resource := op.target
     context := Cedar.Data.Map.make (contextAttrs schema generated action op) }
 
-/-- Cedar に渡す実体(判定材料の全体)。DB の現在の行のうちスキーマに適合する行と、スキーマの全アクション
-    (`Nyxis.Materials.entities`)。挿入で現在の行が無ければ提案される行を対象の実体として加える
-    (主体自身を除く)。 -/
+/-- The entities passed to Cedar (the whole of the decision materials). The DB's current rows that conform to the
+    schema, and all actions of the schema (`Nyxis.Materials.entities`). For an insert with no current row, the proposed
+    row is added as the resource's entity (except for the principal itself). -/
 def judgementEntities (schema : Schema) (principal : Principal) (store : Store) (op : Operation) : Entities :=
   match op with
   | .insert t k row =>
@@ -165,24 +189,26 @@ def judgementEntities (schema : Schema) (principal : Principal) (store : Store) 
     else Nyxis.Materials.entities schema.types schema.parents schema.memberships store
   | _ => Nyxis.Materials.entities schema.types schema.parents schema.memberships store
 
-/-- 限定した判定材料: 判定材料の全体のうち、要求(主体・アクション・対象・文脈)に現れる実体から `level` 段で
-    到達できる実体だけ(cedar-lean の `Entities.sliceAtLevel`)。`level = 1` なら主体・対象(と文脈に現れる実体)
-    そのもの、`level = 2` ならそれらの属性が参照する実体まで。 -/
+/-- The restricted decision materials: of the whole of the decision materials, only the entities reachable in `level`
+    steps from the entities appearing in the request (principal, action, resource, context) (cedar-lean's
+    `Entities.sliceAtLevel`). `level = 1` means the principal and resource themselves (and entities appearing in the
+    context); `level = 2` extends to the entities their attributes refer to. -/
 def materials (schema : Schema) (principal : Principal) (generated : Generated) (store : Store)
     (action : EntityUID) (op : Operation) (level : Nat) : Entities :=
   (judgementEntities schema principal store op).sliceAtLevel
     (judgementRequest schema principal generated action op) level
 
-/-- Cedar の判定が allow か。主体・アクション・対象・文脈を nyxis が組み立てた `Request` に対して判定する。 -/
+/-- Whether Cedar's decision is allow. Decides on the `Request` whose principal, action, resource and context nyxis
+    assembled. -/
 def isPermitted (policies : Policies) (req : Request) (entities : Entities) : Bool :=
   match (isAuthorized req entities policies).decision with
   | .allow => true
   | .deny => false
 
-/-- 認可層の判定: 正本のポリシーが level 検証に通る最小の level を求め(無ければ拒否)、判定ごとの前提
-    (型環境の well-formedness・要求のインスタンス性)を検査し(通らなければ拒否)、限定した判定材料
-    `materials` について Cedar が permit と判定したとき真。`permits_authorized` により、これは判定材料の全体
-    での判定(`Authorized`)と一致する。 -/
+/-- The authorization layer's decision: find the minimum level at which the sources' policies pass level validation
+    (deny if none), check the per-decision premises (well-formedness of the type environment, the request being an
+    instance; deny if they fail), and true when Cedar decides permit on the restricted decision materials `materials`.
+    By `permits_authorized`, this agrees with the decision on the whole of the decision materials (`Authorized`). -/
 def permits (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (op : Operation) : Bool :=
   let req := judgementRequest schema principal generated action op
@@ -192,30 +218,31 @@ def permits (schema : Schema) (policies : Policies) (principal : Principal) (gen
     Nyxis.Materials.premisesHold schema.types req &&
       isPermitted policies req (materials schema principal generated store action op level)
 
-/-- 認可層が発行した 1 つの DB 操作と、その判定に使った材料。定理はこの記録について述べる。 -/
+/-- One DB operation issued by the authorization layer, and the materials used for its decision. The theorems speak
+    about this record. -/
 structure Issued where
-  /-- 判定に使った主体。そのリクエストの認証された主体。 -/
+  /-- The principal used for the decision. The request's authenticated principal. -/
   principal : Principal
-  /-- 判定に使ったサーバー生成値。そのリクエストのために nyxis が決めたもの。 -/
+  /-- The server-generated values used for the decision. Those nyxis decided for that request. -/
   generated : Generated
-  /-- 判定時(操作の適用前)の DB の状態。 -/
+  /-- The DB state at decision time (before applying the operation). -/
   store : Store
-  /-- ハンドラが呼んだアクション。 -/
+  /-- The action the handler called. -/
   action : EntityUID
-  /-- 発行した DB 操作。 -/
+  /-- The DB operation issued. -/
   op : Operation
 
-/-- 発行した操作が「認証された主体の正当な権限」の範囲内であること:
-    ハンドラが呼んだアクションにスキーマが効果を宣言しており、操作がその効果の範囲内にあり、
-    その時点の DB の状態から組み立てた判定材料について Cedar のポリシーが permit と判定した。 -/
+/-- The issued operation is within "the legitimate authority of the authenticated principal": the schema declares an
+    effect for the action the handler called, the operation is within that effect, and Cedar's policies decided permit
+    on the decision materials assembled from the DB state at that time. -/
 def Authorized (schema : Schema) (policies : Policies) (i : Issued) : Prop :=
   ∃ effect, schema.effectOf i.action = some effect
     ∧ i.op.withinEffect effect = true
     ∧ isPermitted policies (judgementRequest schema i.principal i.generated i.action i.op)
         (judgementEntities schema i.principal i.store i.op) = true
 
-/-- 判定材料の全体は、ある DB の状態から組み立てた `Nyxis.Materials.entities` である
-    (挿入では提案される行を置いた状態)。 -/
+/-- The whole of the decision materials is `Nyxis.Materials.entities` assembled from some DB state (for an insert, the
+    state with the proposed row placed). -/
 theorem judgementEntities_entities (schema : Schema) (principal : Principal) (store : Store)
     (op : Operation) :
     ∃ s, judgementEntities schema principal store op
@@ -224,9 +251,10 @@ theorem judgementEntities_entities (schema : Schema) (principal : Principal) (st
   all_goals try exact ⟨_, rfl⟩
   split <;> exact ⟨_, rfl⟩
 
-/-- 認可層の判定(限定した判定材料)が permit なら、判定材料の全体でも permit である
-    (cedar-lean の slicing 定理。前提は `permits` が検査した型環境・要求・level の検査の成功と、
-    `Nyxis.Materials.entities` の構成による実体の適合性)。 -/
+/-- If the authorization layer's decision (on the restricted decision materials) is permit, it is permit on the whole of
+    the decision materials as well (cedar-lean's slicing theorem; the premises are the success of the type-environment,
+    request and level checks that `permits` performed, and entity conformance by the construction of
+    `Nyxis.Materials.entities`). -/
 theorem permits_authorized (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) (store : Store) (action : EntityUID) (op : Operation)
     (h : permits schema policies principal generated store action op = true) :
@@ -247,28 +275,36 @@ theorem permits_authorized (schema : Schema) (policies : Policies) (principal : 
     rw [Nyxis.Materials.isAuthorized_slice _ _ _ _ _ _ _ hwf hreq hl] at hperm
     exact hperm
 
-/-! ## 宣言された外部効果
+/-! ## Declared external effects
 
-添付の署名付き URL の発行(効果 `upload T` / `download T`)、メール送信(`mail T(宛先列; 件名列, 本文列…)`)、
-外部 API 呼び出し(`call <送り先> <メソッド> <パス | url: 列> T(列, …) (sync … | async)`)。これらを宣言した
-アクションは、対象の行 `T::"key"` について permit されたときだけ、nyxis が決めた内容(`Payload`)の外部効果を記録する:
+Issuing signed URLs for attachments (effects `upload T` / `download T`), sending mail
+(`mail T(<recipient column>; <subject column>, <body column>…)`), and external API calls
+(`call <destination> <method> <path | url: column> T(column, …) (sync … | async)`). An action declaring one of these
+records an external effect with content decided by nyxis (`Payload`) only when permitted for the target row `T::"key"`:
 
-- `upload` / `download`: Supabase Storage のオブジェクト `T/<key>/<名>` への署名付き URL の発行。名はアップロードでは
-  要求のサーバー生成値の一意 ID、ダウンロードでは正本が `@attachment("列")` で名指しした列の現在の値。パスの要素として
-  使えない主キーや名(`Nyxis.Db.isObjectToken`)ではパスが決まらない。
-- `mail`: 宛先は行の宣言された列の値(Auth からは読まない)、件名は内容の列の先頭の値、本文は残りの列の値(段落)。
-- `call`: 送り先は正本の `@external` の宣言(名前・ベース URL・認証方式)で、URL はベース URL に正本の固定のパス
-  (`{key}` は主キー)を続けたもの、または対象行の String 列の値(`url: 列`。`https://` のみ。`Nyxis.Db.callUrl`)。
-  本文は対象行の宣言された列の名前と値に、`context.values` を取る呼び出しではその提案値(判定の文脈に置かれ、ポリシーが
-  絞れる)を続けたもの(`GET` / `DELETE` では本文なし)。認証ヘッダの値はコア設定で、記録には載らない。
+- `upload` / `download`: issuing a signed URL for the Supabase Storage object `T/<key>/<name>`. For uploads the name is
+  the unique ID of the request's server-generated values; for downloads it is the current value of the column the
+  sources name with `@attachment("column")`. With a primary key or name that cannot be used as a path segment
+  (`Nyxis.Db.isObjectToken`), no path is determined.
+- `mail`: the recipient is the value of the row's declared column (not read from Auth), the subject is the value of the
+  first content column, and the body is the values of the remaining columns (as paragraphs).
+- `call`: the destination is the sources' `@external` declaration (name, base URL, authentication scheme), and the URL
+  is the base URL followed by the sources' fixed path (`{key}` is the primary key), or the value of a String column of
+  the target row (`url: column`; `https://` only; `Nyxis.Db.callUrl`). The body is the names and values of the target
+  row's declared columns, followed, for calls that take `context.values`, by those proposed values (placed in the
+  decision context, so policies can restrict them) (no body for `GET` / `DELETE`). The value of the authentication
+  header is core configuration and is not recorded.
 
-対象の行が無い・列が無い・文字列でない値・URL として使えない値では内容が決まらず `Outcome.notFound`(記録しない)。
-発行・送信自体は DB を変えず、ハンドラに渡るのは署名付き URL の発行では接続層が Storage から得た URL(`Outcome.signed`)、
-`sync` の呼び出しでは接続層が送り先から得て宣言した型に復号した応答(`Outcome.called`)か 2xx 以外の状態コードと本文
-(`Outcome.calledError`)、メールと `async` の呼び出しでは `Outcome.ok none` だけ(行は渡らない)。ダウンロードの URL の
-パスは添付の列の値を含む: その流出は `download` の効果が宣言する範囲(permit された行の添付への到達)そのものである。 -/
+If the target row is missing, a column is missing, a value is not a string, or a value cannot be used as a URL, no
+content is determined and the result is `Outcome.notFound` (nothing is recorded). Issuing and sending themselves do not
+change the DB, and all that is passed to the handler is the URL the connection layer obtained from Storage
+(`Outcome.signed`) for issuing signed URLs, the response the connection layer obtained from the destination and decoded
+into the declared type (`Outcome.called`) or a non-2xx status code and body (`Outcome.calledError`) for `sync` calls,
+and only `Outcome.ok none` for mail and `async` calls (no row is passed). The path of a download URL includes the value
+of the attachment column: that disclosure is exactly the scope the `download` effect declares (access to the attachment
+of a permitted row). -/
 
-/-- 外部効果の種類。 -/
+/-- The kind of external effect. -/
 inductive ExternalKind where
   | upload
   | download
@@ -276,30 +312,33 @@ inductive ExternalKind where
   | call
   deriving Repr, DecidableEq
 
-/-- 外部効果の内容。nyxis が正本の宣言・対象の行の列・要求の生成値(・判定を通った提案値)から決め、ハンドラは提案できない。 -/
+/-- The content of an external effect. nyxis decides it from the sources' declarations, the target row's columns and the
+    request's generated values (and the proposed values that passed the decision); handlers cannot propose it. -/
 inductive Payload where
-  /-- 署名付きアップロード URL の発行。オブジェクトのパス `テーブル/<主キー>/<生成 ID>`。 -/
+  /-- Issuing a signed upload URL. The object path `<table>/<primary key>/<generated ID>`. -/
   | upload (object : String)
-  /-- 署名付きダウンロード URL の発行。オブジェクトのパス `テーブル/<主キー>/<添付の列の値>`。 -/
+  /-- Issuing a signed download URL. The object path `<table>/<primary key>/<value of the attachment column>`. -/
   | download (object : String)
-  /-- メール送信。宛先(行の宣言された列の値)、件名、本文。 -/
+  /-- Sending mail. Recipient (the value of the row's declared column), subject, body. -/
   | mail (recipient subject body : String)
-  /-- 外部 API 呼び出し。送り先の名前(認証ヘッダはコア設定から送信時に付ける)、メソッド、解決済みの URL、
-      本文(列の名前と値。`GET` / `DELETE` では `none`)、実行時機(`sync` なら応答の型と上限の上書き)。 -/
+  /-- An external API call. The destination's name (the authentication header is added at send time from core
+      configuration), method, resolved URL, body (column names and values; `none` for `GET` / `DELETE`), and timing (for
+      `sync`, the response type and limit overrides). -/
   | call (destination : String) (method : CallMethod) (url : String) (body : Option (List (Column × Cell)))
       (mode : CallMode)
   deriving Repr, DecidableEq
 
-/-- 内容の種類。 -/
+/-- The kind of content. -/
 def Payload.kind : Payload → ExternalKind
   | .upload _ => .upload
   | .download _ => .download
   | .mail .. => .mail
   | .call .. => .call
 
-/-- 外部効果の結果(接続層が外界から得た値。純粋モデルでは要求の結果の列 `Nyxis.Runtime.Externals` の要素で、任意):
-    結果なし(メール・`async` の呼び出し・オブジェクトが無い)、Storage が発行した署名付き URL、`sync` の呼び出しの
-    2xx の応答を宣言した型に復号した値、2xx 以外の応答の状態コードと本文。 -/
+/-- The result of an external effect (a value the connection layer obtained from the outside world; in the pure model,
+    an element of the request's result sequence `Nyxis.Runtime.Externals`, arbitrary): no result (mail, `async` calls, a
+    missing object), a signed URL issued by Storage, the 2xx response of a `sync` call decoded into the declared type,
+    or the status code and body of a non-2xx response. -/
 inductive ExternalResult where
   | none
   | signed (url : String)
@@ -307,9 +346,10 @@ inductive ExternalResult where
   | calledError (status : Nat) (body : String)
   deriving Repr, DecidableEq
 
-/-- 外部効果の結果としてハンドラに渡る値: 署名付き URL の発行では接続層が得た結果(`signed url` なら `signed url`、
-    それ以外ならオブジェクトが無い `notFound`)、メールと `async` の呼び出しでは `ok none`(結果の値は使わない)、`sync` の
-    呼び出しでは応答(`called` / `calledError`。応答が無ければ `notFound`)。 -/
+/-- The value passed to the handler as the result of an external effect: for issuing signed URLs, the result the
+    connection layer obtained (`signed url` if `signed url`, otherwise `notFound` for a missing object); for mail and
+    `async` calls, `ok none` (the result value is unused); for `sync` calls, the response (`called` / `calledError`;
+    `notFound` if there is no response). -/
 def Payload.outcome : Payload → ExternalResult → Outcome
   | .upload _, .signed url | .download _, .signed url => .signed url
   | .upload _, _ | .download _, _ => .notFound
@@ -319,21 +359,22 @@ def Payload.outcome : Payload → ExternalResult → Outcome
   | .call _ _ _ _ (.sync _ _), .calledError status body => .calledError status body
   | .call _ _ _ _ (.sync _ _), .none | .call _ _ _ _ (.sync _ _), .signed _ => .notFound
 
-/-- テーブルの添付の列(`@attachment("列")`)。宣言が無ければ `none`。 -/
+/-- The table's attachment column (`@attachment("column")`). `none` if not declared. -/
 def Schema.attachmentOf (s : Schema) (table : Table) : Option Column :=
   s.attachments.lookup table
 
-/-- 名前付きの送り先(`@external`)の宣言。無ければ `none`。 -/
+/-- The declaration of a named destination (`@external`). `none` if absent. -/
 def Schema.destinationOf (s : Schema) (name : String) : Option Nyxis.Db.Destination :=
   s.destinations.lookup name
 
-/-- 行の String 列の値。列が無い・文字列でなければ `none`。 -/
+/-- The value of a String column of a row. `none` if the column is missing or not a string. -/
 def stringColumn (row : Row) (column : Column) : Option String :=
   match row.find? column with
   | some (.prim (.string s)) => some s
   | _ => none
 
-/-- メールの内容: 宛先の列の値、内容の列の先頭の値が件名、残りの値が本文(空行で区切る)。 -/
+/-- Mail content: the recipient column's value; the first content column's value is the subject, and the remaining
+    values are the body (separated by blank lines). -/
 def mailOf (row : Row) (recipient : Column) (content : List Column) : Option Payload := do
   let to ← stringColumn row recipient
   let parts ← content.mapM (stringColumn row)
@@ -341,19 +382,22 @@ def mailOf (row : Row) (recipient : Column) (content : List Column) : Option Pay
   | [] => none
   | subject :: body => some (.mail to subject ("\n\n".intercalate body))
 
-/-- 呼び出しの本文: 対象の行の宣言された列の名前と値(列が無ければ決まらない)に、提案値の列を続けたもの。 -/
+/-- The body of a call: the names and values of the target row's declared columns (undetermined if a column is missing),
+    followed by the proposed-value columns. -/
 def callBody (row : Row) (columns : List Column) (values : Row) : Option (List (Column × Cell)) := do
   let fields ← columns.mapM fun c => (row.find? c).map (c, ·)
   some (fields ++ values.toList)
 
-/-- メソッドに応じた本文: `GET` / `DELETE` では本文なし(`some none`)、それ以外では `callBody`(決まらなければ `none`)。 -/
+/-- The body by method: no body for `GET` / `DELETE` (`some none`); otherwise `callBody` (`none` if undetermined). -/
 def callBodyOf (method : CallMethod) (row : Row) (columns : List Column) (values : Row) :
     Option (Option (List (Column × Cell))) :=
   if method.hasBody then (callBody row columns values).map some else some none
 
-/-- 呼び出しの内容: 正本の送り先の宣言を引き、URL(`Nyxis.Db.callUrl`: ベース URL と固定のパス、または行の
-    URL の列)と本文(行の列と、`proposes` なら提案値)を決める。送り先の宣言が無い・URL が決まらない・列が無ければ
-    決まらない。認証ヘッダの値は含まない(送信時にコア設定から付ける)。 -/
+/-- The content of a call: look up the sources' destination declaration and determine the URL (`Nyxis.Db.callUrl`: the
+    base URL and the fixed path, or the row's URL column) and the body (the row's columns and, if `proposes`, the
+    proposed values). Undetermined if there is no destination declaration, the URL cannot be determined, or a column is
+    missing. The value of the authentication header is not included (it is added from core configuration at send time).
+    -/
 def callOf (schema : Schema) (row : Row) (key : Key) (values : Row) (destination : String) (method : CallMethod)
     (target : CallTarget) (columns : List Column) (proposes : Bool) (mode : CallMode) : Option Payload := do
   let decl ← schema.destinationOf destination
@@ -361,9 +405,11 @@ def callOf (schema : Schema) (row : Row) (key : Key) (values : Row) (destination
   let body ← callBodyOf method row columns (if proposes then values else Cedar.Data.Map.empty)
   some (.call destination method url body mode)
 
-/-- 外部効果の内容: 対象の行があり、効果の種類に応じて正本の宣言・行の列・生成値(・判定を通った提案値 `values`)から
-    決まるときだけ。外部効果でない効果では `none`。アップロードのパスの名は生成 ID、ダウンロードの名は添付の列の値
-    (`objectPath`: 主キーと名はパスの要素として使えること)。 -/
+/-- The content of an external effect: only when the target row exists and the content is determined, according to the
+    kind of effect, from the sources' declarations, the row's columns and the generated values (and the proposed values
+    `values` that passed the decision). `none` for effects that are not external effects. The name in an upload path is
+    the generated ID, and the name for a download is the attachment column's value (`objectPath`: the primary key and
+    name must be usable as path segments). -/
 def payloadOf (schema : Schema) (generated : Generated) (store : Store) (effect : Nyxis.Db.Effect) (key : Key)
     (values : Row) : Option Payload := do
   let row ← store.find? effect.table key
@@ -378,33 +424,38 @@ def payloadOf (schema : Schema) (generated : Generated) (store : Store) (effect 
     callOf schema row key values destination method target columns proposes mode
   | .read | .list | .insert | .update _ | .delete => none
 
-/-- 認可層が発行した 1 つの外部効果(添付の署名付き URL の発行、メール送信、外部 API 呼び出し)の記録と、その判定に
-    使った材料。主定理の (6)(8) はこの記録について述べる。 -/
+/-- The record of one external effect issued by the authorization layer (issuing a signed URL for an attachment, sending
+    mail, an external API call), and the materials used for its decision. (6) and (8) of the main theorem speak about
+    this record. -/
 structure External where
-  /-- 判定に使った主体。そのリクエストの認証された主体(定期処理ではサービス主体)。 -/
+  /-- The principal used for the decision. The request's authenticated principal (the service principal for scheduled
+      jobs). -/
   principal : Principal
-  /-- 判定に使ったサーバー生成値。そのリクエストのために nyxis が決めたもの。 -/
+  /-- The server-generated values used for the decision. Those nyxis decided for that request. -/
   generated : Generated
-  /-- 判定時の DB の状態(外部効果は状態を変えない)。 -/
+  /-- The DB state at decision time (external effects do not change the state). -/
   store : Store
-  /-- ハンドラが呼んだアクション。 -/
+  /-- The action the handler called. -/
   action : EntityUID
-  /-- 対象の行のテーブルと主キー。 -/
+  /-- The table and primary key of the target row. -/
   table : Table
   key : Key
-  /-- ハンドラが提案した値(`context.values` を取る呼び出しでだけ判定の文脈と本文に使う。他の効果では使わない)。 -/
+  /-- The values the handler proposed (used for the decision context and body only in calls that take `context.values`;
+      unused by other effects). -/
   values : Row
-  /-- nyxis が決めた内容(オブジェクトのパス、宛先と件名・本文、送り先・メソッド・URL・本文)。 -/
+  /-- The content nyxis decided (the object path; the recipient, subject and body; the destination, method, URL and
+      body). -/
   payload : Payload
 
-/-- 記録の種類。 -/
+/-- The kind of record. -/
 def External.kind (e : External) : ExternalKind := e.payload.kind
 
-/-- 外部効果の記録が「認証された主体の正当な権限」の範囲内であること: ハンドラが呼んだアクションにスキーマが効果を
-    宣言しており(その対象が記録のテーブル)、その効果の判定材料(`Operation.ofEffect`: 対象の行の読み取りと同じ主体・
-    対象・文脈。`context.values` を取る呼び出しでは提案値を文脈に置く)について Cedar のポリシーが permit と判定し、
-    内容はその効果の宣言・その時点の状態・生成値・提案値から nyxis が決めたもの(`payloadOf`。外部効果の宣言についてだけ
-    決まる)である。 -/
+/-- The external-effect record is within "the legitimate authority of the authenticated principal": the schema declares
+    an effect for the action the handler called (whose target is the record's table), Cedar's policies decided permit on
+    that effect's decision materials (`Operation.ofEffect`: the same principal, resource and context as a read of the
+    target row; for calls that take `context.values`, the proposed values are put in the context), and the content is
+    what nyxis decided from that effect's declaration, the state at that time, the generated values and the proposed
+    values (`payloadOf`; determined only for external-effect declarations). -/
 def ExternalAuthorized (schema : Schema) (policies : Policies) (e : External) : Prop :=
   ∃ effect, schema.effectOf e.action = some effect ∧ effect.table = e.table
     ∧ isPermitted policies
@@ -412,12 +463,15 @@ def ExternalAuthorized (schema : Schema) (policies : Policies) (e : External) : 
         (judgementEntities schema e.principal e.store (Operation.ofEffect effect e.key e.values)) = true
     ∧ payloadOf schema e.generated e.store effect e.key e.values = some e.payload
 
-/-- 呼び出しの記録の内容の由来(主定理の (8)): 記録の内容が呼び出し `call destination method url body mode` なら、
-    ハンドラが呼んだアクションにスキーマがその送り先・メソッド・実行時機の `call` の効果を(送り先の決め方 `target`・
-    本文の列 `columns`・提案値を取るか `proposes` とともに)対象テーブルについて宣言しており、送り先 `destination` は
-    スキーマに宣言された送り先 `decl` で、対象の行 `row` が判定時の状態にあり、URL は送り先の宣言と固定のパス(または行の
-    URL の列)と主キーから(`Nyxis.Db.callUrl`)、本文は行の宣言された列と(`proposes` なら)判定を通った提案値から
-    (`callBodyOf`)nyxis が決めたものである。ハンドラの値が入る余地は提案値だけで、それはポリシーの判定を通っている。 -/
+/-- The provenance of a call record's content ((8) of the main theorem): if the record's content is the call
+    `call destination method url body mode`, then the schema declares, for the action the handler called, a `call`
+    effect with that destination, method and timing (together with how the destination is determined `target`, the body
+    columns `columns` and whether it takes proposed values `proposes`) on the target table; the destination
+    `destination` is the destination `decl` declared in the schema; the target row `row` exists in the state at decision
+    time; and the URL is what nyxis decided from the destination declaration, the fixed path (or the row's URL column)
+    and the primary key (`Nyxis.Db.callUrl`), and the body from the row's declared columns and (if `proposes`) the
+    proposed values that passed the decision (`callBodyOf`). The only room for the handler's values is the proposed
+    values, and they have passed the policy decision. -/
 def CallRecorded (schema : Schema) (e : External) : Prop :=
   ∀ destination method url body mode, e.payload = .call destination method url body mode →
     ∃ target columns proposes decl row,
@@ -427,7 +481,7 @@ def CallRecorded (schema : Schema) (e : External) : Prop :=
       callUrl decl target e.key row = some url ∧
       callBodyOf method row columns (if proposes then e.values else Cedar.Data.Map.empty) = some body
 
-/-- メールの内容が決まれば、それはメールの内容である。 -/
+/-- If mail content is determined, it is mail content. -/
 theorem mailOf_kind (row : Row) (recipient : Column) (content : List Column) (p : Payload)
     (h : mailOf row recipient content = some p) : p.kind = .mail := by
   unfold mailOf at h
@@ -437,7 +491,8 @@ theorem mailOf_kind (row : Row) (recipient : Column) (content : List Column) (p 
   · cases h
   · cases h; rfl
 
-/-- 認可済みの記録の呼び出しの内容は、正本の宣言と対象の行と提案値から決まる(`ExternalAuthorized` の `payloadOf` の展開)。 -/
+/-- The content of an authorized call record is determined by the sources' declarations, the target row and the proposed
+    values (unfolding `payloadOf` in `ExternalAuthorized`). -/
 theorem call_recorded (schema : Schema) (policies : Policies) (e : External)
     (h : ExternalAuthorized schema policies e) : CallRecorded schema e := by
   intro destination method url body mode hpay
@@ -474,36 +529,38 @@ theorem call_recorded (schema : Schema) (policies : Policies) (e : External)
   | update _ => simp at hp
   | delete => simp at hp
 
-/-- 1 回のアクション呼び出しの処理結果。 -/
+/-- The result of processing one action call. -/
 structure StepResult where
-  /-- 処理後の DB の状態。 -/
+  /-- The DB state after processing. -/
   store : Store
-  /-- 発行した DB 操作の記録(発行順)。発行しなければ空。行の操作では 1 つ、一覧では permit された行ごとの
-      読み取り。 -/
+  /-- The records of the DB operations issued (in issue order). Empty if none are issued. One for a row operation; for a
+      list, a read per permitted row. -/
   issued : List Issued
-  /-- 発行した外部効果の記録。外部効果の宣言で permit され内容が決まったときだけ 1 つ、それ以外は空。 -/
+  /-- The records of the external effects issued. Exactly one when an external-effect declaration is permitted and its
+      content is determined; otherwise empty. -/
   external : List External
-  /-- ハンドラに返す結果。 -/
+  /-- The result returned to the handler. -/
   outcome : Outcome
 
--- テーブル `table` の現在の行のうち絞り込みに合う行(`Nyxis.Materials.matchingRows`)。一覧の候補と、一意性・参照整合
--- の判定、所属行がこの経路で行を見る(実 DB では WHERE 句つきの SELECT)。
+-- The current rows of table `table` that match the filters (`Nyxis.Materials.matchingRows`). List candidates,
+-- uniqueness and referential-integrity checks, and membership rows see rows through this path (on a real DB, a SELECT
+-- with a WHERE clause).
 export Nyxis.Materials (matchingRows)
 
-/-- 一覧の候補: テーブル `table` の現在の行のうち問い合わせの絞り込みに合う行で、その行の読み取り
-    (`Operation.read table key`)と同じ判定材料(主体・アクション・対象 = その行。提案される値は無い)で Cedar が
-    permit と判定したもの。一覧の件数はこの長さ、返す行はこれを並べ替えてページを切ったもの。 -/
+/-- List candidates: the current rows of table `table` that match the query's filters and that Cedar decided permit with
+    the same decision materials as a read of that row (`Operation.read table key`) (principal, action, resource = that
+    row; no proposed values). The list count is this length, and the rows returned are these sorted and paged. -/
 def permittedRows (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (table : Table) (query : ListQuery) : List (Key × Row) :=
   (matchingRows store table query.filters).filter fun kv =>
     permits schema policies principal generated store action (Operation.read table kv.1)
 
-/-- 一覧が返す行: permit された候補(`permittedRows`)を並べ替えてページを切ったもの(`ListQuery.select`)。 -/
+/-- The rows a list returns: the permitted candidates (`permittedRows`) sorted and paged (`ListQuery.select`). -/
 def listRows (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (table : Table) (query : ListQuery) : List (Key × Row) :=
   query.select (permittedRows schema policies principal generated store action table query)
 
-/-- 候補の各行は判定材料の全体でも permit されている(`permits_authorized`)。 -/
+/-- Each candidate row is permitted on the whole of the decision materials as well (`permits_authorized`). -/
 theorem permittedRows_authorized (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) (store : Store) (action : EntityUID) (table : Table) (query : ListQuery)
     (kv : Key × Row) (h : kv ∈ permittedRows schema policies principal generated store action table query) :
@@ -511,42 +568,51 @@ theorem permittedRows_authorized (schema : Schema) (policies : Policies) (princi
       (judgementEntities schema principal store (.read table kv.1)) = true :=
   permits_authorized _ _ _ _ _ _ _ (List.mem_filter.mp h).2
 
-/-! ## 一意性と参照整合
+/-! ## Uniqueness and referential integrity
 
-正本が宣言した制約(`Schema.constraints`)の判定。permit された操作について、DB 操作を発行する前に行う
-(permit されない操作は判定せず拒否するので、permit されない主体には制約の判定の結果が見えない。permit された主体には
-競合(`conflict`)が、同じ値の行や参照する行の存在を伝えうる — 主キーの競合(409)と同じ種類で、定理の (3) の範囲外)。
+Checking the constraints declared by the sources (`Schema.constraints`). Performed for permitted operations, before
+issuing DB operations (operations that are not permitted are denied without checking, so a principal that is not
+permitted cannot see the result of constraint checks. To a permitted principal, a conflict (`conflict`) can reveal the
+existence of a row with the same values or of a referencing row — the same kind as a primary-key conflict (409), and
+outside the scope of (3) of the theorem).
 
-- 一意性(`Unique`): 置く行(挿入では提案される行、更新では現在の行に変更を重ねた行)と組の列の値が同じ、別の主キーの
-  行があれば競合(`Outcome.conflict`)。置く行に組の列が 1 つでも無ければ比べない。
-- 参照整合(`Reference`)の挿入・更新: 置く行の参照の列の値が宣言された型の実体でないか、その行が無ければ競合。
-- 参照される行の削除: 削除する行(と連鎖で消える各行)を参照する行が `restrict` の列にあれば競合。`cascade` の列に
-  あれば、その行も消える(`cascadePlan`: 深い行から順)。消える各行は、宣言されたアクション(そのテーブルの削除効果を
-  持つこと)で、その時点の状態について Cedar の判定を行い(`cascadeRun`)、1 行でも permit されなければ要求全体を
-  拒否して何も発行しない。発行する記録の `action` はその宣言されたアクションになる(主定理の (5))。 -/
+- Uniqueness (`Unique`): a conflict (`Outcome.conflict`) if there is a row with a different primary key whose values in
+  the group's columns equal those of the row being placed (for an insert, the proposed row; for an update, the current
+  row with the changes applied). If the row being placed lacks even one of the group's columns, no comparison is made.
+- Referential integrity (`Reference`) on insert and update: a conflict if the value of a reference column of the row
+  being placed is not an entity of the declared type, or that row does not exist.
+- Deleting a referenced row: a conflict if a row referencing the row being deleted (or any row removed by the cascade)
+  is in a `restrict` column. If it is in a `cascade` column, that row is removed too (`cascadePlan`: deepest rows
+  first). Each removed row is decided by Cedar, with the declared action (which must have the delete effect for that
+  table), on the state at that point (`cascadeRun`); if even one row is not permitted, the whole request is denied and
+  nothing is issued. The `action` of the issued records is that declared action ((5) of the main theorem). -/
 
-/-- 操作が置く行: 挿入では提案される行、更新では現在の行に変更を重ねた行(行が無ければ無し)、それ以外は無し。 -/
+/-- The row an operation places: the proposed row for an insert, the current row with the changes applied for an update
+    (none if there is no row), and none otherwise. -/
 def _root_.Nyxis.Db.Operation.newRow (store : Store) : Operation → Option (Table × Key × Row)
   | .insert t k row => some (t, k, row)
   | .update t k changes => (store.find? t k).map fun row => (t, k, row.patch changes)
   | .read _ _ | .delete _ _ => none
 
-/-- 一意性の判定で見る行の絞り込み: 置く行のテーブルの一意性の組ごとに、組の列の値との等値。 -/
+/-- The row filters used by the uniqueness check: for each uniqueness group of the placed row's table, equality with the
+    values of the group's columns. -/
 def uniqueFilters (schema : Schema) (store : Store) (op : Operation) : List (Table × List Filter) :=
   match op.newRow store with
   | none => []
   | some (t, _, new) =>
     (schema.constraints.uniques.filter (·.table == t)).filterMap fun u => (u.filtersOf new).map (t, ·)
 
-/-- 一意性の違反: 置く行と組の列の値が同じ、別の主キーの行がある。 -/
+/-- A uniqueness violation: there is a row with a different primary key whose values in the group's columns equal those
+    of the row being placed. -/
 def uniqueViolation (schema : Schema) (store : Store) (op : Operation) : Bool :=
   match op.newRow store with
   | none => false
   | some (t, k, _) => (uniqueFilters schema store op).any fun tf =>
       (matchingRows store t tf.2).any fun kv => kv.1 != k
 
-/-- 置く行が参照する実体: 参照整合を宣言した列ごとに、列が無ければ無し(参照しない)、値が宣言された型の実体なら
-    `some uid`、それ以外(型違い・実体でない値)は `none`(違反)。 -/
+/-- The entities the placed row refers to: for each column with a referential-integrity declaration, nothing if the
+    column is absent (no reference), `some uid` if the value is an entity of the declared type, and `none` (a violation)
+    otherwise (wrong type, a value that is not an entity). -/
 def referencedUIDs (schema : Schema) (table : Table) (new : Row) : List (Option EntityUID) :=
   (schema.constraints.references.filter (·.table == table)).filterMap fun r =>
     match new.find? r.column with
@@ -554,7 +620,8 @@ def referencedUIDs (schema : Schema) (table : Table) (new : Row) : List (Option 
     | some (.prim (.entityUID uid)) => some (if uid.ty == r.target then some uid else none)
     | some _ => some none
 
-/-- 参照整合の違反(挿入・更新): 参照する実体が宣言された型の実体でないか、その行が無い。 -/
+/-- A referential-integrity violation (insert/update): a referenced entity is not an entity of the declared type, or its
+    row does not exist. -/
 def referenceViolation (schema : Schema) (store : Store) (op : Operation) : Bool :=
   match op.newRow store with
   | none => false
@@ -562,13 +629,14 @@ def referenceViolation (schema : Schema) (store : Store) (op : Operation) : Bool
     | none => true
     | some uid => (Cedar.Data.Map.find? store uid).isNone
 
-/-- 実体 `uid` を宣言 `r` の列で参照する行。 -/
+/-- The rows that refer to the entity `uid` through the column of declaration `r`. -/
 def referencing (store : Store) (r : Reference) (uid : EntityUID) : List (Key × Row) :=
   matchingRows store r.table (Reference.filterOf r.column uid)
 
-/-- 削除の連鎖の計画: テーブル `table` の主キー `key` の行を削除するとき、`cascade` の宣言で消える行(その行を参照する
-    行と、さらにそれを参照する行 … 深い行が先)と、各行を判定するアクション。`fuel` は辿る段数の上限
-    (宣言の数 + 1 で、宣言に循環が無ければ閉じる。正本の検査が循環を拒む)。 -/
+/-- The plan of a delete cascade: when deleting the row with primary key `key` of table `table`, the rows removed by
+    `cascade` declarations (rows referring to that row, rows referring to those, … deepest first) and the action that
+    decides each row. `fuel` is the limit on the number of steps followed (the number of declarations + 1, which
+    terminates if the declarations have no cycle; the check of the sources rejects cycles). -/
 def cascadePlan (schema : Schema) (store : Store) : Nat → Table → Key → List (EntityUID × Table × Key)
   | 0, _, _ => []
   | fuel + 1, table, key =>
@@ -579,50 +647,54 @@ def cascadePlan (schema : Schema) (store : Store) : Nat → Table → Key → Li
         (referencing store r ⟨table, key⟩).flatMap fun kv =>
           cascadePlan schema store fuel r.table kv.1 ++ [(action, r.table, kv.1)]
 
-/-- 同じ行(テーブルと主キー)は最初の 1 回だけ残す(2 つの参照の経路で同じ行に届いても 1 回だけ消す)。 -/
+/-- Keep only the first occurrence of the same row (table and primary key) (even if two reference paths reach the same
+    row, it is removed only once). -/
 def dedupePlan (plan : List (EntityUID × Table × Key)) : List (EntityUID × Table × Key) :=
   plan.foldl (fun acc e => if acc.any (fun d => d.2.1 == e.2.1 && d.2.2 == e.2.2) then acc else acc ++ [e]) []
 
-/-- 連鎖の段数の上限。 -/
+/-- The limit on the number of cascade steps. -/
 def cascadeFuel (schema : Schema) : Nat := schema.constraints.references.length + 1
 
-/-- 削除の操作の連鎖の計画(重複を含む)。削除以外の操作では空。 -/
+/-- The cascade plan of a delete operation (may contain duplicates). Empty for operations other than delete. -/
 def cascadePlanOf (schema : Schema) (store : Store) : Operation → List (EntityUID × Table × Key)
   | .delete t k => cascadePlan schema store (cascadeFuel schema) t k
   | _ => []
 
-/-- 削除の操作で消える行の計画(重複を除く)。発行はこの順(深い行が先)。 -/
+/-- The plan of rows removed by a delete operation (without duplicates). Issued in this order (deepest rows first). -/
 def deletePlan (schema : Schema) (store : Store) (op : Operation) : List (EntityUID × Table × Key) :=
   dedupePlan (cascadePlanOf schema store op)
 
-/-- 削除の操作で消える行(削除する行と、連鎖の計画の各行。重複を含んでよい)。削除以外の操作では空。 -/
+/-- The rows removed by a delete operation (the row being deleted and each row of the cascade plan; duplicates allowed).
+    Empty for operations other than delete. -/
 def deletedRows (schema : Schema) (store : Store) : Operation → List (Table × Key)
   | .delete t k => (t, k) :: (cascadePlan schema store (cascadeFuel schema) t k).map (·.2)
   | _ => []
 
-/-- 削除の判定で見る行の絞り込み: 消える各行について、その行のテーブルを参照する宣言ごとに、その行を参照する行。 -/
+/-- The row filters used by the delete check: for each removed row, and each declaration referring to that row's table,
+    the rows that refer to that row. -/
 def deleteFilters (schema : Schema) (store : Store) (op : Operation) : List (Table × List Filter) :=
   (deletedRows schema store op).flatMap fun (t, k) =>
     (schema.constraints.references.filter (·.target == t)).map fun r =>
       (r.table, Reference.filterOf r.column ⟨t, k⟩)
 
-/-- 削除の拒否(`restrict`): 消える行を参照する行が `restrict` の列にあれば競合。 -/
+/-- Delete rejection (`restrict`): a conflict if a row referring to a removed row is in a `restrict` column. -/
 def restrictViolation (schema : Schema) (store : Store) (op : Operation) : Bool :=
   (deletedRows schema store op).any fun (t, k) =>
     (schema.constraints.references.filter fun r => r.target == t && r.onDelete == .restrict).any fun r =>
       !(referencing store r ⟨t, k⟩).isEmpty
 
-/-- 制約の違反(競合)。 -/
+/-- A constraint violation (conflict). -/
 def integrityViolation (schema : Schema) (store : Store) (op : Operation) : Bool :=
   uniqueViolation schema store op || referenceViolation schema store op || restrictViolation schema store op
 
-/-- 制約の判定が見る行の絞り込み(一意性と削除)。接続層はこれらの行を取得し、取得の整合(絞り込みに合う行の全部)は
-    `step_eq_of_covers` の前提になる。 -/
+/-- The row filters the constraint checks look at (uniqueness and delete). The connection layer fetches these rows, and
+    the consistency of the fetch (all rows matching the filters) is a premise of `step_eq_of_covers`. -/
 def integrityFilters (schema : Schema) (store : Store) (op : Operation) : List (Table × List Filter) :=
   uniqueFilters schema store op ++ deleteFilters schema store op
 
-/-- 連鎖の削除を順に判定して適用する: 各行について、宣言されたアクションがそのテーブルの削除効果を持ち、その時点の
-    状態について permit されれば削除を発行して次へ。1 行でも通らなければ `none`(要求全体を拒否)。 -/
+/-- Decide and apply the cascade deletes in order: for each row, if the declared action has the delete effect for that
+    table and is permitted on the state at that point, issue the delete and continue. If even one row fails, `none` (the
+    whole request is denied). -/
 def cascadeRun (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated) :
     Store → List (EntityUID × Table × Key) → Option (Store × List Issued)
   | store, [] => some (store, [])
@@ -634,8 +706,9 @@ def cascadeRun (schema : Schema) (policies : Policies) (principal : Principal) (
       | none => none
     else none
 
-/-- 行の操作(一覧・外部効果以外)の処理: 操作が効果の範囲内にあり、Cedar が permit のときだけ、制約の判定(違反は競合)と
-    削除の連鎖(各行の判定。1 行でも通らなければ拒否して何も発行しない)を経て DB 操作を発行する。 -/
+/-- Processing of a row operation (other than lists and external effects): only when the operation is within the effect
+    and Cedar decides permit, issue the DB operation after the constraint check (a violation is a conflict) and the
+    delete cascade (a decision for each row; if even one row fails, deny and issue nothing). -/
 def stepOp (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) : StepResult :=
   if op.withinEffect effect then
@@ -645,7 +718,8 @@ def stepOp (schema : Schema) (policies : Policies) (principal : Principal) (gene
         match cascadeRun schema policies principal generated store (deletePlan schema store op) with
         | none => ⟨store, [], [], .denied⟩
         | some (s, issued) =>
-          -- 連鎖で行が消えた後の状態についてもう一度判定する(発行の記録の `store` はその状態。連鎖が無ければ同じ判定)。
+          -- Decide again on the state after the cascade has removed rows (the `store` of the issued record is that
+          -- state; without a cascade, the decision is the same).
           if permits schema policies principal generated s action op then
             let applied := s.apply op
             ⟨applied.1, issued ++ [⟨principal, generated, s, action, op⟩], [], applied.2⟩
@@ -653,12 +727,14 @@ def stepOp (schema : Schema) (policies : Policies) (principal : Principal) (gene
     else ⟨store, [], [], .denied⟩
   else ⟨store, [], [], .denied⟩
 
-/-- 外部効果(添付の署名付き URL の発行。メール送信。外部 API 呼び出し)の処理: その効果の判定材料
-    (`Operation.ofEffect`: 対象の行の読み取りと同じ主体・対象・文脈。`context.values` を取る呼び出しでは提案値 `values` を
-    文脈に置く)で Cedar が permit のときだけ、nyxis が決めた内容(`payloadOf`。決まらなければ `notFound`)の発行・送信を
-    記録し、結果(`Payload.outcome`: 署名付き URL の発行では接続層が Storage から得た `external`、`sync` の呼び出しでは
-    接続層が送り先から得た応答、メールと `async` の呼び出しでは `ok none`)をハンドラに渡す。DB 操作は発行せず状態も
-    変えない。permit されなければ `denied` で何も記録しない。 -/
+/-- Processing of an external effect (issuing a signed URL for an attachment; sending mail; an external API call): only
+    when Cedar decides permit on that effect's decision materials (`Operation.ofEffect`: the same principal, resource
+    and context as a read of the target row; for calls that take `context.values`, the proposed values `values` are put
+    in the context), record the issuing/sending of the content nyxis decided (`payloadOf`; `notFound` if undetermined),
+    and pass the result (`Payload.outcome`: for issuing signed URLs, the `external` the connection layer obtained from
+    Storage; for `sync` calls, the response the connection layer obtained from the destination; for mail and `async`
+    calls, `ok none`) to the handler. No DB operation is issued and the state does not change. If not permitted,
+    `denied` and nothing is recorded. -/
 def externalStep (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
     (external : ExternalResult) : StepResult :=
@@ -669,13 +745,13 @@ def externalStep (schema : Schema) (policies : Policies) (principal : Principal)
       ⟨store, [], [⟨principal, generated, store, action, effect.table, key, values, payload⟩], payload.outcome external⟩
   else ⟨store, [], [], .denied⟩
 
-/-- 1 回のアクション呼び出しを処理する。スキーマで効果を引き、
-    一覧の効果なら絞り込みに合う各行について判定し、permit された行(件数)を並べ替えてページを切って返し、
-    返す行の読み取りを発行する。
-    外部効果(`upload` / `download` / `mail` / `call`)なら対象の行について判定し、permit されたときだけ発行・送信を
-    記録して、結果(接続層が外界から得た `external`)をハンドラに渡す(`externalStep`)。
-    それ以外の効果なら操作を組み立て、`stepOp` で処理する(効果の範囲内で permit のときだけ、制約の判定と
-    削除の連鎖を経て発行)。`external` は外部効果の結果で、他の効果では使われない。 -/
+/-- Process one action call. Look up the effect in the schema; for a list effect, decide on each row matching the
+    filters, return the permitted rows (and count) sorted and paged, and issue reads of the returned rows. For an
+    external effect (`upload` / `download` / `mail` / `call`), decide on the target row, and only when permitted record
+    the issuing/sending and pass the result (the `external` the connection layer obtained from the outside world) to the
+    handler (`externalStep`). For any other effect, build the operation and process it with `stepOp` (issued only when
+    within the effect and permitted, after the constraint check and the delete cascade). `external` is the result of the
+    external effect and is unused by other effects. -/
 def step (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery)
     (external : ExternalResult := .none) : StepResult :=
@@ -693,8 +769,9 @@ def step (schema : Schema) (policies : Policies) (principal : Principal) (genera
     | .read | .insert | .update _ | .delete =>
       stepOp schema policies principal generated store action effect (Operation.ofEffect effect key values)
 
-/-- 記録と DB の状態の遷移が整合していること: 状態 `s` から始めて、各記録の `store` がその時点の状態であり、
-    記録の操作を順に適用した結果が状態 `s'` である。すなわち DB の状態は記録された操作だけで変わる。 -/
+/-- The records are coherent with the DB state transitions: starting from state `s`, each record's `store` is the state
+    at that point, and applying the records' operations in order yields state `s'`. That is, the DB state changes only
+    through the recorded operations. -/
 def Coherent : Store → List Issued → Store → Prop
   | s, [], s' => s' = s
   | s, i :: rest, s' => i.store = s ∧ Coherent (s.apply i.op).1 rest s'
@@ -710,7 +787,7 @@ theorem Coherent.append {s s' s'' : Store} {l₁ l₂ : List Issued}
     simp only [Coherent, List.cons_append] at h₁ ⊢
     exact ⟨h₁.1, ih h₁.2⟩
 
-/-- 同じ状態からの読み取りの記録の列は、状態を変えずに整合している。 -/
+/-- A sequence of read records from the same state is coherent without changing the state. -/
 theorem Coherent.reads (store : Store) (principal : Principal) (generated : Generated) (action : EntityUID)
     (table : Table) (rows : List (Key × Row)) :
     Coherent store (rows.map fun kv => (⟨principal, generated, store, action, .read table kv.1⟩ : Issued)) store := by
@@ -720,7 +797,8 @@ theorem Coherent.reads (store : Store) (principal : Principal) (generated : Gene
     simp only [List.map_cons, Coherent, Store.apply_read_fst, true_and]
     exact ih
 
-/-- 連鎖の記録は状態の遷移と整合している(各記録の `store` はその削除の直前の状態)。 -/
+/-- The cascade records are coherent with the state transitions (each record's `store` is the state just before that
+    delete). -/
 theorem cascadeRun_coherent (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) :
     ∀ (store : Store) (plan : List (EntityUID × Table × Key)) (s : Store) (issued : List Issued),
@@ -740,8 +818,9 @@ theorem cascadeRun_coherent (schema : Schema) (policies : Policies) (principal :
       · cases h
     · cases h
 
-/-- 連鎖の記録はすべて、そのリクエストの主体とサーバー生成値について、計画に載った行の削除を、その行を判定する
-    宣言されたアクション(そのテーブルの削除効果を持つ)について正当な権限の範囲内で発行したものである。 -/
+/-- Every cascade record was issued, for the request's principal and server-generated values, as the deletion of a row
+    in the plan, within the legitimate authority for the declared action that decides that row (which has the delete
+    effect for that table). -/
 theorem cascadeRun_authorized (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) :
     ∀ (store : Store) (plan : List (EntityUID × Table × Key)) (s : Store) (issued : List Issued),
@@ -773,7 +852,8 @@ theorem cascadeRun_authorized (schema : Schema) (policies : Policies) (principal
       · cases h
     · cases h
 
-/-- 計画に載る行は、`cascade` の宣言の列でその上位の行を参照する行で、判定するアクションはその宣言のもの。 -/
+/-- A row in the plan is a row that refers to its parent row through the column of a `cascade` declaration, and the
+    deciding action is that declaration's. -/
 theorem mem_cascadePlan (schema : Schema) (store : Store) :
     ∀ (fuel : Nat) (table : Table) (key : Key) (e : EntityUID × Table × Key),
       e ∈ cascadePlan schema store fuel table key →
@@ -812,13 +892,14 @@ theorem mem_dedupePlan (plan : List (EntityUID × Table × Key)) (e : EntityUID 
   · simp at h
   · exact h
 
-/-- 記録の判定アクションの由来(主定理の (5)): ハンドラが呼んだアクション `callAction` か、正本が宣言した連鎖の
-    削除のアクション(`@references` の `cascade`。その記録はその宣言のテーブルの行の削除)。 -/
+/-- The origin of a record's deciding action ((5) of the main theorem): the action `callAction` the handler called, or
+    the delete action of a cascade declared by the sources (`cascade` of `@references`; that record is a deletion of a
+    row of that declaration's table). -/
 def ActionOrigin (schema : Schema) (callAction : EntityUID) (i : Issued) : Prop :=
   i.action = callAction ∨
     ∃ r ∈ schema.constraints.references, r.onDelete = .cascade i.action ∧ ∃ key, i.op = .delete r.table key
 
-/-- `stepOp` の記録は状態の遷移と整合している。 -/
+/-- The records of `stepOp` are coherent with the state transitions. -/
 theorem stepOp_coherent (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) :
     Coherent store (stepOp schema policies principal generated store action effect op).issued
@@ -838,7 +919,8 @@ theorem stepOp_coherent (schema : Schema) (policies : Policies) (principal : Pri
     · simp [Coherent]
   · simp [Coherent]
 
-/-- `stepOp` が発行した操作はすべて正当な権限の範囲内にあり、判定アクションはハンドラのものか宣言された連鎖のもの。 -/
+/-- Every operation issued by `stepOp` is within the legitimate authority, and the deciding action is the handler's or
+    that of a declared cascade. -/
 theorem stepOp_authorized (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) (i : Issued)
     (heff : schema.effectOf action = some effect)
@@ -876,8 +958,9 @@ theorem stepOp_authorized (schema : Schema) (policies : Policies) (principal : P
     · simp at h
   · simp at h
 
-/-- `stepOp` がハンドラに(主キー, 行)の組を渡したなら、操作は読み取りで、連鎖も制約の違反も無く、判定時の状態から
-    その読み取りを 1 つ発行しており、行はその状態でその主キーが指す行である。 -/
+/-- If `stepOp` passed a (primary key, row) pair to the handler, the operation is a read, there is neither a cascade nor
+    a constraint violation, it issued exactly that one read from the state at decision time, and the row is the row that
+    primary key points to in that state. -/
 theorem stepOp_entries (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) (key : Key) (kv : Key × Row)
     (heff : schema.effectOf action = some effect)
@@ -912,7 +995,7 @@ theorem stepOp_entries (schema : Schema) (policies : Policies) (principal : Prin
     · simp [Outcome.entries] at h
   · simp [Outcome.entries] at h
 
-/-- 行の操作の結果は一覧の結果にならない。 -/
+/-- The result of a row operation is never a list result. -/
 theorem stepOp_outcome_ne_list (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) (rows : List (Key × Row))
     (total : Nat) : (stepOp schema policies principal generated store action effect op).outcome ≠ .list rows total := by
@@ -929,7 +1012,7 @@ theorem stepOp_outcome_ne_list (schema : Schema) (policies : Policies) (principa
     · simp
   · simp
 
-/-- 行の操作の結果は外部効果の結果(署名付き URL・呼び出しの応答)にならない。 -/
+/-- The result of a row operation is never an external-effect result (a signed URL or a call response). -/
 theorem stepOp_outcome_isExternal (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) :
     (stepOp schema policies principal generated store action effect op).outcome.isExternal = false := by
@@ -946,7 +1029,7 @@ theorem stepOp_outcome_isExternal (schema : Schema) (policies : Policies) (princ
     · rfl
   · rfl
 
-/-- 行の操作は外部効果を記録しない。 -/
+/-- A row operation records no external effect. -/
 theorem stepOp_external (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (op : Operation) :
     (stepOp schema policies principal generated store action effect op).external = [] := by
@@ -961,9 +1044,9 @@ theorem stepOp_external (schema : Schema) (policies : Policies) (principal : Pri
     · rfl
   · rfl
 
-/-! ### 外部効果の処理の性質 -/
+/-! ### Properties of external-effect processing -/
 
-/-- 外部効果の結果は行を渡さない。 -/
+/-- The result of an external effect passes no row. -/
 theorem Payload.outcome_entries (p : Payload) (external : ExternalResult) (k : Key) :
     (p.outcome external).entries k = [] := by
   cases p with
@@ -972,7 +1055,7 @@ theorem Payload.outcome_entries (p : Payload) (external : ExternalResult) (k : K
   | mail _ _ _ => cases external <;> rfl
   | call _ _ _ _ mode => cases mode <;> cases external <;> rfl
 
-/-- 外部効果の結果は一覧の結果にならない。 -/
+/-- The result of an external effect is never a list result. -/
 theorem Payload.outcome_ne_list (p : Payload) (external : ExternalResult) (rows : List (Key × Row)) (total : Nat) :
     p.outcome external ≠ .list rows total := by
   cases p with
@@ -981,7 +1064,7 @@ theorem Payload.outcome_ne_list (p : Payload) (external : ExternalResult) (rows 
   | mail _ _ _ => cases external <;> simp [Payload.outcome]
   | call _ _ _ _ mode => cases mode <;> cases external <;> simp [Payload.outcome]
 
-/-- 呼び出しの応答(`called` / `calledError`)は呼び出しの内容(`Payload.call`)からだけ生じる。 -/
+/-- A call response (`called` / `calledError`) arises only from call content (`Payload.call`). -/
 theorem Payload.outcome_isCalled (p : Payload) (external : ExternalResult)
     (h : (p.outcome external).isCalled = true) : p.kind = .call := by
   cases p with
@@ -990,7 +1073,7 @@ theorem Payload.outcome_isCalled (p : Payload) (external : ExternalResult)
   | mail _ _ _ => cases external <;> simp [Payload.outcome, Outcome.isCalled] at h
   | call _ _ _ _ mode => rfl
 
-/-- 外部効果の処理は DB 操作を発行せず、状態を変えない。 -/
+/-- External-effect processing issues no DB operation and does not change the state. -/
 theorem externalStep_coherent (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
     (external : ExternalResult) :
@@ -1001,7 +1084,7 @@ theorem externalStep_coherent (schema : Schema) (policies : Policies) (principal
   · split <;> simp [Coherent]
   · simp [Coherent]
 
-/-- 外部効果の処理は DB 操作を発行しない。 -/
+/-- External-effect processing issues no DB operation. -/
 theorem externalStep_issued (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
     (external : ExternalResult) :
@@ -1011,7 +1094,7 @@ theorem externalStep_issued (schema : Schema) (policies : Policies) (principal :
   · split <;> rfl
   · rfl
 
-/-- 外部効果の処理は行を渡さない。 -/
+/-- External-effect processing passes no row. -/
 theorem externalStep_entries (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
     (external : ExternalResult) (k : Key) :
@@ -1024,7 +1107,7 @@ theorem externalStep_entries (schema : Schema) (policies : Policies) (principal 
     · exact Payload.outcome_entries _ _ _
   · rfl
 
-/-- 外部効果の結果は一覧の結果にならない。 -/
+/-- The result of an external effect is never a list result. -/
 theorem externalStep_outcome_ne_list (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key)
     (values : Row) (external : ExternalResult) (rows : List (Key × Row)) (total : Nat) :
@@ -1037,8 +1120,9 @@ theorem externalStep_outcome_ne_list (schema : Schema) (policies : Policies) (pr
     · exact Payload.outcome_ne_list _ _ _ _
   · simp
 
-/-- 外部効果の記録は、permit された対象の行への、nyxis が決めた内容の発行・送信である: 記録の主体・生成値・状態・
-    アクション・対象・提案値は処理のもので、その効果の判定材料で permit され、内容は `payloadOf` が決めたもの。 -/
+/-- An external-effect record is the issuing/sending of content decided by nyxis for a permitted target row: the
+    record's principal, generated values, state, action, target and proposed values are those of the processing, it was
+    permitted on that effect's decision materials, and the content is what `payloadOf` decided. -/
 theorem externalStep_external (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
     (external : ExternalResult) (e : External)
@@ -1055,8 +1139,8 @@ theorem externalStep_external (schema : Schema) (policies : Policies) (principal
       simp only [List.mem_singleton] at h
       exact ⟨payload, h, rfl, rfl⟩
 
-/-- 外部効果の結果の値(署名付き URL・呼び出しの応答)がハンドラに渡ったなら、その呼び出しは外部効果を 1 つ記録しており、
-    結果はその記録の内容の `Payload.outcome`。 -/
+/-- If a result value of an external effect (a signed URL or a call response) was passed to the handler, that call
+    recorded exactly one external effect, and the result is `Payload.outcome` of that record's content. -/
 theorem externalStep_result (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key) (values : Row)
     (external : ExternalResult)
@@ -1072,8 +1156,9 @@ theorem externalStep_result (schema : Schema) (policies : Policies) (principal :
     · simp [Outcome.isExternal] at h
     · exact ⟨_, rfl, rfl⟩
 
-/-- `step` の記録は状態の遷移と整合している: 発行しなければ状態は変わらず、発行すれば記録の `store` は
-    判定時の状態で、新しい状態はその操作を適用した結果である(一覧の読み取りと外部効果は状態を変えない)。 -/
+/-- The records of `step` are coherent with the state transitions: if nothing is issued, the state does not change; if
+    something is issued, the record's `store` is the state at decision time, and the new state is the result of applying
+    that operation (list reads and external effects do not change the state). -/
 theorem step_coherent (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) (external : ExternalResult) :
     Coherent store (step schema policies principal generated store action key values query external).issued
@@ -1089,9 +1174,9 @@ theorem step_coherent (schema : Schema) (policies : Policies) (principal : Princ
       | exact externalStep_coherent schema policies principal generated store action _ key values external
       | exact stepOp_coherent schema policies principal generated store action _ _
 
-/-- `step` が発行した操作はすべて、そのリクエストの主体とサーバー生成値について正当な権限の範囲内にあり、
-    判定アクションはハンドラが呼んだアクションか、正本が宣言した連鎖の削除のアクションである。
-    一覧では、発行した各読み取りの対象の行について、その主体にそのアクションが permit されている。 -/
+/-- Every operation `step` issued is within the legitimate authority for the request's principal and server-generated
+    values, and the deciding action is either the action the handler called or the delete action of a cascade declared
+    by the sources. For a list, the action is permitted to that principal for the target row of each read issued. -/
 theorem step_authorized (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) (external : ExternalResult)
     (i : Issued)
@@ -1113,8 +1198,9 @@ theorem step_authorized (schema : Schema) (policies : Policies) (principal : Pri
       | (rw [externalStep_issued] at h; simp at h)
       | exact stepOp_authorized schema policies principal generated store action _ _ i heff h
 
-/-- `step` が記録した外部効果はすべて、そのリクエストの主体とサーバー生成値について、ハンドラが呼んだアクションで
-    判定時の状態について正当な権限の範囲内にある(`ExternalAuthorized`)。対象の主キーと提案値はハンドラが渡したもの。 -/
+/-- Every external effect `step` recorded is within the legitimate authority, for the request's principal and
+    server-generated values, of the action the handler called on the state at decision time (`ExternalAuthorized`). The
+    target primary key and proposed values are those the handler passed. -/
 theorem step_external (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) (external : ExternalResult)
     (e : External)
@@ -1133,9 +1219,10 @@ theorem step_external (schema : Schema) (policies : Policies) (principal : Princ
       | (obtain ⟨payload, rfl, hperm, hpay⟩ := externalStep_external _ _ _ _ _ _ _ _ _ _ e h
          exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, ⟨_, table⟩, heff, rfl, permits_authorized _ _ _ _ _ _ _ hperm, hpay⟩)
 
-/-- 外部効果の結果の値(署名付き URL・呼び出しの応答)がハンドラに渡ったなら、その呼び出しは外部効果を 1 つ記録しており
-    (その記録は `step_external` のとおり認可済み)、結果はその記録の内容について結果の列の値から決めたもの。一覧と行の
-    操作の結果はこうした値にならない。 -/
+/-- If a result value of an external effect (a signed URL or a call response) was passed to the handler, that call
+    recorded exactly one external effect (that record is authorized, as in `step_external`), and the result is
+    determined from the value in the result sequence for that record's content. The results of lists and row operations
+    are never such values. -/
 theorem step_result (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) (external : ExternalResult)
     (h : (step schema policies principal generated store action key values query external).outcome.isExternal = true) :
@@ -1153,9 +1240,11 @@ theorem step_result (schema : Schema) (policies : Policies) (principal : Princip
       | exact externalStep_result _ _ _ _ _ _ _ _ _ _ h
       | (rw [stepOp_outcome_isExternal] at h; cases h)
 
-/-- 外部効果の結果の値は、発行した DB 操作・外部効果の記録・状態を変えない(ハンドラに渡る結果だけが変わる)。
-    接続層は結果を得る前に判定して記録を読み、結果を得た後に同じ呼び出しを結果つきで進める。応答の値が後の呼び出しの
-    判定に入る経路は、ハンドラが別のアクションで提案する `values` だけで、それは (1) の判定を通る。 -/
+/-- The result value of an external effect does not change the issued DB operations, the external-effect records or the
+    state (only the result passed to the handler changes). The connection layer decides and reads the record before
+    obtaining the result, and after obtaining it advances the same call with the result. The only path by which a
+    response value enters the decision of a later call is the `values` the handler proposes in another action, and that
+    passes the decision of (1). -/
 theorem step_external_indep (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) (e₁ e₂ : ExternalResult) :
     (step schema policies principal generated store action key values query e₁).issued
@@ -1186,21 +1275,24 @@ theorem step_external_indep (schema : Schema) (policies : Policies) (principal :
       | exact ⟨rfl, rfl, rfl⟩
       | exact indep _
 
-/-! ## 部分的な取得との一致(接続層のための定理)
+/-! ## Agreement with partial fetching (theorems for the connection layer)
 
-実 DB の接続層は全テーブルではなく、要求に必要な行だけを主キーの点検索で取得する(`Nyxis.Materials.Known`:
-取得した行と、引いたが無かった実体)。`coversOp` は、その取得が 1 つの操作の判定材料を覆っているか(対象の行の
-有無が分かっており、要求から到達できる実体がすべて取得済みか)を実行可能に検査する。検査に通り、取得が全体の
-状態と整合していれば(`Known.Consistent`)、取得した行だけでの判定(`permits`)と `step` の結果(ハンドラに渡る
-結果・発行する操作)は、全テーブルを取得した場合と一致する(`permits_eq_of_covers` / `step_eq_of_covers`)。
-判定が絞り込みで行を見るところ(一覧の候補、一意性の組と同じ値の行、削除する行を参照する行。`rowFilters`)では
-その絞り込みに合う行をすべて取得し(絞り込んだ行列の一致。実 DB では WHERE 句)、取得した行について `coversOp`
-(一覧では各行の読み取り、削除の連鎖では各行の削除)と参照先の行の有無を検査する。 -/
+The real-DB connection layer fetches not all tables but only the rows the request needs, by primary-key point lookups
+(`Nyxis.Materials.Known`: the fetched rows, and the entities looked up but absent). `coversOp` checks executably whether
+that fetch covers the decision materials of one operation (whether the presence of the target row is known, and all
+entities reachable from the request have been fetched). If the check passes and the fetch is consistent with the full
+state (`Known.Consistent`), the decision using only the fetched rows (`permits`) and the result of `step` (the result
+passed to the handler, the operations issued) agree with the case where all tables are fetched (`permits_eq_of_covers` /
+`step_eq_of_covers`). Where the decision looks at rows through a filter (list candidates, rows with the same values as a
+uniqueness group, rows referring to a row being deleted; `rowFilters`), all rows matching that filter are fetched
+(agreement of the filtered row sequence; on a real DB, a WHERE clause), and for the fetched rows `coversOp` (a read of
+each row for a list, a delete of each row for a cascade) and the presence of referenced rows are checked. -/
 
 open Nyxis.Materials (Known)
 
-/-- 部分的な取得が 1 つの操作の判定材料を覆っているか(実行可能な検査): 対象の行の有無が分かっており、
-    ポリシーの level について要求から到達できる実体がすべて取得済み(または行の実体にならない型)である。 -/
+/-- Whether a partial fetch covers the decision materials of one operation (an executable check): the presence of the
+    target row is known, and all entities reachable from the request at the policies' level have been fetched (or are of
+    a type that is never a row entity). -/
 def coversOp (schema : Schema) (policies : Policies) (k : Known) (principal : Principal)
     (generated : Generated) (action : EntityUID) (op : Operation) : Bool :=
   k.decided op.target &&
@@ -1210,12 +1302,14 @@ def coversOp (schema : Schema) (policies : Policies) (k : Known) (principal : Pr
     Nyxis.Materials.closedAt (judgementEntities schema principal k.rows op)
       (k.knows schema.types schema.memberships) (judgementRequest schema principal generated action op) level
 
-/-- 行を消した後の部分的な取得: 行は消した後の状態(`Store.apply` の削除)、消した実体は無いと分かっている。
-    すべて取得した絞り込みの記録は保つ(消した行は両方の状態から消える)。 -/
+/-- The partial fetch after removing a row: rows are those of the state after removal (deletion via `Store.apply`), and
+    the removed entity is known to be absent. The records of fully fetched filters are kept (the removed row disappears
+    from both states). -/
 def _root_.Nyxis.Materials.Known.remove (k : Known) (t : Table) (key : Key) : Known :=
   ⟨(k.rows.apply (.delete t key)).1, ⟨t, key⟩ :: k.absent, k.fetched⟩
 
-/-- 参照整合の判定材料を覆っているか: 置く行が参照する実体の行の有無が分かっている。 -/
+/-- Whether the referential-integrity decision materials are covered: the presence of the rows of the entities the
+    placed row refers to is known. -/
 def coversReferences (schema : Schema) (k : Known) (op : Operation) : Bool :=
   match op.newRow k.rows with
   | none => true
@@ -1223,7 +1317,8 @@ def coversReferences (schema : Schema) (k : Known) (op : Operation) : Bool :=
     | none => true
     | some uid => k.decided uid
 
-/-- 削除の連鎖の判定材料を覆っているか: 計画の各行の削除について、その時点(前の行を消した後)の取得で `coversOp`。 -/
+/-- Whether the decision materials of the delete cascade are covered: for the delete of each row in the plan, `coversOp`
+    on the fetch at that point (after removing the previous rows). -/
 def coversCascade (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated) :
     Known → List (EntityUID × Table × Key) → Bool
   | _, [] => true
@@ -1231,20 +1326,22 @@ def coversCascade (schema : Schema) (policies : Policies) (principal : Principal
     coversOp schema policies k principal generated action (.delete t key) &&
       coversCascade schema policies principal generated (k.remove t key) rest
 
-/-- 連鎖の計画の行をすべて消した後の部分的な取得。 -/
+/-- The partial fetch after removing all rows in the cascade plan. -/
 def _root_.Nyxis.Materials.Known.removeAll (k : Known) (plan : List (EntityUID × Table × Key)) : Known :=
   plan.foldl (fun k e => k.remove e.2.1 e.2.2) k
 
-/-- 制約の判定と連鎖の判定材料を覆っているか: 参照先の行の有無、連鎖の各行の判定、連鎖の後の状態での操作の判定。 -/
+/-- Whether the decision materials of the constraint check and the cascade are covered: the presence of referenced rows,
+    the decision of each cascade row, and the decision of the operation on the state after the cascade. -/
 def coversIntegrity (schema : Schema) (policies : Policies) (k : Known) (principal : Principal)
     (generated : Generated) (action : EntityUID) (op : Operation) : Bool :=
   let plan := deletePlan schema k.rows op
   coversReferences schema k op && coversCascade schema policies principal generated k plan &&
     coversOp schema policies (k.removeAll plan) principal generated action op
 
-/-- 1 回のアクション呼び出し(`step`)の判定材料を覆っているか: 一覧では取得した対象テーブルの行のうち絞り込みに
-    合う各行の読み取りについて、外部効果ではその判定材料の操作について `coversOp`(制約の判定は無い)、それ以外では
-    組み立てた操作について `coversOp`、さらに制約と連鎖の判定材料。 -/
+/-- Whether the decision materials of one action call (`step`) are covered: for a list, `coversOp` for the read of each
+    fetched row of the target table that matches the filters; for an external effect, `coversOp` for the operation of
+    its decision materials (there is no constraint check); otherwise, `coversOp` for the built operation, plus the
+    decision materials of constraints and the cascade. -/
 def coversStep (schema : Schema) (policies : Policies) (k : Known) (principal : Principal)
     (generated : Generated) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) : Bool :=
   match schema.effectOf action with
@@ -1260,9 +1357,10 @@ def coversStep (schema : Schema) (policies : Policies) (k : Known) (principal : 
       coversOp schema policies k principal generated action op &&
         coversIntegrity schema policies k principal generated action op
 
-/-- 判定が絞り込みで見る行(テーブルと絞り込み): 一覧では対象テーブルの問い合わせの絞り込み、外部効果では無し、それ以外
-    では制約の判定が見る絞り込み(`integrityFilters`)。接続層はこの行をすべて取得し、その一致が `step_eq_of_covers` の
-    前提。 -/
+/-- The rows the decision looks at through filters (table and filters): for a list, the filters of the query on the
+    target table; for an external effect, none; otherwise, the filters the constraint check looks at
+    (`integrityFilters`). The connection layer fetches all these rows, and their agreement is a premise of
+    `step_eq_of_covers`. -/
 def rowFilters (schema : Schema) (store : Store) (action : EntityUID) (key : Key) (values : Row)
     (query : ListQuery) : List (Table × List Filter) :=
   match schema.effectOf action with
@@ -1273,7 +1371,7 @@ def rowFilters (schema : Schema) (store : Store) (action : EntityUID) (key : Key
     | .upload | .download | .mail _ _ | .call .. => []
     | .read | .insert | .update _ | .delete => integrityFilters schema store (Operation.ofEffect effect key values)
 
-/-- 行を置いても、絞り込みに合う行の集合の一致は保たれる(両方に同じ行を置く)。 -/
+/-- Placing a row preserves agreement of the sets of rows matching filters (the same row is placed in both). -/
 theorem RowsAgree.put {s₁ s₂ : Store} {table : Table} {filters : List Filter}
     (h : Nyxis.Materials.RowsAgree s₁ s₂ table filters) (t : Table) (key : Key) (row : Row) :
     Nyxis.Materials.RowsAgree (s₁.put t key row) (s₂.put t key row) table filters := by
@@ -1286,8 +1384,9 @@ theorem RowsAgree.put {s₁ s₂ : Store} {table : Table} {filters : List Filter
   · simp only [heq, ↓reduceIte]
     exact this
 
-/-- 判定材料の全体は、取得が整合し対象の有無が分かっていれば、答えを持つ実体(行の有無が分かり、所属行を取得済み)
-    について全体の状態から組んだものと同じ `find?` を返す(挿入で提案される行を置く分岐も一致する)。 -/
+/-- If the fetch is consistent and the presence of the target is known, the whole of the decision materials returns, for
+    entities that have an answer (whose row presence is known and whose membership rows have been fetched), the same
+    `find?` as the one built from the full state (the branch placing the proposed row for an insert agrees as well). -/
 theorem judgementEntities_find?_eq (schema : Schema) (k : Known) (full : Store) (principal : Principal)
     (op : Operation) (u : EntityUID) (hc : k.Consistent full)
     (ht : k.decided op.target = true) (hk : k.knows schema.types schema.memberships u = true) :
@@ -1317,7 +1416,8 @@ theorem judgementEntities_find?_eq (schema : Schema) (k : Known) (full : Store) 
   | update t key changes => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
   | delete t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
 
-/-- 検査に通った部分的な取得から組んだ限定した判定材料は、全体の状態から組んだものと等しい。 -/
+/-- The restricted decision materials built from a partial fetch that passed the check equal those built from the full
+    state. -/
 theorem materials_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)
     (principal : Principal) (generated : Generated) (action : EntityUID) (op : Operation) (level : Nat)
     (hc : k.Consistent full)
@@ -1333,7 +1433,8 @@ theorem materials_eq_of_covers (schema : Schema) (policies : Policies) (k : Know
   exact judgementEntities_find?_eq schema k full principal op u hc ht
     (Nyxis.Materials.closedAt_spec hclosed u hu)
 
-/-- 検査に通った部分的な取得だけでの認可層の判定は、全体の状態での判定と一致する(許可も拒否も)。 -/
+/-- The authorization layer's decision using only a partial fetch that passed the check agrees with the decision on the
+    full state (both permit and deny). -/
 theorem permits_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)
     (principal : Principal) (generated : Generated) (action : EntityUID) (op : Operation)
     (hc : k.Consistent full)
@@ -1347,14 +1448,15 @@ theorem permits_eq_of_covers (schema : Schema) (policies : Policies) (k : Known)
     dsimp only
     rw [materials_eq_of_covers schema policies k full principal generated action op level hc hlevel hcov]
 
-/-- 対象の行の `find?` が一致すれば、操作の結果(ハンドラに渡る `Outcome`)は一致する。 -/
+/-- If `find?` of the target row agrees, the operation's result (the `Outcome` passed to the handler) agrees. -/
 theorem apply_snd_eq (s₁ s₂ : Store) (op : Operation)
     (h : Cedar.Data.Map.find? s₁ op.target = Cedar.Data.Map.find? s₂ op.target) :
     (s₁.apply op).2 = (s₂.apply op).2 := by
   cases op <;> simp only [Store.apply, Store.find?, Operation.target] at h ⊢ <;> rw [h] <;> split <;> rfl
 
-/-- 対象テーブルの行のうち絞り込みに合う行をすべて取得し(絞り込んだ行列の一致)、その各行の読み取りについて検査に
-    通れば、一覧の候補は全体の状態での候補と一致する(したがって件数も返す行も一致する)。 -/
+/-- If all rows of the target table matching the filters are fetched (agreement of the filtered row sequence) and the
+    read of each of those rows passes the check, the list candidates agree with the candidates on the full state (so the
+    count and the returned rows agree as well). -/
 theorem permittedRows_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)
     (principal : Principal) (generated : Generated) (action : EntityUID) (table : Table) (query : ListQuery)
     (hc : k.Consistent full)
@@ -1370,7 +1472,7 @@ theorem permittedRows_eq_of_covers (schema : Schema) (policies : Policies) (k : 
   exact permits_eq_of_covers schema policies k full principal generated action _ hc
     (List.all_eq_true.mp hcov kv hkv)
 
-/-! ### 制約の判定と連鎖の一致 -/
+/-! ### Agreement of the constraint check and the cascade -/
 
 private theorem flatMap_congr {α β : Type} {f g : α → List β} :
     ∀ {l : List α}, (∀ a ∈ l, f a = g a) → l.flatMap f = l.flatMap g
@@ -1386,7 +1488,7 @@ private theorem any_congr {α : Type} {p q : α → Bool} :
     simp only [List.any_cons, h a List.mem_cons_self]
     rw [any_congr fun x hx => h x (List.mem_cons_of_mem a hx)]
 
-/-- 対象の行の有無が分かっていれば、置く行は一致する。 -/
+/-- If the presence of the target row is known, the placed row agrees. -/
 theorem newRow_eq (k : Known) (full : Store) (op : Operation) (hc : k.Consistent full)
     (hd : k.decided op.target = true) : op.newRow k.rows = op.newRow full := by
   have h := Nyxis.Materials.Known.find?_eq_of_decided hc hd
@@ -1394,7 +1496,8 @@ theorem newRow_eq (k : Known) (full : Store) (op : Operation) (hc : k.Consistent
   simp only [Operation.target] at h
   simp only [Operation.newRow, Store.find?, h]
 
-/-- 一意性の判定は、置く行が一致し、組の列と同じ値の行をすべて取得していれば一致する。 -/
+/-- The uniqueness check agrees if the placed row agrees and all rows with the same values as the group's columns have
+    been fetched. -/
 theorem uniqueViolation_eq (schema : Schema) (k : Known) (full : Store) (op : Operation)
     (hnew : op.newRow k.rows = op.newRow full)
     (hfilt : ∀ tf ∈ uniqueFilters schema k.rows op,
@@ -1417,7 +1520,8 @@ theorem uniqueViolation_eq (schema : Schema) (k : Known) (full : Store) (op : Op
     rw [hft] at this
     rw [this]
 
-/-- 参照整合の判定は、置く行が一致し、参照する実体の行の有無が分かっていれば一致する。 -/
+/-- The referential-integrity check agrees if the placed row agrees and the presence of the rows of the referenced
+    entities is known. -/
 theorem referenceViolation_eq (schema : Schema) (k : Known) (full : Store) (op : Operation)
     (hc : k.Consistent full) (hnew : op.newRow k.rows = op.newRow full)
     (hcov : coversReferences schema k op = true) :
@@ -1437,7 +1541,7 @@ theorem referenceViolation_eq (schema : Schema) (k : Known) (full : Store) (op :
       simp only at hd
       simp only [Nyxis.Materials.Known.find?_eq_of_decided hc hd]
 
-/-- 連鎖の計画は、消える各行を参照する行をすべて取得していれば一致する。 -/
+/-- The cascade plan agrees if all rows referring to each removed row have been fetched. -/
 theorem cascadePlan_eq (schema : Schema) (s₁ s₂ : Store) :
     ∀ (fuel : Nat) (t : Table) (k : Key),
       (∀ r ∈ schema.constraints.references, r.target = t → referencing s₁ r ⟨t, k⟩ = referencing s₂ r ⟨t, k⟩) →
@@ -1469,7 +1573,8 @@ theorem cascadePlan_eq (schema : Schema) (s₁ s₂ : Store) :
         (fun r' hr'' ht' => h₂ (action, r.table, kv.1) (hmem _ (List.mem_append_right _ List.mem_cons_self)) r' hr'' ht')
         (fun e he r' hr'' ht' => h₂ e (hmem e (List.mem_append_left _ he)) r' hr'' ht')]
 
-/-- 連鎖で消える行(計画と削除する行)は、消える各行を参照する行をすべて取得していれば一致する。 -/
+/-- The rows removed by the cascade (the plan and the row being deleted) agree if all rows referring to each removed row
+    have been fetched. -/
 theorem deletedRows_eq (schema : Schema) (s₁ s₂ : Store) (op : Operation)
     (hr : ∀ tk ∈ deletedRows schema s₁ op, ∀ r ∈ schema.constraints.references, r.target = tk.1 →
       referencing s₁ r ⟨tk.1, tk.2⟩ = referencing s₂ r ⟨tk.1, tk.2⟩) :
@@ -1486,7 +1591,7 @@ theorem deletedRows_eq (schema : Schema) (s₁ s₂ : Store) (op : Operation)
   | insert _ _ _ => exact ⟨rfl, rfl⟩
   | update _ _ _ => exact ⟨rfl, rfl⟩
 
-/-- 削除の拒否の判定は、消える各行を参照する行をすべて取得していれば一致する。 -/
+/-- The delete-rejection check agrees if all rows referring to each removed row have been fetched. -/
 theorem restrictViolation_eq (schema : Schema) (s₁ s₂ : Store) (op : Operation)
     (hr : ∀ tk ∈ deletedRows schema s₁ op, ∀ r ∈ schema.constraints.references, r.target = tk.1 →
       referencing s₁ r ⟨tk.1, tk.2⟩ = referencing s₂ r ⟨tk.1, tk.2⟩) :
@@ -1501,7 +1606,7 @@ theorem restrictViolation_eq (schema : Schema) (s₁ s₂ : Store) (op : Operati
   simp only [Bool.and_eq_true, beq_iff_eq] at hr''
   rw [hr tk htk r hr''.1 hr''.2.1]
 
-/-- 行を消した後の `find?`: 消した主キーなら無く、それ以外は元のまま。 -/
+/-- `find?` after removing a row: absent for the removed primary key, unchanged otherwise. -/
 theorem find?_remove (s : Store) (t : Table) (key : Key) (u : EntityUID) :
     Cedar.Data.Map.find? (s.remove t key) u = if u = ⟨t, key⟩ then none else Cedar.Data.Map.find? s u := by
   rw [Nyxis.Materials.map_find?_eq_list_find?, Nyxis.Materials.map_find?_eq_list_find?]
@@ -1520,7 +1625,7 @@ theorem find?_remove (s : Store) (t : Table) (key : Key) (u : EntityUID) :
     · simp [hk, hne]
     · simp [hk]
 
-/-- 行を消しても、絞り込みに合う行の集合の一致は保たれる(両方から同じ行を消す)。 -/
+/-- Removing a row preserves agreement of the sets of rows matching filters (the same row is removed from both). -/
 theorem RowsAgree.remove {s₁ s₂ : Store} {table : Table} {filters : List Filter}
     (h : Nyxis.Materials.RowsAgree s₁ s₂ table filters) (t : Table) (key : Key) :
     Nyxis.Materials.RowsAgree (s₁.remove t key) (s₂.remove t key) table filters := by
@@ -1533,8 +1638,8 @@ theorem RowsAgree.remove {s₁ s₂ : Store} {table : Table} {filters : List Fil
   · simp only [heq, ↓reduceIte]
     exact this
 
-/-- 行を消した後の部分的な取得は、消す行の有無が分かっていれば、消した後の全体の状態と整合する(すべて取得した
-    絞り込みの記録も保たれる)。 -/
+/-- If the presence of the row to remove is known, the partial fetch after removing it is consistent with the full state
+    after removal (the records of fully fetched filters are kept as well). -/
 theorem Known.remove_consistent {k : Known} {full : Store} (hc : k.Consistent full) (t : Table) (key : Key)
     (hd : k.decided ⟨t, key⟩ = true) :
     (k.remove t key).Consistent (full.apply (.delete t key)).1 := by
@@ -1568,7 +1673,7 @@ theorem Known.remove_consistent {k : Known} {full : Store} (hc : k.Consistent fu
     · intro tf htf
       exact RowsAgree.remove (hc.2.2 tf htf) t key
 
-/-- 行を消しても、有無が分かっている実体は分かったまま。 -/
+/-- Removing a row keeps entities whose presence is known still known. -/
 theorem Known.decided_remove {k : Known} (t : Table) (key : Key) {u : EntityUID}
     (hd : k.decided u = true) : (k.remove t key).decided u = true := by
   simp only [Known.decided, Known.remove, Store.apply, Bool.or_eq_true, List.contains_iff_mem,
@@ -1584,15 +1689,16 @@ theorem Known.decided_remove {k : Known} (t : Table) (key : Key) {u : EntityUID}
       · exact hd
     · exact Or.inr (Or.inr hd)
 
-/-- 連鎖の計画の行を消しても、有無が分かっている実体は分かったまま。 -/
+/-- Removing the rows of the cascade plan keeps entities whose presence is known still known. -/
 theorem Known.decided_removeAll : ∀ (plan : List (EntityUID × Table × Key)) (k : Known) (u : EntityUID),
     k.decided u = true → (k.removeAll plan).decided u = true
   | [], _, _, hd => hd
   | e :: rest, k, u, hd =>
     Known.decided_removeAll rest (k.remove e.2.1 e.2.2) u (Known.decided_remove e.2.1 e.2.2 hd)
 
-/-- 2 つの連鎖の結果の一致: 成功か拒否かが同じで、両方とも成功なら、取得した行の状態は計画の行を消した後の部分的な
-    取得の行で、それが全体の状態と整合し、記録(主体・生成値・アクション・操作)が一致する。 -/
+/-- Agreement of two cascade results: success or denial is the same, and if both succeed, the state of the fetched rows
+    is the rows of the partial fetch after removing the plan's rows, which is consistent with the full state, and the
+    records (principal, generated values, action, operation) agree. -/
 def CascadeAgree (k : Known) (plan : List (EntityUID × Table × Key))
     (r₁ r₂ : Option (Store × List Issued)) : Prop :=
   r₁.isSome = r₂.isSome ∧
@@ -1601,7 +1707,8 @@ def CascadeAgree (k : Known) (plan : List (EntityUID × Table × Key))
       is₁.map (fun i => (i.principal, i.generated, i.action, i.op))
         = is₂.map (fun i => (i.principal, i.generated, i.action, i.op))
 
-/-- 検査に通った部分的な取得だけでの連鎖の判定と記録は、全体の状態でのものと一致する。 -/
+/-- The cascade's decisions and records using only a partial fetch that passed the check agree with those on the full
+    state. -/
 theorem cascadeRun_eq_of_covers (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) :
     ∀ (plan : List (EntityUID × Table × Key)) (k : Known) (full : Store), k.Consistent full →
@@ -1652,9 +1759,10 @@ theorem cascadeRun_eq_of_covers (schema : Schema) (policies : Policies) (princip
             exact ⟨hk', hcons, by simp [hmap]⟩
     · exact ⟨rfl, fun _ _ _ _ h _ => by cases h⟩
 
-/-- **部分的な取得での行の操作の一致**: 取得が全体の状態と整合し、検査(`coversOp` と `coversIntegrity`)に通り、
-    制約の判定が見る絞り込みに合う行をすべて取得しているなら、取得した行だけで処理した `stepOp` の結果と発行した
-    操作(主体・生成値・アクション・操作)は、全体の状態で処理したものと一致する。 -/
+/-- **Agreement of row operations under partial fetching**: if the fetch is consistent with the full state, passes the
+    checks (`coversOp` and `coversIntegrity`), and all rows matching the filters the constraint check looks at have been
+    fetched, then the result of `stepOp` processed using only the fetched rows and the operations it issued (principal,
+    generated values, action, operation) agree with those processed on the full state. -/
 theorem stepOp_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)
     (principal : Principal) (generated : Generated) (action : EntityUID) (effect : Nyxis.Db.Effect)
     (op : Operation)
@@ -1735,26 +1843,28 @@ theorem stepOp_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) 
     · exact ⟨rfl, rfl⟩
   · exact ⟨rfl, rfl⟩
 
-/-- 外部効果の記録のうち、判定時の状態を除いた部分(主体・生成値・アクション・対象・提案値・内容)。部分的な取得との
-    一致はこの部分について述べる(記録の `store` は取得した状態と全体の状態で異なる)。 -/
+/-- The part of an external-effect record excluding the state at decision time (principal, generated values, action,
+    target, proposed values, content). Agreement with partial fetching is stated about this part (the record's `store`
+    differs between the fetched state and the full state). -/
 def External.view (e : External) : Principal × Generated × EntityUID × Table × Key × Row × Payload :=
   (e.principal, e.generated, e.action, e.table, e.key, e.values, e.payload)
 
-/-- 外部効果の内容は対象の行の `find?` だけで決まる。 -/
+/-- The content of an external effect is determined only by `find?` of the target row. -/
 theorem payloadOf_eq (schema : Schema) (generated : Generated) (s₁ s₂ : Store) (effect : Nyxis.Db.Effect)
     (key : Key) (values : Row)
     (h : Cedar.Data.Map.find? s₁ (⟨effect.table, key⟩ : EntityUID) = Cedar.Data.Map.find? s₂ ⟨effect.table, key⟩) :
     payloadOf schema generated s₁ effect key values = payloadOf schema generated s₂ effect key values := by
   simp only [payloadOf, Store.find?, h]
 
-/-- 効果の判定材料の操作の対象は、対象の行(テーブルと主キー)である。 -/
+/-- The target of the operation of an effect's decision materials is the target row (table and primary key). -/
 theorem ofEffect_target (effect : Nyxis.Db.Effect) (key : Key) (values : Row) :
     (Operation.ofEffect effect key values).target = ⟨effect.table, key⟩ := by
   unfold Operation.ofEffect
   split <;> first | rfl | (split <;> rfl)
 
-/-- 部分的な取得での外部効果の処理の一致: 対象の行の有無が分かり、検査に通れば、結果・発行(無し)・外部効果の記録
-    (状態を除く)は全体の状態でのものと一致する。 -/
+/-- Agreement of external-effect processing under partial fetching: if the presence of the target row is known and the
+    check passes, the result, the issued operations (none) and the external-effect records (excluding the state) agree
+    with those on the full state. -/
 theorem externalStep_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)
     (principal : Principal) (generated : Generated) (action : EntityUID) (effect : Nyxis.Db.Effect) (key : Key)
     (values : Row) (external : ExternalResult)
@@ -1786,11 +1896,14 @@ theorem externalStep_eq_of_covers (schema : Schema) (policies : Policies) (k : K
     · exact ⟨rfl, rfl, rfl⟩
   · exact ⟨rfl, rfl, rfl⟩
 
-/-- **部分的な取得での `step` の一致**: 取得が全体の状態と整合し、検査(`coversStep`)に通り、判定が絞り込みで見る行
-    (`rowFilters`: 一覧の候補、一意性の組と同じ値の行、削除する行を参照する行)をすべて取得しているなら、取得した行
-    だけで処理した `step` の結果(ハンドラに渡る結果。一覧では返す行と件数、外部効果では同じ結果の値)と発行した操作
-    (主体・生成値・アクション・操作)、外部効果の記録(主体・生成値・アクション・対象・内容)は、全体の状態で
-    処理した `step` のものと一致する。発行と記録の `store` だけが取得した状態と全体の状態で異なる。 -/
+/-- **Agreement of `step` under partial fetching**: if the fetch is consistent with the full state, passes the check
+    (`coversStep`), and all rows the decision looks at through filters (`rowFilters`: list candidates, rows with the
+    same values as a uniqueness group, rows referring to a row being deleted) have been fetched, then the result of
+    `step` processed using only the fetched rows (the result passed to the handler; for a list, the returned rows and
+    count; for an external effect, the same result value), the operations it issued (principal, generated values,
+    action, operation) and the external-effect records (principal, generated values, action, target, content) agree with
+    those of `step` processed on the full state. Only the `store` of the issued operations and records differs between
+    the fetched state and the full state. -/
 theorem step_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)
     (principal : Principal) (generated : Generated) (action : EntityUID) (key : Key) (values : Row)
     (query : ListQuery) (external : ExternalResult)

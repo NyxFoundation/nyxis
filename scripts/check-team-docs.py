@@ -61,7 +61,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import nyxis_local
 
 BACKEND = ROOT / 'examples/team-docs/backend'
-PORT = int(os.environ.get('NYXIS_TEAM_DOCS_PORT', '18117'))
+PORT = int(os.environ.get('NYXIS_TEAM_DOCS_PORT', '18115'))
 DATABASE = 'nyxis_team_docs_test_' + uuid.uuid4().hex
 BUCKET = 'nyxis-team-docs-' + uuid.uuid4().hex[:12]
 RELAY = 'https://localhost:55325'

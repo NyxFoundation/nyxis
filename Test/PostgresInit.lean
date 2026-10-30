@@ -21,7 +21,7 @@ private def check (name : String) (schema : Authz.Schema) (expectedSuccess : Boo
         pure "COMMIT"
       | "ROLLBACK" => state.set .idle; pure "ROLLBACK"
       | _ => throw (IO.userError "unexpected control command") }
-  -- 全テーブルの後: 外部キーと索引、最後に予約テーブル `_nyxis_outbox` とその部分索引。
+  -- After all tables: foreign keys and indexes, and finally the reserved table `_nyxis_outbox` and its partial index.
   let after := (PostgresSql.foreignKeys schema).toOption.getD [] ++ PostgresSql.outbox
   let driver : PostgresInit.Driver := {
     create := fun command => do
@@ -35,7 +35,7 @@ private def check (name : String) (schema : Authz.Schema) (expectedSuccess : Boo
         if failAt == some i then throw (IO.userError "injected DDL failure")
         return if badTag then "ALTER TABLE" else "CREATE TABLE"
       | none =>
-        -- 全テーブルの後の DDL。順序もコアの生成どおり。
+        -- DDL after all tables, in exactly the order the core generates.
         let some (expected, tag) := after[i - schema.tables.length]? | throw (IO.userError "extra DDL")
         unless expected == command do throw (IO.userError "wrong DDL after the tables")
         events.modify (· ++ [if tag == "ALTER TABLE" then "alter"
@@ -53,7 +53,8 @@ private def check (name : String) (schema : Authz.Schema) (expectedSuccess : Boo
 def main : IO Unit := do
   let begin := ["BEGIN ISOLATION LEVEL SERIALIZABLE"]
   let creates := Test.Fixture.schema.tables.map (fun (table, _) => "create " ++ table.id)
-  -- 予約テーブル `_nyxis_outbox` は正本のテーブル(と外部キー)の後に、どの正本でも作る。
+  -- The reserved table `_nyxis_outbox` is created for every set of approved sources, after the tables of the sources
+  -- (and foreign keys).
   let outbox := ["outbox", "index"]
   check "fixture schema DDL and checked commit" Test.Fixture.schema true (begin ++ creates ++ outbox ++ ["COMMIT"])
   check "empty schema" { Test.Fixture.schema with tables := [] } true (begin ++ outbox ++ ["COMMIT"])
@@ -77,7 +78,8 @@ def main : IO Unit := do
     (begin ++ creates ++ outbox ++ ["COMMIT", "ROLLBACK"]) (badCommit := true)
   check "outbox DDL failure" Test.Fixture.schema false (begin ++ creates ++ ["outbox", "ROLLBACK"])
     (failAt := some Test.Fixture.schema.tables.length)
-  -- 参照整合の外部キーは全テーブルの CREATE TABLE の後に ALTER TABLE で付き、失敗すれば ROLLBACK。
+  -- Referential-integrity foreign keys are added with ALTER TABLE after CREATE TABLE for all tables; on failure,
+  -- ROLLBACK.
   let withRefs := { Test.Fixture.schema with constraints :=
     { references := [⟨Test.Fixture.postT, "author", Test.Fixture.userT, .restrict⟩] } }
   check "foreign keys and indexes after all tables" withRefs true

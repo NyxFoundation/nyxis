@@ -5,34 +5,40 @@ import Nyxis.Internal.Outbox
 import Nyxis.Internal.PostgresValue
 
 /-!
-# Test.Outbox — `async` の外部 API 呼び出しのアウトボックスと内部ループの実 DB 統合検査
+# Test.Outbox — real-DB integration checks for the outbox and internal loop of `async` external API calls
 
-コア専用の検査用正本(文字列。アプリのファイルではない)に `@external` の送り先 2 つ — `Notify`(ベース URL と
-`bearer NYXIS_EXT_NOTIFY`)・`Hook`(`base` 無し、認証なし。`url: 列`)— と `async` の `call` のアクションを置き、
-実 PostgreSQL(ローカル Supabase)と `scripts/check-outbox.py` が起動する HTTPS の模擬 API に対して 3 つの形で動く:
+A core-only test schema (a string, not an app file) declares two `@external` destinations — `Notify` (a base URL and
+`bearer NYXIS_EXT_NOTIFY`) and `Hook` (no `base`, no authentication; `url: column`) — and actions with `async` `call`s,
+and runs in three modes against real PostgreSQL (local Supabase) and the HTTPS mock API started by
+`scripts/check-outbox.py`:
 
-- `provision`: 検査用正本のテーブルと予約テーブル `_nyxis_outbox` を用意する(`PostgresInit.provision`)。
-- `enqueue`: 実起動が使う接続経路 `PostgresRun.handleStaged` で要求を流し、deny された呼び出し(所有者でない利用者・匿名・
-  無い行)は 403、permit された `async` の呼び出しは送信せずにアウトボックスへ記録して `ok none`(200)で続くこと、
-  1 要求に 2 つの `async` 呼び出しがあれば 2 行になること、COMMIT が失敗する要求(Python が置いた遅延制約トリガーが
-  `status = "boom"` の更新を COMMIT で拒む)は例外(入口で 503)で閉じて先の更新ごと取り消されることを確かめる。
-  アウトボックスの行の内容(state・attempts・本文・送り先・COMMIT 失敗の要求の行が無いこと)は Python 側が DB で照合する。
-- `loop`: nyxis の内部ループ(`Outbox.tick` を設定の間隔で繰り返す。実起動の `Outbox.loop` と同じ本体)を
-  `NYXIS_CHECK_OUTBOX_SECONDS` 秒だけ回し、処理した行の数を出力する。Python は同じ DB に 2 プロセスを同時に起動し、
-  模擬 API の記録で各行がちょうど 1 回送られること、5xx → 2xx の切り替えで再送されて `sent` になること(再送の間隔が
-  指数バックオフ以上)、4xx が即 `failed` になること、最大試行回数超過(常に 5xx の行と、閉じたポートへの `url: 列` の行 =
-  輸送の失敗)が `failed` になることを照合する。遷移 `Outbox.settle` そのものは下の `#guard` がビルド時に検査する。
+- `provision`: prepares the test schema's tables and the reserved table `_nyxis_outbox` (`PostgresInit.provision`).
+- `enqueue`: sends requests through the connection path used in real operation, `PostgresRun.handleStaged`, and checks
+  that denied calls (a user who is not the owner, anonymous, a missing row) give 403; that a permitted `async` call is
+  recorded in the outbox without being sent and continues with `ok none` (200); that two `async` calls in one request
+  give two rows; and that a request whose COMMIT fails (a deferred constraint trigger installed by Python rejects the
+  update `status = "boom"` at COMMIT) ends with an exception (503 at the entry) and is rolled back together with the
+  earlier update. The Python side checks the outbox rows' contents (state, attempts, body, destination, and the absence
+  of rows for the request whose COMMIT failed) in the DB.
+- `loop`: runs nyxis's internal loop (repeating `Outbox.tick` at the configured interval; the same body as `Outbox.loop`
+  in real operation) for only `NYXIS_CHECK_OUTBOX_SECONDS` seconds and prints the number of rows processed. Python
+  starts two processes at once against the same DB and checks, from the mock API's records, that each row is sent
+  exactly once, that a switch from 5xx to 2xx is resent and becomes `sent` (with resend intervals of at least the
+  exponential backoff), that 4xx immediately becomes `failed`, and that exceeding the maximum number of attempts (a row
+  that always gets 5xx, and a `url: column` row pointing at a closed port = transport failures) becomes `failed`. The
+  transition `Outbox.settle` itself is checked at build time by the `#guard`s below.
 
-`NYXIS_DATABASE_URL` が指す新しい DB、`NYXIS_CHECK_EXTERNAL_PORT`(模擬 API のポート)、`NYXIS_EXT_NOTIFY`(送り先の鍵)、
-`NYXIS_OUTBOX_*`(内部ループの設定)を環境変数で受け取る。HTTP・JWT は通さない(`AuthenticatedRequest` を直接組む)。
-失敗すれば非 0 で終わる。資格情報・鍵・接続先は出力しない。
+Receives through environment variables a new DB pointed to by `NYXIS_DATABASE_URL`, `NYXIS_CHECK_EXTERNAL_PORT` (the
+mock API's port), `NYXIS_EXT_NOTIFY` (the destination's key), and `NYXIS_OUTBOX_*` (the internal loop's settings). Does
+not go through HTTP or JWT (builds `AuthenticatedRequest` directly). Exits non-zero on failure. Does not print
+credentials, keys, or connection targets.
 -/
 
 namespace Test.Outbox
 
 open Cedar.Spec Cedar.Data Nyxis Nyxis.Db Nyxis.Authz Nyxis.Runtime Nyxis.Internal
 
-/-! ## 遷移の純粋な検査(`Outbox.settle`。docs/external-calls.md §4.2。ビルド時) -/
+/-! ## Pure checks of the transitions (`Outbox.settle`; docs/external-calls.md §4.2; at build time) -/
 
 private def small : Outbox.Config := { intervalSeconds := 1, maxAttempts := 3, backoffBaseSeconds := 1 }
 
@@ -53,7 +59,7 @@ private def small : Outbox.Config := { intervalSeconds := 1, maxAttempts := 3, b
 #guard Outbox.principalText (.user ⟨⟨"User", []⟩, "alice"⟩) == "User::\"alice\""
 #guard Outbox.principalText .anonymous == "Anonymous::\"anonymous\""
 
-/-! ## 検査用の正本(送り先のベース URL は模擬 API のポートで決まる) -/
+/-! ## Test schema (the destination's base URL depends on the mock API's port) -/
 
 def schemaText (base : String) : String :=
   "entity User = { \"admin\": Bool };\n" ++
@@ -87,7 +93,7 @@ def act (name : String) : EntityUID := ⟨⟨"Action", []⟩, name⟩
 def str (s : String) : Value := .prim (.string s)
 def row (kvs : List (Column × Cell)) : Row := Map.make kvs
 
-/-! ## ハンドラ(検査用。効果は認可層への呼び出しだけ) -/
+/-! ## Handlers (for the checks; their only effects are calls to the authorization layer) -/
 
 def rowText (r : Row) : String :=
   String.intercalate ";" (r.toList.map fun kv => kv.1 ++ "=" ++ ((PostgresValue.encode kv.2).toOption.getD "?"))
@@ -104,13 +110,14 @@ def respond (success : Std.Http.Status) (body : Option Row → String) : Outcome
 
 def plain : Outcome → Http.Response := respond .ok (fun _ => "")
 
-/-- 通知を 2 回記録する(1 要求に 2 つの `async` 呼び出し → アウトボックスに 2 行)。 -/
+/-- Records a notification twice (two `async` calls in one request → two rows in the outbox). -/
 def notifyTwice (id : Key) : Handler Http.Response := do
   let first ← Handler.callAction (act "notifyOrder") id (row [])
   if let .ok none := first then plain <$> Handler.callAction (act "notifyOrder") id (row [])
   else pure (plain first)
 
-/-- 先に状態を更新してから通知を記録する(COMMIT が失敗すれば更新ごとアウトボックスの行も残らない)。 -/
+/-- Updates the status first, then records a notification (if the COMMIT fails, neither the update nor the outbox row
+    remains). -/
 def notifyMarked (id : Key) (status : String) : Handler Http.Response := do
   let marked ← Handler.callAction (act "markOrder") id (row [("status", str status)])
   if let .ok none := marked then plain <$> Handler.callAction (act "notifyOrder") id (row [])
@@ -131,7 +138,7 @@ def router (base : String) : Http.Router := fun method path =>
   | .post, ["orders", id, "ping"] => some fun _ _ _ => plain <$> Handler.callAction (act "pingHook") id (row [])
   | _, _ => none
 
-/-! ## 検査 -/
+/-! ## Checks -/
 
 def alice : Principal := .user ⟨userT, "alice"⟩
 def bob : Principal := .user ⟨userT, "bob"⟩
@@ -142,10 +149,11 @@ structure Context where
   app : App
   shape : PostgresShape.Shape
   external : ExternalSend.Config
-  /-- 応答・例外の文言に現れてはならない値(送り先の鍵)。 -/
+  /-- Values that must not appear in the text of responses or exceptions (destination keys). -/
   secrets : List String
   passed : IO.Ref Nat
-  /-- 要求ごとに別の一意 ID(実起動では `Generated.fresh`)。アウトボックスの主キーの接頭辞になる。 -/
+  /-- A distinct unique ID per request (`Generated.fresh` in real operation). Becomes the prefix of the outbox's primary
+      key. -/
   requests : IO.Ref Nat
 
 def Context.attempt (ctx : Context) (p : Principal) (method : Std.Http.Method) (path : String)
@@ -192,24 +200,24 @@ def Context.status (ctx : Context) (name : String) (id : String) (expected : Str
   ctx.passed.modify (· + 1)
   IO.println s!"ok {name}: status={expected}"
 
-/-- 並行して送られる行(2 プロセスの内部ループが分け合う)。 -/
+/-- Rows sent in parallel (shared between the internal loops of two processes). -/
 def parallelOrders : List String := (List.range 12).map fun i => s!"o-par{i}"
 
 def orders : List String :=
   ["o-ok", "o-twice", "o-boom", "o-404", "o-retry", "o-max", "o-hook"] ++ parallelOrders
 
 def enqueue (ctx : Context) : IO Unit := do
-  -- 行の用意(呼び出しは無い)。
+  -- Prepare the rows (no calls).
   for id in orders do
     ctx.expect s!"create {id}" alice .post s!"/orders/{id}" 201
   ctx.expect "create o-dead (url column at a closed port)" alice .post "/orders/o-dead" 201 "https://localhost:1/dead"
   ctx.expect "create by anonymous" anon .post "/orders/o-anon" 403
-  -- deny された呼び出しでは記録も送信も発生しない(Python 側がアウトボックスと模擬 API の記録を照合する)。
+  -- Denied calls cause neither a record nor a send (the Python side checks the outbox and the mock API's records).
   ctx.expect "notify denied: not the owner" bob .post "/orders/o-ok/notify" 403
   ctx.expect "notify denied: anonymous" anon .post "/orders/o-ok/notify" 403
   ctx.expect "notify denied: absent order" alice .post "/orders/nope/notify" 403
   ctx.expect "ping denied: not the owner" bob .post "/orders/o-hook/ping" 403
-  -- permit された async の呼び出しは送らずに記録し、ハンドラには `ok none`(200・本文なし)が渡る。
+  -- A permitted async call is recorded without being sent, and the handler receives `ok none` (200, no body).
   ctx.expect "notify o-retry (mock answers 5xx twice, then 2xx)" alice .post "/orders/o-retry/notify" 200 "" (some "")
   ctx.expect "notify o-404 (mock answers 4xx)" alice .post "/orders/o-404/notify" 200 "" (some "")
   ctx.expect "notify o-max (mock always answers 5xx)" alice .post "/orders/o-max/notify" 200 "" (some "")
@@ -219,7 +227,7 @@ def enqueue (ctx : Context) : IO Unit := do
     (some "")
   for id in parallelOrders do
     ctx.expect s!"notify {id}" alice .post s!"/orders/{id}/notify" 200 "" (some "")
-  -- 同じトランザクションの更新と記録: COMMIT が失敗すれば(遅延制約トリガー)どちらも残らない。
+  -- An update and a record in the same transaction: if the COMMIT fails (deferred constraint trigger), neither remains.
   ctx.expectFailure "notify-marked o-boom (COMMIT fails: no outbox row may remain)" alice .post
     "/orders/o-boom/notify-marked" "boom"
   ctx.status "o-boom rolled back" "o-boom" "new"
@@ -228,7 +236,8 @@ def enqueue (ctx : Context) : IO Unit := do
   ctx.status "o-ok marked" "o-ok" "noted"
   ctx.expect "unknown route" alice .get "/nothing" 404
 
-/-- 内部ループを期限まで回す(実起動の `Outbox.loop` と同じ本体: `tick` → 間隔だけ眠る)。処理した行の数。 -/
+/-- Runs the internal loop until the deadline (the same body as `Outbox.loop` in real operation: `tick` → sleep for the
+    interval). Returns the number of rows processed. -/
 partial def runLoop (conninfo : String) (calls : CallSend.Config) (config : Outbox.Config) (deadline : Nat)
     (processed : Nat := 0) : IO Nat := do
   let processed := processed + (← Outbox.tick conninfo calls config)

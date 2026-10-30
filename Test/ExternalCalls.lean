@@ -4,36 +4,39 @@ import Nyxis.Internal.PostgresRun
 import Nyxis.Internal.PostgresValue
 
 /-!
-# Test.ExternalCalls — 外部 API 呼び出し(`sync`)の模擬 API に対する実 DB 統合検査
+# Test.ExternalCalls — real-DB integration checks of external API calls (`sync`) against a mock API
 
-コア専用の検査用正本(文字列。アプリのファイルではない)に `@external` の送り先 3 つ — `Pay`(ベース URL と
-`bearer NYXIS_EXT_PAY`)・`Maps`(ベース URL と `header X-API-Key NYXIS_EXT_MAPS`)・`Hook`(`base` 無し、認証なし。
-`url: 列`)— と `call` のアクションを置き、実 PostgreSQL(ローカル Supabase)と、`scripts/check-external-calls.py` が
-ローカルで起動する HTTPS の模擬 API(`https://localhost:<port>`。一時的な自己署名証明書を `CURL_CA_BUNDLE` で子だけに
-信頼させる)に対し、実起動が使う接続経路 `PostgresRun.handleStaged`(呼び出しごとの点検索 → 判定 → 送信 → 続き → COMMIT)
-で次を確かめる:
+Places, in a core-only test source (a string; not an application file), three `@external` destinations — `Pay` (a base
+URL and `bearer NYXIS_EXT_PAY`), `Maps` (a base URL and `header X-API-Key NYXIS_EXT_MAPS`), and `Hook` (no `base`, no
+authentication; `url: column`) — together with `call` actions, and checks the following against real PostgreSQL (local
+Supabase) and a mock HTTPS API that `scripts/check-external-calls.py` starts locally (`https://localhost:<port>`; a
+temporary self-signed certificate is trusted only by the child via `CURL_CA_BUNDLE`), through the connection path the
+real server uses, `PostgresRun.handleStaged` (per call: point lookup → decision → send → continuation → COMMIT):
 
-- deny された呼び出し(所有者でない利用者・匿名・提案値がポリシーに合わない・無い行)では送信が発生しない(模擬 API の
-  記録は Python 側が照合する)。
-- `sync` の呼び出しの認証ヘッダがコア設定 `NYXIS_EXT_<名前>` の値で付く(`bearer` と `header` の両方。模擬 API が照合)。
-- 2xx の応答は宣言した型に寛容に復号されてハンドラに値として渡る: 余分なキーは捨てられ、宣言したキーの欠落・型違い
-  (入れ子の省略可能なキーの型違い・JSON でない本文を含む)は要求全体が固定の 502 になり、同じ要求で先に行った更新は
-  取り消される。
-- 2xx 以外の応答は状態コードと本文としてハンドラに渡り(トランザクションは続く)、輸送の失敗(期限・本文の上限)は例外
-  (入口で 503)で取り消される。
-- `GET` では本文を送らない。`url: 列` の送り先は行の `https://` の URL にだけ送る。
-- 認証ヘッダの値(秘密)は応答にも例外の文言にも現れない(模擬 API 以外の出力は Python 側も照合する)。
+- Denied calls (a user who is not the owner, anonymous, proposed values that do not match the policy, a missing row)
+  cause no send (the Python side checks the mock API's record).
+- The authentication header of a `sync` call is set to the value of the core configuration `NYXIS_EXT_<name>` (both
+  `bearer` and `header`; the mock API checks it).
+- A 2xx response is leniently decoded into the declared type and passed to the handler as a value: extra keys are
+  dropped, and a missing declared key or a type mismatch (including a type mismatch of a nested optional key, and a body
+  that is not JSON) turns the whole request into a fixed 502, rolling back updates made earlier in the same request.
+- A non-2xx response is passed to the handler as the status code and body (the transaction continues), and a transport
+  failure (deadline, body limit) is an exception (503 at the entry point) and is rolled back.
+- With `GET` no body is sent. A `url: column` destination is sent to only for an `https://` URL in the row.
+- The value of the authentication header (a secret) appears neither in responses nor in exception messages (the Python
+  side also checks the output other than the mock API).
 
-`NYXIS_DATABASE_URL` が指す新しい DB、`NYXIS_CHECK_EXTERNAL_PORT`(模擬 API のポート)、`NYXIS_EXT_PAY` /
-`NYXIS_EXT_MAPS`(送り先の鍵)を環境変数で受け取る。HTTP・JWT は通さない(`AuthenticatedRequest` を直接組む)。
-失敗すれば非 0 で終わる。資格情報・鍵・接続先は出力しない。
+Takes from environment variables a fresh DB pointed to by `NYXIS_DATABASE_URL`, `NYXIS_CHECK_EXTERNAL_PORT` (the mock
+API's port), and `NYXIS_EXT_PAY` / `NYXIS_EXT_MAPS` (the destination keys). HTTP and JWT are not involved (an
+`AuthenticatedRequest` is built directly). Exits non-zero on failure. Credentials, keys, and connection targets are not
+printed.
 -/
 
 namespace Test.ExternalCalls
 
 open Cedar.Spec Cedar.Data Nyxis Nyxis.Db Nyxis.Authz Nyxis.Runtime Nyxis.Internal
 
-/-! ## 検査用の正本(送り先のベース URL は模擬 API のポートで決まる) -/
+/-! ## Test sources (the destinations' base URLs are determined by the mock API's port) -/
 
 def schemaText (base : String) : String :=
   "entity User = { \"admin\": Bool };\n" ++
@@ -75,13 +78,13 @@ def act (name : String) : EntityUID := ⟨⟨"Action", []⟩, name⟩
 def str (s : String) : Value := .prim (.string s)
 def row (kvs : List (Column × Cell)) : Row := Map.make kvs
 
-/-! ## ハンドラ(検査用。効果は認可層への呼び出しだけ) -/
+/-! ## Handlers (for testing; the only effects are calls into the authorization layer) -/
 
-/-- 行を列ごとの保存形式で書き下す(読み取りの応答)。 -/
+/-- Write out a row in the per-column storage format (the response of a read). -/
 def rowText (r : Row) : String :=
   String.intercalate ";" (r.toList.map fun kv => kv.1 ++ "=" ++ ((PostgresValue.encode kv.2).toOption.getD "?"))
 
-/-- 呼び出しの結果の応答: 復号した値は JSON、2xx 以外は `状態コード:本文`(409 に写す)。 -/
+/-- The response for a call result: a decoded value as JSON, non-2xx as `status code:body` (mapped to 409). -/
 def respond (success : Std.Http.Status) (body : Option Row → String) : Outcome → Http.Response
   | .ok r => ⟨success, body r, []⟩
   | .list rows _ => ⟨.ok, String.intercalate "," (rows.map Prod.fst), []⟩
@@ -94,15 +97,16 @@ def respond (success : Std.Http.Status) (body : Option Row → String) : Outcome
 
 def plain : Outcome → Http.Response := respond .ok (fun _ => "")
 
-/-- 課金を呼び、成功したら状態を `charged` にする(応答の値は判定に入らず、続きの更新は別に判定される)。 -/
+/-- Call the charge and, on success, set the status to `charged` (the response value does not enter the decision, and
+    the follow-up update is decided separately). -/
 def charge (id : Key) (currency : String) : Handler Http.Response := do
   let charged ← Handler.callAction (act "chargeOrder") id (row [("currency", str currency)])
   if let .called _ := charged then
     let _ ← Handler.callAction (act "markOrder") id (row [("status", str "charged")])
   pure (plain charged)
 
-/-- 先に状態を `charging` にしてから課金を呼ぶ(復号の失敗・輸送の失敗ではこの更新ごと取り消される。2xx 以外の応答では
-    トランザクションが続くので残る)。 -/
+/-- First set the status to `charging`, then call the charge (on a decoding failure or a transport failure this update
+    is rolled back as well; on a non-2xx response the transaction continues, so it remains). -/
 def chargeMarked (id : Key) (currency : String) : Handler Http.Response := do
   let _ ← Handler.callAction (act "markOrder") id (row [("status", str "charging")])
   plain <$> Handler.callAction (act "chargeOrder") id (row [("currency", str currency)])
@@ -123,7 +127,7 @@ def router (base : String) : Http.Router := fun method path =>
   | .post, ["orders", id, "ping"] => some fun _ _ _ => plain <$> Handler.callAction (act "pingHook") id
   | _, _ => none
 
-/-! ## 検査 -/
+/-! ## Checks -/
 
 def gen : Generated := { now := ⟨1700000000000⟩, id := "00000000-0000-4000-8000-000000000002" }
 def alice : Principal := .user ⟨userT, "alice"⟩
@@ -135,7 +139,7 @@ structure Context where
   app : App
   shape : PostgresShape.Shape
   external : ExternalSend.Config
-  /-- 応答・例外の文言に現れてはならない値(送り先の鍵)。 -/
+  /-- Values that must not appear in responses or exception messages (the destination keys). -/
   secrets : List String
   passed : IO.Ref Nat
 
@@ -150,7 +154,7 @@ def Context.attempt (ctx : Context) (p : Principal) (method : Std.Http.Method) (
 def Context.leaks (ctx : Context) (text : String) : Bool :=
   ctx.secrets.any fun s => (text.splitOn s).length > 1
 
-/-- 1 要求の状態コードと(与えられれば)本文を照合する。本文に鍵が現れないことも確かめる。 -/
+/-- Check the status code and (if given) the body of one request. Also checks that no key appears in the body. -/
 def Context.expect (ctx : Context) (name : String) (p : Principal) (method : Std.Http.Method)
     (path : String) (status : Nat) (body : String := "") (expected : Option String := none) : IO Unit := do
   let .ok response ← ctx.attempt p method path body
@@ -164,7 +168,8 @@ def Context.expect (ctx : Context) (name : String) (p : Principal) (method : Std
   ctx.passed.modify (· + 1)
   IO.println s!"ok {name}: {response.status.toCode} {response.body}"
 
-/-- 1 要求が例外で閉じる(入口では 503)ことと、例外の文言に鍵が現れないことを照合する。 -/
+/-- Check that one request ends with an exception (503 at the entry point) and that no key appears in the exception
+    message. -/
 def Context.expectFailure (ctx : Context) (name : String) (p : Principal) (method : Std.Http.Method)
     (path : String) (body : String := "") : IO Unit := do
   let .error message ← ctx.attempt p method path body
@@ -173,7 +178,7 @@ def Context.expectFailure (ctx : Context) (name : String) (p : Principal) (metho
   ctx.passed.modify (· + 1)
   IO.println s!"ok {name}: exception"
 
-/-- 行の `status` 列の読み取り。 -/
+/-- Read the row's `status` column. -/
 def Context.status (ctx : Context) (name : String) (id : String) (expected : String) : IO Unit := do
   let .ok response ← ctx.attempt alice .get s!"/orders/{id}" ""
     | throw (IO.userError s!"{name}: read failed with an exception")
@@ -188,13 +193,13 @@ def orders : List String :=
   ["o-ok", "o-extra", "o-missing", "o-wrong", "o-nested", "o-text", "o-402", "o-500", "o-slow", "o-large", "o-hook"]
 
 def run (ctx : Context) (base : String) : IO Unit := do
-  -- 行の用意(呼び出しは無い)。
+  -- Prepare the rows (no calls).
   for id in orders do
     ctx.expect s!"create {id}" alice .post s!"/orders/{id}" 201
   ctx.expect "create o-plain (http:// endpoint)" alice .post "/orders/o-plain" 201 "http://localhost/hooks/a"
   ctx.expect "create by anonymous" anon .post "/orders/o-anon" 403
   ctx.expect "create for bob by alice" bob .post "/orders/o-bob" 201 ""
-  -- deny された呼び出しでは送信が発生しない(模擬 API の記録を Python 側が照合する)。
+  -- Denied calls cause no send (the Python side checks the mock API's record).
   ctx.expect "charge denied: not the owner" bob .post "/orders/o-ok/charge" 403 "jpy"
   ctx.expect "charge denied: anonymous" anon .post "/orders/o-ok/charge" 403 "jpy"
   ctx.expect "charge denied: currency usd" alice .post "/orders/o-ok/charge" 403 "usd"
@@ -203,36 +208,40 @@ def run (ctx : Context) (base : String) : IO Unit := do
   ctx.expect "geocode denied: not the owner" bob .get "/orders/o-ok/geocode" 403
   ctx.expect "ping denied: not the owner" bob .post "/orders/o-hook/ping" 403
   ctx.status "o-ok unchanged after denied calls" "o-ok" "new"
-  -- sync の 2xx: 復号した値がハンドラに渡り、続きの更新も判定を通って COMMIT される。
+  -- sync 2xx: the decoded value is passed to the handler, and the follow-up update also passes the decision and is
+  -- COMMITted.
   ctx.expect "charge o-ok" alice .post "/orders/o-ok/charge" 200 "jpy"
     (some "{\"id\":\"ch_1\",\"status\":\"succeeded\"}")
   ctx.status "o-ok charged" "o-ok" "charged"
-  -- 余分なキー(最上位と入れ子)は捨てられ、宣言した省略可能なキーは残る。
+  -- Extra keys (top level and nested) are dropped; declared optional keys remain.
   ctx.expect "charge o-extra (extra keys dropped)" alice .post "/orders/o-extra/charge" 200 "jpy"
     (some "{\"id\":\"ch_2\",\"meta\":{\"n\":5},\"status\":\"succeeded\"}")
-  -- 宣言したキーの欠落・型違い・入れ子の型違い・JSON でない本文は固定の 502 で、先の更新ごと取り消される。
+  -- A missing declared key, a type mismatch, a nested type mismatch, or a non-JSON body is a fixed 502, rolling back
+  -- the earlier update as well.
   for (id, what) in [("o-missing", "missing key"), ("o-wrong", "wrong type"), ("o-nested", "nested wrong type"),
       ("o-text", "not json")] do
     ctx.expect s!"charge-marked {id} ({what}) is 502" alice .post s!"/orders/{id}/charge-marked" 502 "jpy"
       (some "external response invalid")
     ctx.status s!"{id} rolled back" id "new"
-  -- 2xx 以外は状態コードと本文としてハンドラに渡り、トランザクションは続く(先の更新が残る)。
+  -- Non-2xx is passed to the handler as the status code and body, and the transaction continues (the earlier update
+  -- remains).
   ctx.expect "charge-marked o-402 (status and body to the handler)" alice .post "/orders/o-402/charge-marked" 409 "jpy"
     (some "402:{\"error\":\"insufficient\"}")
   ctx.status "o-402 kept the update before the call" "o-402" "charging"
   ctx.expect "charge o-500" alice .post "/orders/o-500/charge" 409 "jpy" (some "500:oops")
   ctx.status "o-500 not charged" "o-500" "new"
-  -- 輸送の失敗(期限・本文の上限)は例外で取り消される。
+  -- Transport failures (deadline, body limit) are exceptions and are rolled back.
   ctx.expectFailure "charge-marked o-slow (deadline)" alice .post "/orders/o-slow/charge-marked" "jpy"
   ctx.status "o-slow rolled back" "o-slow" "new"
   ctx.expectFailure "charge-marked o-large (response size bound)" alice .post "/orders/o-large/charge-marked" "jpy"
   ctx.status "o-large rolled back" "o-large" "new"
-  -- GET の sync(本文なし)、header の認証(Set / Bool / Long の復号)、url: 列の送り先(認証なし)。
+  -- GET sync (no body), header authentication (decoding Set / Bool / Long), a url: column destination (no
+  -- authentication).
   ctx.expect "check o-ok (GET, no body)" alice .get "/orders/o-ok/charge" 200 "" (some "{\"status\":\"paid\"}")
   ctx.expect "geocode o-ok (header auth, set and bool)" alice .get "/orders/o-ok/geocode" 200 ""
     (some "{\"lat\":35,\"ok\":true,\"tags\":[\"a\",\"b\"]}")
   ctx.expect "ping o-hook (url column, no auth)" alice .post "/orders/o-hook/ping" 200 "" (some "{\"ok\":true}")
-  -- ポリシーの `like "https://localhost:*"` が http:// の送り先を deny する(送信なし)。
+  -- The policy's `like "https://localhost:*"` denies the http:// destination (no send).
   ctx.expect "ping o-plain (policy denies the http:// endpoint: no send)" alice .post "/orders/o-plain/ping" 403
   ctx.expect "unknown route" alice .get "/nothing" 404
   let _ := base
@@ -263,7 +272,7 @@ def main : IO UInt32 := do
     IO.println s!"check-external-calls: {← passed.get} checks passed (real local DB; mock HTTPS API; path=staged)"
     return 0
   | .error e =>
-    -- 失敗の説明は検査の名前だけで、接続先や鍵の診断は含まない。
+    -- The failure description is only the check's name and contains no diagnostics about connection targets or keys.
     IO.eprintln s!"check-external-calls failed after {← passed.get} checks: {e}"
     return 1
 

@@ -1,12 +1,13 @@
 import TeamDocs.App
 
 /-!
-# TeamDocsTest.Model — 2 つめの公式サンプルのハンドラとルーティングの検査
+# TeamDocsTest.Model — checks of the handlers and routing of the second official sample
 
-`TeamDocs.app`(正本から構成した `TeamDocs.schema` と `TeamDocs.policies`、`TeamDocs.router`)を、
-ランタイムの純粋モデル(`Nyxis.Runtime.handleRequest` / `trace`)の上で小さな DB の初期状態について動かし、
-各主体の各操作がポリシーどおりに許可・拒否され、HTTP の状態に写ることを `#guard` で検査する。
-HTTP サーバ・JWT・PostgreSQL は含まない(それらは `scripts/check-team-docs.py` の統合テスト)。`lake build` で実行される。
+Runs `TeamDocs.app` (`TeamDocs.schema` and `TeamDocs.policies` built from the approved source, and `TeamDocs.router`) on
+the runtime's pure model (`Nyxis.Runtime.handleRequest` / `trace`) against a small initial DB state, and checks with
+`#guard` that each operation of each principal is permitted or denied as the policy says and maps to the expected HTTP
+status. The HTTP server, JWT and PostgreSQL are not included (those are the integration test
+`scripts/check-team-docs.py`). Run by `lake build`.
 -/
 
 namespace TeamDocsTest.Model
@@ -27,7 +28,7 @@ def teamT : EntityType := ⟨"Team", []⟩
 def memT : EntityType := ⟨"Membership", []⟩
 def user (id : String) : EntityUID := ⟨userT, id⟩
 def org (id : String) : EntityUID := ⟨orgT, id⟩
-/-- 組織 `o` の役割 `role` の組(ハンドラの `teamKey` と同じ名前)。 -/
+/-- The team for role `role` of org `o` (the same name as the handlers' `teamKey`). -/
 def team (o role : String) : EntityUID := ⟨teamT, o ++ "/" ++ role ++ "s"⟩
 
 def uidV (u : EntityUID) : Value := .prim (.entityUID u)
@@ -36,7 +37,7 @@ def setV (vs : List Value) : Value := .set (Set.make vs)
 def dateV (ms : Int64) : Value := .ext (.datetime ⟨ms⟩)
 def row (kvs : List (Attr × Value)) : Row := Map.make kvs
 
-/-- この検査で固定するサーバー生成値。 -/
+/-- The server-generated values fixed for this check. -/
 def gen : Generated := { now := ⟨1767225600000⟩, id := "generated-id" }
 def t0 : Int64 := 1767000000000
 
@@ -54,7 +55,7 @@ def orgRow (o name : String) (owners : List String) : Row :=
 
 def teamRow (o role : String) : Row := row [("org", uidV (org o)), ("role", strV role)]
 
-/-- 所属行: 利用者 `u` が組織 `o` の役割 `role` の組に属する。 -/
+/-- Membership row: user `u` belongs to the team for role `role` of org `o`. -/
 def memRow (u o role : String) : Row := row [("user", uidV (user u)), ("team", uidV (team o role)), ("org", uidV (org o))]
 
 def docRow (o : String) (title : String) (shared : List String) (creator : String) (attachment : String := "") : Row :=
@@ -62,9 +63,10 @@ def docRow (o : String) (title : String) (shared : List String) (creator : Strin
       , ("shared", setV (shared.map (uidV ∘ user))), ("createdBy", uidV (user creator))
       , ("createdAt", dateV t0), ("updatedAt", dateV t0), ("attachment", strV attachment), ("summary", strV "") ]
 
-/-- acme: owner が owner、editor と multi が editor の組、viewer が viewer の組(所属行 m-editor-acme / m-multi-acme /
-    m-viewer-acme)。zen: outsider が owner、multi が viewer の組(m-multi-zen)。solo: outsider だけ。各組織は editor と
-    viewer の組を持つ。a1 は editor が acme に作った文書、z1 は zen の文書、s1 は solo の文書で guest に個別共有されている。 -/
+/-- acme: owner is the owner, editor and multi are in the editor team, viewer is in the viewer team (membership rows
+    m-editor-acme / m-multi-acme / m-viewer-acme). zen: outsider is the owner, multi is in the viewer team
+    (m-multi-zen). solo: outsider only. Every org has editor and viewer teams. a1 is a document editor created in acme,
+    z1 is a zen document, s1 is a solo document individually shared with guest. -/
 def store : Store := Map.make
   [ (user "owner", row [("name", strV "Owner")]), (user "editor", row [("name", strV "Editor")])
   , (user "viewer", row [("name", strV "Viewer")]), (user "multi", row [("name", strV "Multi")])
@@ -95,7 +97,7 @@ def body (s : Store) (r : AuthenticatedRequest) : String :=
 def issuedCount (s : Store) (r : AuthenticatedRequest) : Nat :=
   (handleRequest app s r).issued.length
 
-/-- リクエスト列を順に処理し、各レスポンスと最後の状態を返す。 -/
+/-- Processes a request sequence in order and returns each response and the final state. -/
 def run (s : Store) : List AuthenticatedRequest → List Http.Response × Store
   | [] => ([], s)
   | r :: rest =>
@@ -105,22 +107,22 @@ def run (s : Store) : List AuthenticatedRequest → List Http.Response × Store
 
 def contains (haystack needle : String) : Bool := (haystack.splitOn needle).length > 1
 
-/-! ## 文書の読み取り(所属組織の文書だけ、他組織は 403、個別共有は読める) -/
+/-! ## Reading documents (only documents of one's own orgs; other orgs are 403; individual sharing can be read) -/
 
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p => status store (req p .get "/docs/a1"))
   == [200, 200, 200, 200, 403, 403, 403]
 #guard [owner, editor, viewer, multi, outsider, guest].map (fun p => status store (req p .get "/docs/z1"))
   == [403, 403, 403, 200, 200, 403]
 #guard [owner, multi, outsider, guest].map (fun p => status store (req p .get "/docs/s1")) == [403, 403, 200, 200]
--- 無い文書・無い組織の文書はポリシーが評価できず 403(存在を漏らさない)
+-- A missing document or a document of a missing org cannot be evaluated by the policy: 403 (does not leak existence)
 #guard status store (req owner .get "/docs/nope") == 403
 #guard issuedCount store (req anon .get "/docs/a1") == 0
--- 読み取りの本文は JSON で、日時はエポックミリ秒
+-- The body of a read is JSON, with datetimes in epoch milliseconds
 #guard contains (body store (req viewer .get "/docs/a1")) "\"createdAt\":1767000000000"
 #guard contains (body store (req viewer .get "/docs/a1")) "\"org\":\"acme\""
 #guard (handleRequest app store (req viewer .get "/docs/a1")).result.headers == [(.contentType, "application/json")]
 
-/-! ## 一覧(問い合わせ文字列で組織を絞る) -/
+/-! ## Listing (filtering by org with the query string) -/
 
 def listed (p : Principal) (query : String := "") : String := body store (req p .get "/docs" "" query)
 
@@ -135,56 +137,57 @@ def listed (p : Principal) (query : String := "") : String := body store (req p 
 #guard (handleRequest app store (req multi .get "/docs" "" "org=acme")).result.headers == [(.contentType, "application/json")]
 #guard (handleRequest app store (req multi .get "/docs")).store == store
 
-/-! ## 一覧の絞り込み・並べ替え・ページ・件数
+/-! ## List filtering, ordering, paging and counts
 
-`store` に acme の文書 `a2`(題名 "b2"、更新日時 t0+1000)と `a3`(題名 "c3"、更新日時 t0+2000)を足す。
-multi は acme と zen の文書(a1・a2・a3・z1)を読め、s1 は読めない。 -/
+Adds to `store` acme documents `a2` (title "b2", updated at t0+1000) and `a3` (title "c3", updated at t0+2000). multi
+can read the acme and zen documents (a1, a2, a3, z1) but not s1. -/
 
 def store5 : Store := Map.make (store.toList ++
   [ (⟨docT, "a2"⟩, (docRow "acme" "b2" [] "owner").patch (row [("updatedAt", dateV (t0 + 1000))]))
   , (⟨docT, "a3"⟩, (docRow "acme" "c3" [] "editor").patch (row [("updatedAt", dateV (t0 + 2000))])) ])
 
-/-- 返した主キーの列と件数(本文の JSON から)。 -/
+/-- The returned primary keys and the count (from the JSON body). -/
 def page (p : Principal) (query : String) : List String × Nat :=
   let b := body store5 (req p .get "/docs" "" query)
   let ids := ((b.splitOn "\"id\":\"").drop 1).map fun piece => (piece.splitOn "\"").headD ""
   let total := (((b.splitOn "\"total\":").getD 1 "").takeWhile Char.isDigit).toNat?.getD 0
   (ids, total)
 
--- 問い合わせ無しは主キーの順で全部。件数は permit された数
+-- Without a query: everything in primary key order. The count is the number permitted
 #guard page multi "" == (["a1", "a2", "a3", "z1"], 4)
 #guard page outsider "" == (["s1", "z1"], 2)
--- 絞り込み(組織の等値・題名の等値・更新日時の範囲)は判定の前に行われ、件数も絞った後
+-- Filtering (org equality, title equality, update time range) happens before the decision, and the count is after
+-- filtering too
 #guard page multi "org=acme" == (["a1", "a2", "a3"], 3)
 #guard page multi "title=b2" == (["a2"], 1)
 #guard page multi "since=1767000001000" == (["a2", "a3"], 2)
 #guard page multi "before=1767000001000" == (["a1", "z1"], 2)
 #guard page multi "since=1767000001000&before=1767000002000" == (["a2"], 1)
 #guard page outsider "org=acme" == ([], 0)
--- 題名の範囲(文字列の大小。コードポイントの順)
+-- Title range (string comparison; code point order)
 #guard page multi "titleFrom=b" == (["a2", "a3", "z1"], 3)
 #guard page multi "titleTo=b2" == (["a1"], 1)
 #guard page multi "titleFrom=b2&titleTo=z" == (["a2", "a3"], 2)
 #guard status store5 (req multi .get "/docs" "" "title=a%00b") == 400
--- 並べ替え
+-- Ordering
 #guard page multi "sort=updatedAt&dir=desc" == (["a3", "a2", "a1", "z1"], 4)
 #guard page multi "sort=title&dir=desc" == (["z1", "a3", "a2", "a1"], 4)
--- ページは permit された行に対して切られ、拒否された行(s1)の分だけ欠けない。件数はページを切る前
+-- Pages are cut over the permitted rows, with no gaps for denied rows (s1). The count is before paging
 #guard page multi "sort=title&limit=2" == (["a1", "a2"], 4)
 #guard page multi "sort=title&limit=2&offset=2" == (["a3", "z1"], 4)
 #guard page multi "sort=title&limit=2&offset=4" == ([], 4)
 #guard page guest "sort=title&limit=1" == (["s1"], 1)
 #guard page outsider "sort=title&limit=1&offset=1" == (["z1"], 2)
--- 発行する読み取りは返した行の分だけ
+-- Reads are issued only for the returned rows
 #guard issuedCount store5 (req multi .get "/docs" "" "limit=1") == 1
 #guard issuedCount store5 (req multi .get "/docs" "" "org=acme") == 3
--- 不正な問い合わせは 400 で、アクションは呼ばない
+-- An invalid query is 400, and no action is called
 #guard status store5 (req multi .get "/docs" "" "limit=x") == 400
 #guard status store5 (req multi .get "/docs" "" "sort=body") == 400
 #guard status store5 (req multi .get "/docs" "" "dir=up") == 400
 #guard issuedCount store5 (req multi .get "/docs" "" "offset=-1") == 0
 
-/-! ## 作成(主キーは生成 ID、作成日時・更新日時は生成時刻) -/
+/-! ## Creation (primary key is the generated ID; creation and update times are the generated time) -/
 
 def newDoc : String := "{\"org\":\"acme\",\"title\":\"n\",\"body\":\"b\",\"id\":\"client\",\"createdAt\":1,\"createdBy\":\"viewer\"}"
 
@@ -198,14 +201,15 @@ def newDoc : String := "{\"org\":\"acme\",\"title\":\"n\",\"body\":\"b\",\"id\":
 #guard ((handleRequest app store (req editor .post "/docs" newDoc)).store.find? docT "generated-id").map (·.find? "createdBy")
   == some (some (uidV (user "editor")))
 #guard ((handleRequest app store (req editor .post "/docs" newDoc)).store.find? docT "client").isNone
--- 他組織・無い組織には作れない
+-- Cannot create in another org or a missing org
 #guard status store (req editor .post "/docs" "{\"org\":\"zen\",\"title\":\"n\",\"body\":\"b\"}") == 403
 #guard status store (req editor .post "/docs" "{\"org\":\"nope\",\"title\":\"n\",\"body\":\"b\"}") == 403
 #guard status store (req editor .post "/docs" "{\"org\":\"acme\",\"title\":\"n\"}") == 400
 #guard issuedCount store (req editor .post "/docs" "not json") == 0
--- 生成 ID の文書が既にあれば 409
+-- 409 if a document with the generated ID already exists
 #guard (run store [req editor .post "/docs" newDoc, req editor .post "/docs" newDoc]).1.map (·.status.toCode) == [201, 409]
--- ハンドラを経由しない呼び出しでも、生成時刻と違う作成日時や主体と違う作成者はポリシーが拒否する
+-- Even for calls that bypass the handler, the policy rejects a creation time different from the generated time or a
+-- creator different from the principal
 def forged (createdAt : Int64) (creator : String) (attachment : String := "") (summary : String := "") : Row :=
   row [ ("org", uidV (org "acme")), ("title", strV "n"), ("body", strV "b"), ("shared", setV [])
       , ("createdBy", uidV (user creator)), ("createdAt", dateV createdAt), ("updatedAt", dateV createdAt)
@@ -221,15 +225,15 @@ def isDenied : Outcome → Bool
 #guard isOk (createOutcome (forged 1767225600000 "editor"))
 #guard isDenied (createOutcome (forged 1 "editor"))
 #guard isDenied (createOutcome (forged 1767225600000 "owner"))
--- 作成時に共有先や添付や要約を入れることもポリシーが拒否する(共有は shareDoc で、添付は attachDoc / uploadAttachment で、
--- 要約は summarizeDoc の応答を recordSummary で)
+-- The policy also rejects setting share targets, an attachment or a summary at creation (sharing is via shareDoc,
+-- attachments via attachDoc / uploadAttachment, summaries via recordSummary with summarizeDoc's response)
 #guard isDenied (createOutcome (row [ ("org", uidV (org "acme")), ("title", strV "n"), ("body", strV "b")
   , ("shared", setV [uidV (user "guest")]), ("createdBy", uidV (user "editor"))
   , ("createdAt", dateV 1767225600000), ("updatedAt", dateV 1767225600000), ("attachment", strV ""), ("summary", strV "") ]))
 #guard isDenied (createOutcome (forged 1767225600000 "editor" "generated-id"))
 #guard isDenied (createOutcome (forged 1767225600000 "editor" "" "written by the client"))
 
-/-! ## 編集・共有・削除 -/
+/-! ## Editing, sharing, deleting -/
 
 #guard [owner, editor, multi, viewer, outsider, guest, anon].map (fun p => status store (req p .patch "/docs/a1" "{\"title\":\"t\"}"))
   == [204, 204, 204, 403, 403, 403, 403]
@@ -240,7 +244,7 @@ def isDenied : Outcome → Bool
 #guard status store (req editor .patch "/docs/a1" "{}") == 400
 #guard status store (req editor .patch "/docs/a1" "{\"updatedAt\":1}") == 400
 #guard status store (req guest .patch "/docs/s1" "{\"title\":\"t\"}") == 403
--- 共有は owner / editor だけ。共有された利用者は読めるようになり、共有を外すと読めなくなる
+-- Sharing is owner / editor only. A shared user becomes able to read, and loses that when unshared
 #guard [owner, editor, viewer, outsider].map (fun p => status store (req p .put "/docs/a1/shared" "{\"shared\":[\"guest\"]}"))
   == [204, 204, 403, 403]
 #guard (run store [req editor .put "/docs/a1/shared" "{\"shared\":[\"guest\"]}", req guest .get "/docs/a1",
@@ -248,18 +252,18 @@ def isDenied : Outcome → Bool
   == [204, 200, 204, 403]
 #guard status store (req owner .put "/docs/a1/shared" "{}") == 400
 #guard status store (req owner .put "/docs/a1/shared" "{\"shared\":[1]}") == 400
--- 削除は作成者だけ(owner でも他人の文書は消せない)
+-- Deletion is creator only (even an owner cannot delete someone else's document)
 #guard [owner, editor, multi, viewer, outsider, guest].map (fun p => status store (req p .delete "/docs/a1"))
   == [403, 204, 403, 403, 403, 403]
 #guard (run store [req editor .delete "/docs/a1", req viewer .get "/docs/a1"]).1.map (·.status.toCode) == [204, 403]
 #guard status store (req outsider .delete "/docs/s1") == 204
 #guard status store (req guest .delete "/docs/s1") == 403
 
-/-! ## 添付(署名付き URL の発行は宣言された外部効果として認可層を通る)
+/-! ## Attachments (issuing signed URLs passes through the authorization layer as a declared external effect)
 
-`req … (externals := …)` の外部効果の結果の列は、接続層が Supabase Storage から得る値の代わり(呼び出しごとに 1 つ)。
-`POST /docs/{id}/attachment` は 1 番目の呼び出し(attachDoc の更新)で消費せず、2 番目(uploadAttachment)で署名付き URL を
-受け取る。 -/
+The list of external effect results in `req … (externals := …)` stands in for the values the connection layer gets from
+Supabase Storage (one per call). `POST /docs/{id}/attachment` consumes none in the 1st call (the attachDoc update) and
+receives the signed URL in the 2nd (uploadAttachment). -/
 
 def attachReq (p : Principal) (id : String) (exts : Externals := [.none, .signed "https://storage/upload"]) : AuthenticatedRequest :=
   req p .post ("/docs/" ++ id ++ "/attachment") "" "" exts
@@ -271,32 +275,35 @@ def externalObjects (s : Store) (r : AuthenticatedRequest) : List String :=
     | .upload object | .download object => some object
     | _ => none
 
--- アップロード URL の発行は owner と editor の組の利用者だけ。応答は URL と記録したオブジェクトの名(生成 ID)
+-- Upload URLs are issued only to owners and users in the editor team. The response is the URL and the recorded object
+-- name (the generated ID)
 #guard [owner, editor, multi, viewer, outsider, guest, anon].map (fun p => status store (attachReq p "a1"))
   == [200, 200, 200, 403, 403, 403, 403]
 #guard body store (attachReq editor "a1") == "{\"object\":\"generated-id\",\"url\":\"https://storage/upload\"}"
 #guard (handleRequest app store (attachReq editor "a1")).result.headers == [(.contentType, "application/json")]
--- 添付の名が列に記録され(更新 1 件)、外部効果の記録は 1 件でパスは Doc/<文書>/<生成 ID>
+-- The attachment name is recorded in the column (1 update), and there is 1 external effect record with path
+-- Doc/<document>/<generated ID>
 #guard ((handleRequest app store (attachReq editor "a1")).store.find? docT "a1").map (·.find? "attachment")
   == some (some (strV "generated-id"))
 #guard (handleRequest app store (attachReq editor "a1")).issued.map (·.action.eid) == ["attachDoc"]
 #guard externalObjects store (attachReq editor "a1") == ["Doc/a1/generated-id"]
 #guard (handleRequest app store (attachReq editor "a1")).external.map (fun e => (e.action.eid, e.key))
   == [("uploadAttachment", "a1")]
--- 拒否された主体には記録も更新も無い。無い文書も 403
+-- A denied principal leaves no record and no update. A missing document is also 403
 #guard externalCount store (attachReq viewer "a1") == 0 && issuedCount store (attachReq viewer "a1") == 0
 #guard status store (attachReq editor "nope") == 403
 #guard externalCount store (attachReq editor "nope") == 0
--- Storage がオブジェクトを知らなければ(結果の列が無ければ)404 だが、名の記録と発行の記録は残る
+-- If Storage does not know the object (no result in the list), 404, but the name record and the issuance record remain
 #guard status store (attachReq editor "a1" []) == 404
 #guard externalCount store (attachReq editor "a1" []) == 1
--- ハンドラを経由しない呼び出しでも、記録された名がこの要求の生成 ID でない文書のアップロードや、生成 ID 以外の名の記録は
--- ポリシーが拒否する(発行の対象は nyxis の生成 ID から決まる)
+-- Even for calls that bypass the handler, the policy rejects an upload for a document whose recorded name is not this
+-- request's generated ID, and recording a name other than the generated ID (the issuance target is determined by
+-- nyxis's generated ID)
 #guard isDenied (step _root_.TeamDocs.schema _root_.TeamDocs.policies editor gen store (⟨⟨"Action", []⟩, "uploadAttachment"⟩) "a1"
   Map.empty {} (.signed "u")).outcome
 #guard isDenied (step _root_.TeamDocs.schema _root_.TeamDocs.policies editor gen store (⟨⟨"Action", []⟩, "attachDoc"⟩) "a1"
   (row [("attachment", strV "mine")]) {}).outcome
--- ダウンロード URL の発行は文書を読める利用者。添付が無ければ 404、記録も無い
+-- Download URLs are issued to users who can read the document. Without an attachment, 404 and no record
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p => status store (downloadReq p "a1"))
   == [404, 404, 404, 404, 403, 403, 403]
 #guard externalCount store (downloadReq viewer "a1") == 0
@@ -307,26 +314,29 @@ def attached : Store := (handleRequest app store (attachReq editor "a1")).store
 #guard externalObjects attached (downloadReq viewer "a1") == ["Doc/a1/generated-id"]
 #guard issuedCount attached (downloadReq viewer "a1") == 0
 #guard externalCount attached (downloadReq outsider "a1") == 0
--- 個別に共有された利用者はダウンロードできる(s1 に添付を付けた状態)
+-- An individually shared user can download (with an attachment on s1)
 #guard status (Map.make (store.toList.map fun kv =>
   if kv.1 == ⟨docT, "s1"⟩ then (kv.1, docRow "solo" "s1" ["guest"] "outsider" "obj-s1") else kv)) (downloadReq guest "s1") == 200
 #guard externalObjects (Map.make (store.toList.map fun kv =>
   if kv.1 == ⟨docT, "s1"⟩ then (kv.1, docRow "solo" "s1" ["guest"] "outsider" "obj-s1") else kv)) (downloadReq guest "s1")
   == ["Doc/s1/obj-s1"]
--- リクエスト列の記録: 外部効果はそれを起こしたリクエストと対になり、主体・生成値はそのリクエストのもの
+-- Records of the request sequence: an external effect is paired with the request that caused it, with that request's
+-- principal and generated values
 #guard ((trace app store [attachReq editor "a1", downloadReq viewer "a1", downloadReq outsider "a1"]).external.map
   fun re => (re.1.principal == re.2.principal && re.1.generated == re.2.generated, re.2.action.eid))
   == [(true, "uploadAttachment"), (true, "downloadAttachment")]
 
-/-! ## 外部 API 呼び出し(`sync` の応答を別のアクションで記録し、`async` はアウトボックスに書く)
+/-! ## External API calls (a `sync` response is recorded through a separate action; `async` is written to the outbox)
 
-`req … (externals := [.called value])` の結果の列は、接続層が要約 API から得て宣言した型 `{ summary: String }` に復号した応答の
-代わり(`.calledError` は 2xx 以外の応答)。`async` の呼び出しは結果を要らず、接続層がアウトボックスに書く。 -/
+The list of results in `req … (externals := [.called value])` stands in for the response the connection layer gets from
+the summarizer API and decodes into the declared type `{ summary: String }` (`.calledError` is a non-2xx response). An
+`async` call needs no result; the connection layer writes it to the outbox. -/
 
 def summaryV (s : String) : Value := .record (Map.make [("summary", strV s)])
 def summaryReq (p : Principal) (id : String) (exts : Externals := [.called (summaryV "a1 in short")]) : AuthenticatedRequest :=
   req p .post ("/docs/" ++ id ++ "/summary") "" "" exts
-/-- 外部効果の記録のうち外部 API 呼び出し: (送り先, メソッド, 解決済みの URL, 本文の列, `async` か)。 -/
+/-- External API calls among the external effect records: (destination, method, resolved URL, body columns, whether
+    `async`). -/
 def callsOf (s : Store) (r : AuthenticatedRequest) : List (String × String × String × List String × Bool) :=
   (handleRequest app s r).external.filterMap fun e => match e.payload with
     | .call dest method url body? mode =>
@@ -336,7 +346,8 @@ def recordOutcome (p : Principal) (summary : String) : Outcome :=
   (step _root_.TeamDocs.schema _root_.TeamDocs.policies p gen store (⟨⟨"Action", []⟩, "recordSummary"⟩) "a1"
     (row [("summary", strV summary)]) {}).outcome
 
--- 要約の呼び出しは owner と editor の組の利用者だけ。応答の要約が列に記録され(更新 1 件)、200 と {summary}
+-- The summary call is only for owners and users in the editor team. The response's summary is recorded in the column (1
+-- update), 200 with {summary}
 #guard [owner, editor, multi, viewer, outsider, guest, anon].map (fun p => status store (summaryReq p "a1"))
   == [200, 200, 200, 403, 403, 403, 403]
 #guard body store (summaryReq editor "a1") == "{\"summary\":\"a1 in short\"}"
@@ -344,35 +355,39 @@ def recordOutcome (p : Principal) (summary : String) : Outcome :=
 #guard ((handleRequest app store (summaryReq editor "a1")).store.find? docT "a1").map (·.find? "summary")
   == some (some (strV "a1 in short"))
 #guard (handleRequest app store (summaryReq editor "a1")).issued.map (·.action.eid) == ["recordSummary"]
--- 送り先・メソッド・URL・本文の列は正本の宣言と対象の行から決まる(sync)
+-- Destination, method, URL and body columns are determined by the approved declaration and the target row (sync)
 #guard callsOf store (summaryReq editor "a1")
   == [("Summarizer", "POST", "https://localhost:18118/summarizer/v1/summaries/a1", ["title", "body"], false)]
--- 拒否された主体には記録(送信)も更新も無い。無い文書も 403 で記録なし
+-- A denied principal leaves no record (no send) and no update. A missing document is also 403 with no record
 #guard externalCount store (summaryReq viewer "a1") == 0 && issuedCount store (summaryReq viewer "a1") == 0
 #guard status store (summaryReq editor "nope") == 403 && externalCount store (summaryReq editor "nope") == 0
--- 個別に共有された利用者(guest は s1 の共有先)は文書を読めるが、要約の呼び出しは拒否され記録も無い
+-- An individually shared user (guest is a share target of s1) can read the document, but the summary call is denied
+-- with no record
 #guard status store (req guest .get "/docs/s1") == 200
 #guard status store (summaryReq guest "s1") == 403 && externalCount store (summaryReq guest "s1") == 0
--- 2xx 以外の応答は状態コードと本文としてハンドラに渡り、ハンドラが 424 に写す。要約は記録されない
+-- A non-2xx response reaches the handler as status code and body, and the handler maps it to 424. No summary is
+-- recorded
 #guard status store (summaryReq editor "a1" [.calledError 422 "{\"error\":\"unsupported\"}"]) == 424
 #guard body store (summaryReq editor "a1" [.calledError 422 "x"]) == "{\"error\":\"summarizer\",\"status\":422}"
 #guard issuedCount store (summaryReq editor "a1" [.calledError 422 "x"]) == 0
 #guard ((handleRequest app store (summaryReq editor "a1" [.calledError 422 "x"])).store.find? docT "a1").map (·.find? "summary")
   == some (some (strV ""))
--- 応答の値は別のアクション(recordSummary)の判定を通ってはじめて DB に入る: 空の要約はポリシーが拒み、呼び出しの記録は
--- 残るが更新は無い(403)
+-- The response value enters the DB only after passing the decision of a separate action (recordSummary): the policy
+-- rejects an empty summary; the call's record remains but there is no update (403)
 #guard status store (summaryReq editor "a1" [.called (summaryV "")]) == 403
 #guard issuedCount store (summaryReq editor "a1" [.called (summaryV "")]) == 0
 #guard externalCount store (summaryReq editor "a1" [.called (summaryV "")]) == 1
--- 結果の列が無ければ 404(接続層では sync の呼び出しに必ず結果がある)
+-- 404 without a result in the list (in the connection layer a sync call always has a result)
 #guard status store (summaryReq editor "a1" []) == 404
--- ハンドラを経由しない呼び出しでも、owner でも editor の組でもない主体の記録と、空の要約の記録はポリシーが拒否する
+-- Even for calls that bypass the handler, the policy rejects a record by a principal neither owner nor in the editor
+-- team, and a record of an empty summary
 #guard isOk (recordOutcome editor "s")
 #guard isDenied (recordOutcome viewer "s")
 #guard isDenied (recordOutcome guest "s")
 #guard isDenied (recordOutcome editor "")
--- 更新の通知(async): 編集できた要求にだけ記録され(送り先 Audit、本文は題名と更新日時)、ハンドラには ok none(204)。
--- 結果の列は要らない。編集が拒否された・本文が読めない要求には記録が無い
+-- Update announcement (async): recorded only for requests whose edit succeeded (destination Audit, body is title and
+-- update time); the handler gets ok none (204). No result is needed. Requests whose edit was denied or whose body
+-- cannot be read leave no record
 #guard status store (req editor .patch "/docs/a1" "{\"title\":\"t\"}") == 204
 #guard (handleRequest app store (req editor .patch "/docs/a1" "{\"title\":\"t\"}")).issued.map (·.action.eid) == ["editDoc"]
 #guard callsOf store (req editor .patch "/docs/a1" "{\"title\":\"t\"}")
@@ -383,16 +398,18 @@ def recordOutcome (p : Principal) (summary : String) : Outcome :=
 #guard externalCount store (req guest .patch "/docs/s1" "{\"title\":\"t\"}") == 0
 #guard externalCount store (req editor .patch "/docs/a1" "{}") == 0
 #guard externalCount store (req editor .patch "/docs/nope" "{\"title\":\"t\"}") == 0
--- 記録はすべて認可済み(`ExternalAuthorized` の実行可能な部分)で、主体と生成値は要求のもの
+-- Every record is authorized (the executable part of `ExternalAuthorized`), with the request's principal and generated
+-- values
 #guard ((trace app store [summaryReq editor "a1", req editor .patch "/docs/a1" "{\"title\":\"t\"}", summaryReq viewer "a1"]).external.all fun re =>
   re.2.principal == re.1.principal && re.2.generated == re.1.generated &&
     (_root_.TeamDocs.schema.effectOf re.2.action).any fun effect =>
       payloadOf _root_.TeamDocs.schema re.2.generated re.2.store effect re.2.key re.2.values == some re.2.payload)
 #guard (trace app store [summaryReq editor "a1", req editor .patch "/docs/a1" "{\"title\":\"t\"}", summaryReq viewer "a1"]).external.length == 2
 
-/-! ## 通知(メール送信は宣言された外部効果、定期処理の主体はサービス主体)
+/-! ## Notifications (mail sending is a declared external effect; the periodic job's principal is the service principal)
 
-`store` に購読を足す: viewer と guest が a1 を購読している(guest は a1 を読めない — 個別に共有されていない)。 -/
+Adds subscriptions to `store`: viewer and guest subscribe to a1 (guest cannot read a1 — it is not individually shared).
+-/
 
 def subT : EntityType := ⟨"Subscription", []⟩
 def notifT : EntityType := ⟨"Notification", []⟩
@@ -404,13 +421,14 @@ def subscribed : Store := Map.make (store.toList ++
   [ (⟨subT, "sub-viewer"⟩, subRow "a1" "viewer" "viewer@example.com")
   , (⟨subT, "sub-guest"⟩, subRow "a1" "guest" "guest@example.com") ])
 
-/-- 外部効果の記録のうちメールの宛先。 -/
+/-- Mail recipients among the external effect records. -/
 def mailsOf (s : Store) (r : AuthenticatedRequest) : List (String × String) :=
   (handleRequest app s r).external.filterMap fun e => match e.payload with
     | .mail to subject _ => some (to, subject)
     | _ => none
 
--- 購読は、いま読める文書について自分自身の購読行だけ(宛先は本文)。読めない文書・他人の購読・匿名は 403
+-- Subscribing is only one's own subscription row for a document one can read now (the recipient is in the body).
+-- Unreadable documents, others' subscriptions and anonymous are 403
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p =>
   status store (req p .post "/docs/a1/subscriptions" "{\"email\":\"me@example.com\"}"))
   == [201, 201, 201, 201, 403, 403, 403]
@@ -418,10 +436,11 @@ def mailsOf (s : Store) (r : AuthenticatedRequest) : List (String × String) :=
 #guard status store (req viewer .post "/docs/a1/subscriptions" "{}") == 400
 #guard ((handleRequest app store (req viewer .post "/docs/a1/subscriptions" "{\"email\":\"me@example.com\"}")).store.find? subT "generated-id")
   == some (subRow "a1" "viewer" "me@example.com")
--- ハンドラを経由しない呼び出しでも、他人の購読行はポリシーが拒否する
+-- Even for calls that bypass the handler, the policy rejects someone else's subscription row
 #guard isDenied (step _root_.TeamDocs.schema _root_.TeamDocs.policies viewer gen store (⟨⟨"Action", []⟩, "subscribe"⟩) "x"
   (subRow "a1" "guest" "x@example.com") {}).outcome
--- 購読の一覧は本人と文書の組織の owner / editor。削除は本人・作成者・owner
+-- Listing subscriptions: the subscriber and owners / editors of the document's org. Deletion: the subscriber, the
+-- creator, an owner
 #guard contains (body subscribed (req viewer .get "/docs/a1/subscriptions")) "sub-viewer"
   && !contains (body subscribed (req viewer .get "/docs/a1/subscriptions")) "sub-guest"
 #guard contains (body subscribed (req editor .get "/docs/a1/subscriptions")) "sub-guest"
@@ -429,8 +448,9 @@ def mailsOf (s : Store) (r : AuthenticatedRequest) : List (String × String) :=
 #guard body subscribed (req outsider .get "/docs/a1/subscriptions") == "{\"rows\":[],\"total\":0}"
 #guard [owner, editor, viewer, guest, outsider].map (fun p => status subscribed (req p .delete "/subscriptions/sub-guest"))
   == [204, 204, 403, 204, 403]
--- ハンドラを経由しない呼び出しでも、指した購読の列と一致しない宛先・宛先の利用者、文書の題名と一致しない件名の通知は
--- ポリシーが拒否する(owner / editor は任意の宛先・内容の通知を作れない)
+-- Even for calls that bypass the handler, the policy rejects a notification whose recipient or recipient user does not
+-- match the referenced subscription's columns, or whose subject does not match the document's title (owners / editors
+-- cannot create notifications with arbitrary recipients or content)
 def notifRow (sub email subject : String) : Row :=
   row [ ("doc", uidV ⟨docT, "a1"⟩), ("recipient", uidV (user "viewer")), ("subscription", uidV ⟨subT, sub⟩)
       , ("email", strV email), ("subject", strV subject), ("body", strV "a1 body"), ("sent", boolV false) ]
@@ -442,8 +462,9 @@ def notifOutcome (values : Row) : Outcome :=
 #guard isDenied (notifOutcome (notifRow "sub-viewer" "viewer@example.com" "spam"))
 #guard isDenied (notifOutcome ((notifRow "sub-viewer" "viewer@example.com" "a1").patch (row [("body", strV "spam")])))
 #guard isDenied (notifOutcome ((notifRow "sub-viewer" "viewer@example.com" "a1").patch (row [("sent", boolV true)])))
--- 共有すると購読者ごとに(主キーの順: sub-guest が 0 番、sub-viewer が 1 番)通知の行ができ、宛先がいま文書を読める購読者
--- (viewer)にだけメールが送られる(外部効果の記録)。guest は読めないので送られず、その通知は送信済みでないまま残る
+-- Sharing creates a notification row per subscriber (in primary key order: sub-guest is 0, sub-viewer is 1), and mail
+-- is sent only to subscribers whose recipient can read the document now (viewer) (external effect records). guest
+-- cannot read it, so nothing is sent, and that notification stays unsent
 def shareReq (p : Principal) (shared : String) : AuthenticatedRequest :=
   req p .put "/docs/a1/shared" ("{\"shared\":[" ++ shared ++ "]}")
 #guard status subscribed (shareReq editor "") == 204
@@ -453,17 +474,19 @@ def shareReq (p : Principal) (shared : String) : AuthenticatedRequest :=
 #guard ((handleRequest app subscribed (shareReq editor "")).store.find? notifT "generated-id-1").map (·.find? "sent") == some (some (boolV true))
 #guard ((handleRequest app subscribed (shareReq editor "")).store.find? notifT "generated-id-0").map (·.find? "sent") == some (some (boolV false))
 #guard ((handleRequest app subscribed (shareReq editor "")).store.find? notifT "generated-id-0").map (·.find? "email") == some (some (strV "guest@example.com"))
--- guest に共有する共有では、guest にも送られる
+-- A share that shares with guest also sends to guest
 #guard mailsOf subscribed (shareReq editor "\"guest\"") == [("guest@example.com", "a1"), ("viewer@example.com", "a1")]
--- 共有できない主体は 403 で、通知も送信も無い
+-- A principal that cannot share gets 403, with no notification and no send
 #guard status subscribed (shareReq viewer "") == 403
 #guard mailsOf subscribed (shareReq viewer "") == [] && (handleRequest app subscribed (shareReq viewer "")).external.isEmpty
--- 記録はすべて認可済み(`ExternalAuthorized` の実行可能な部分)で、主体と生成値は要求のもの
+-- Every record is authorized (the executable part of `ExternalAuthorized`), with the request's principal and generated
+-- values
 #guard ((trace app subscribed [shareReq editor "\"guest\""]).external.all fun re =>
   re.2.principal == re.1.principal && re.2.generated == re.1.generated &&
     (_root_.TeamDocs.schema.effectOf re.2.action).any fun effect =>
       payloadOf _root_.TeamDocs.schema re.2.generated re.2.store effect re.2.key re.2.values == some re.2.payload)
--- 定期処理(サービス主体): 送信済みでない通知(guest 宛)は、guest が読めるようになるまで送られず、共有されると送られる
+-- Periodic job (service principal): an unsent notification (to guest) is not sent until guest can read the document,
+-- and is sent once shared
 def pending : Store := (handleRequest app subscribed (shareReq editor "")).store
 def tick : AuthenticatedRequest :=
   { principal := notifier, generated := gen, request := { method := .post, path := "", body := "" }, job := some 0 }
@@ -474,30 +497,33 @@ def pendingShared : Store := (handleRequest app pending (req editor .put "/docs/
 #guard mailsOf pendingShared tick == [("guest@example.com", "a1")]
 #guard ((handleRequest app pendingShared tick).store.find? notifT "generated-id-0").map (·.find? "sent") == some (some (boolV true))
 #guard ((trace app pendingShared [tick]).external.map fun re => re.1.principal == notifier && re.2.principal == notifier) == [true]
--- 定期処理の主体がサービス主体でなければ(利用者で起動しても)ポリシーどおり: 一覧は owner / editor にも許されるが、
--- 送信は宛先が読めるときだけ
+-- If the periodic job's principal is not the service principal (even run as a user), it follows the policy: listing is
+-- permitted to owners / editors too, but sending only when the recipient can read
 #guard mailsOf pendingShared { tick with principal := editor } == [("guest@example.com", "a1")]
 #guard mailsOf pendingShared { tick with principal := outsider } == []
--- サービス主体に許されるのはポリシーが `principal is Service` に書いた操作だけ: 文書は読めない(サービス主体はどのみち HTTP の
--- 要求の主体にならず、実起動ではコア設定の ID だけが定期処理の主体になる)
+-- The service principal is permitted only the operations the policy writes for `principal is Service`: it cannot read
+-- documents (the service principal never becomes the principal of an HTTP request anyway, and in the real startup only
+-- the ID from the core setting becomes the periodic job's principal)
 #guard status pendingShared (req notifier .get "/docs/a1") == 403
 #guard status pendingShared (req notifier .post "/docs" newDoc) == 403
 #guard status pendingShared (req notifier .put "/docs/a1/shared" "{\"shared\":[]}") == 403
--- 手動の送信(owner / editor)と、送信済みの通知の再送・読めない宛先への送信の拒否
+-- Manual sending (owner / editor), and denial of resending a sent notification and of sending to a recipient who cannot
+-- read
 #guard status pendingShared (req editor .post "/notifications/generated-id-0/send") == 204
 #guard status pendingShared (req outsider .post "/notifications/generated-id-0/send") == 403
 #guard status pending (req editor .post "/notifications/generated-id-1/send") == 403
 #guard status pending (req editor .post "/notifications/generated-id-0/send") == 403
 #guard mailsOf pending (req editor .post "/notifications/generated-id-0/send") == []
--- 通知の一覧は owner / editor とサービス主体
+-- Listing notifications: owners / editors and the service principal
 #guard contains (body pending (req editor .get "/docs/a1/notifications")) "\"total\":2"
 #guard body pending (req viewer .get "/docs/a1/notifications") == "{\"rows\":[],\"total\":0}"
--- 文書を消すと購読と通知も連鎖で消える(各行は deleteSubscription / deleteNotification で判定)
+-- Deleting a document also deletes its subscriptions and notifications by cascade (each row judged by
+-- deleteSubscription / deleteNotification)
 #guard status pending (req editor .delete "/docs/a1") == 204
 #guard ((handleRequest app pending (req editor .delete "/docs/a1")).store.find? notifT "generated-id-1").isNone
 #guard ((handleRequest app pending (req editor .delete "/docs/a1")).store.find? subT "sub-viewer").isNone
 
-/-! ## 組織と所属(所属行) -/
+/-! ## Orgs and memberships (membership rows) -/
 
 def issuedActions (s : Store) (r : AuthenticatedRequest) : List String :=
   (handleRequest app s r).issued.map (·.action.eid)
@@ -507,7 +533,8 @@ def issuedActions (s : Store) (r : AuthenticatedRequest) : List String :=
 #guard contains (body store (req multi .get "/orgs")) "\"id\":\"acme\"" && contains (body store (req multi .get "/orgs")) "\"id\":\"zen\""
   && !contains (body store (req multi .get "/orgs")) "\"id\":\"solo\""
 #guard contains (body store (req viewer .get "/orgs/acme")) "\"editors\":\"acme/editors\""
--- 作成した人が唯一の owner。本文の owners は使われない。editor と viewer の組も同じ要求で作られる(3 回の判定)
+-- The creator is the only owner. owners in the body is not used. The editor and viewer teams are created in the same
+-- request (3 decisions)
 #guard status store (req guest .post "/orgs" "{\"name\":\"New\",\"owners\":[\"owner\"]}") == 201
 #guard ((handleRequest app store (req guest .post "/orgs" "{\"name\":\"New\"}")).store.find? orgT "generated-id").map (·.find? "owners")
   == some (some (setV [uidV (user "guest")]))
@@ -518,12 +545,12 @@ def issuedActions (s : Store) (r : AuthenticatedRequest) : List String :=
   == some (teamRow "generated-id" "viewer")
 #guard status store (req anon .post "/orgs" "{\"name\":\"New\"}") == 403
 #guard status store (req guest .post "/orgs" "{}") == 400
--- 新しい組織の owner は文書を作れ、まだ誰も組に属していない
+-- The owner of a new org can create documents, and nobody belongs to its teams yet
 #guard (run store [req guest .post "/orgs" "{\"name\":\"New\"}",
   req guest .post "/docs" "{\"org\":\"generated-id\",\"title\":\"g\",\"body\":\"b\"}",
   req guest .get "/orgs/generated-id/members"]).1.map (·.status.toCode) == [201, 201, 200]
--- ハンドラを経由しない呼び出しでも、既にある組(他の組織の組)を役割の組に指す組織や、組織が参照していない組は
--- ポリシーが拒否する
+-- Even for calls that bypass the handler, the policy rejects an org that points at an existing team (another org's
+-- team) as a role team, and a team the org does not reference
 def orgOutcome (p : Principal) (key : String) (values : Row) : Outcome :=
   (step _root_.TeamDocs.schema _root_.TeamDocs.policies p gen store (⟨⟨"Action", []⟩, "createOrg"⟩) key values {}).outcome
 def teamOutcome (p : Principal) (key : String) (values : Row) : Outcome :=
@@ -535,10 +562,10 @@ def teamOutcome (p : Principal) (key : String) (values : Row) : Outcome :=
   | .denied => true | _ => false)
 #guard (match teamOutcome owner "acme/others" (teamRow "acme" "editor") with | .denied => true | _ => false)
 #guard (match teamOutcome owner "acme/x" (teamRow "acme" "viewer") with | .denied => true | _ => false)
--- 既にある組と同じ主キーは、判定が既存の行で通っても競合(409)
+-- The same primary key as an existing team is a conflict (409) even if the decision passes on the existing row
 #guard (match teamOutcome owner "acme/editors" (teamRow "acme" "viewer") with | .conflict => true | _ => false)
 #guard (match teamOutcome editor "acme/editors" (teamRow "acme" "editor") with | .denied => true | _ => false)
--- owner の集合の変更は owner だけ。owner は自分を外せない
+-- Changing the set of owners is owner only. An owner cannot remove themselves
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p => status store (req p .put "/orgs/acme/owners" "{\"owners\":[\"owner\",\"guest\"]}"))
   == [204, 403, 403, 403, 403, 403, 403]
 #guard status store (req owner .put "/orgs/acme/owners" "{\"owners\":[\"editor\"]}") == 403
@@ -546,7 +573,8 @@ def teamOutcome (p : Principal) (key : String) (values : Row) : Outcome :=
 #guard (run store [req owner .put "/orgs/acme/owners" "{\"owners\":[\"owner\",\"guest\"]}", req guest .get "/docs/a1",
   req guest .put "/orgs/acme/owners" "{\"owners\":[\"guest\"]}", req owner .get "/docs/a1"]).1.map (·.status.toCode)
   == [204, 200, 204, 403]
--- 所属の追加(所属行の挿入)は owner だけ。主キーは生成 ID、組は役割から決まる。変更は次の要求から効く
+-- Adding a member (inserting a membership row) is owner only. The primary key is the generated ID, the team is
+-- determined by the role. The change takes effect from the next request
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p =>
   status store (req p .post "/orgs/acme/members" "{\"user\":\"guest\",\"role\":\"viewer\"}"))
   == [201, 403, 403, 403, 403, 403, 403]
@@ -557,20 +585,21 @@ def teamOutcome (p : Principal) (key : String) (values : Row) : Outcome :=
 #guard status store (req owner .post "/orgs/acme/members" "{\"user\":\"guest\"}") == 400
 #guard status store (req owner .post "/orgs/nope/members" "{\"user\":\"guest\",\"role\":\"viewer\"}") == 403
 #guard status store (req outsider .post "/orgs/zen/members" "{\"user\":\"guest\",\"role\":\"editor\"}") == 201
--- 同じ利用者を同じ組に 2 度は加えられない(409)。所属行の挿入は行の無い利用者でも通る(読める実体にはならない)
+-- The same user cannot be added to the same team twice (409). Inserting a membership row succeeds even for a user
+-- without a row (it does not become a readable entity)
 #guard status store (req owner .post "/orgs/acme/members" "{\"user\":\"editor\",\"role\":\"editor\"}") == 409
 #guard status store (req owner .post "/orgs/acme/members" "{\"user\":\"editor\",\"role\":\"viewer\"}") == 201
 #guard (run store [req owner .post "/orgs/acme/members" "{\"user\":\"guest\",\"role\":\"viewer\"}", req guest .get "/docs/a1",
   req guest .patch "/docs/a1" "{\"title\":\"t\"}", req guest .get "/orgs/acme"]).1.map (·.status.toCode) == [201, 200, 403, 200]
 #guard (run store [req owner .post "/orgs/acme/members" "{\"user\":\"guest\",\"role\":\"editor\"}", req guest .get "/docs/a1",
   req guest .patch "/docs/a1" "{\"title\":\"t\"}", req guest .post "/docs" newDoc]).1.map (·.status.toCode) == [201, 200, 204, 201]
--- ハンドラを経由しない呼び出しでも、所属行の組織が組の組織と違えばポリシーが拒否する
+-- Even for calls that bypass the handler, the policy rejects a membership row whose org differs from the team's org
 def memOutcome (p : Principal) (values : Row) : Outcome :=
   (step _root_.TeamDocs.schema _root_.TeamDocs.policies p gen store (⟨⟨"Action", []⟩, "addMember"⟩) "m-new" values {}).outcome
 #guard (match memOutcome owner (memRow "guest" "acme" "viewer") with | .ok none => true | _ => false)
 #guard (match memOutcome owner ((memRow "guest" "acme" "viewer").patch (row [("org", uidV (org "zen"))])) with | .denied => true | _ => false)
 #guard (match memOutcome owner ((memRow "guest" "acme" "viewer").patch (row [("team", uidV (team "zen" "viewer"))])) with | .denied => true | _ => false)
--- 所属行の一覧は組織で絞られ、owner と所属する利用者だけに現れる
+-- Listing membership rows is filtered by org and appears only to owners and member users
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p => status store (req p .get "/orgs/acme/members"))
   == [200, 200, 200, 200, 200, 200, 200]
 #guard contains (body store (req viewer .get "/orgs/acme/members")) "\"id\":\"m-editor-acme\""
@@ -580,18 +609,19 @@ def memOutcome (p : Principal) (values : Row) : Outcome :=
 #guard body store (req outsider .get "/orgs/acme/members") == "{\"rows\":[],\"total\":0}"
 #guard body store (req guest .get "/orgs/acme/members") == "{\"rows\":[],\"total\":0}"
 #guard body store (req anon .get "/orgs/acme/members") == "{\"rows\":[],\"total\":0}"
--- 所属の削除(所属行の削除)は本人か owner。外れると次の要求から読めない
+-- Removing a member (deleting a membership row) is the member themselves or an owner. Once removed, they cannot read
+-- from the next request on
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p => status store (req p .delete "/memberships/m-viewer-acme"))
   == [204, 403, 204, 403, 403, 403, 403]
 #guard (run store [req viewer .delete "/memberships/m-viewer-acme", req viewer .get "/docs/a1", req viewer .get "/orgs/acme",
   req owner .post "/orgs/acme/members" "{\"user\":\"viewer\",\"role\":\"viewer\"}", req viewer .get "/docs/a1"]).1.map (·.status.toCode)
   == [204, 403, 403, 201, 200]
--- editor の所属行を消すと、作成した文書でも作れず・読めず・消せない
+-- After the editor's membership row is deleted, they can no longer create, read or delete, even documents they created
 #guard (run store [req owner .delete "/memberships/m-editor-acme", req editor .post "/docs" newDoc,
   req editor .get "/docs/a1", req editor .delete "/docs/a1"]).1.map (·.status.toCode) == [204, 403, 403, 403]
 #guard status store (req owner .delete "/memberships/nope") == 403
 
-/-! ## 利用者 -/
+/-! ## Users -/
 
 def newcomer : Principal := .user (user "new-user")
 #guard (run store [req newcomer .get "/users/new-user", req newcomer .post "/users/new-user" "{\"name\":\"N\"}",
@@ -603,7 +633,7 @@ def newcomer : Principal := .user (user "new-user")
 #guard status store (req owner .get "/nope") == 404
 #guard issuedCount store (req owner .get "/nope") == 0
 
-/-! ## リクエスト列全体の記録 -/
+/-! ## Records of the whole request sequence -/
 
 def requests : List AuthenticatedRequest :=
   [ req viewer .get "/docs/a1", req outsider .get "/docs/a1", req editor .post "/docs" newDoc
@@ -612,30 +642,34 @@ def requests : List AuthenticatedRequest :=
 
 def issued := (trace app store requests).issued
 
--- 発行された操作は、許可された 5 件(読み取り・作成・所属の追加・編集・削除)だけで、主体と生成値はそのリクエストのもの。
+-- The issued operations are only the 5 permitted ones (read, create, add member, edit, delete), with each request's
+-- principal and generated values.
 #guard issued.length == 5
 #guard issued.all (fun ri => ri.2.principal == ri.1.principal && ri.2.generated == ri.1.generated)
 #guard issued.map (fun ri => ri.2.action.eid) == ["readDoc", "createDoc", "addMember", "editDoc", "deleteDoc"]
 #guard ((trace app store requests).store.find? docT "generated-id").isNone
 
-/-! ## 一意性と参照整合、削除の連鎖
+/-! ## Uniqueness, referential integrity, cascading deletes
 
-組織名は一意、文書の題名は組織の中で一意(409)。文書を作った利用者は消せない(409)。組織の削除は文書に連鎖し、
-各文書は deleteDoc(作成者だけ)で判定されるので、他の人の文書が残る組織は owner でも消せない(403、何も消えない)。 -/
+Org names are unique, document titles are unique within an org (409). A user who created documents cannot be deleted
+(409). Deleting an org cascades to documents, and each document is judged by deleteDoc (creator only), so an org that
+still holds someone else's documents cannot be deleted even by an owner (403, nothing is deleted). -/
 
--- 同じ組織に同じ題名の文書は作れない(409)。別の組織なら作れる。permit されない主体は 403(存在を漏らさない)
+-- A document with the same title cannot be created in the same org (409). It can in another org. A principal that is
+-- not permitted gets 403 (does not leak existence)
 #guard status store (req editor .post "/docs" "{\"org\":\"acme\",\"title\":\"a1\",\"body\":\"b\"}") == 409
 #guard issuedCount store (req editor .post "/docs" "{\"org\":\"acme\",\"title\":\"a1\",\"body\":\"b\"}") == 0
 #guard status store (req outsider .post "/docs" "{\"org\":\"zen\",\"title\":\"a1\",\"body\":\"b\"}") == 201
 #guard status store (req viewer .post "/docs" "{\"org\":\"acme\",\"title\":\"a1\",\"body\":\"b\"}") == 403
--- 題名の編集でも同じ。自分の題名のままは衝突しない
+-- The same for editing titles. Keeping one's own title does not conflict
 #guard (run store [req editor .post "/docs" newDoc, req editor .patch "/docs/generated-id" "{\"title\":\"a1\"}",
   req editor .patch "/docs/generated-id" "{\"title\":\"n\"}", req editor .patch "/docs/generated-id" "{\"title\":\"n2\"}"]).1.map (·.status.toCode)
   == [201, 409, 204, 204]
--- 組織名も一意
+-- Org names are unique too
 #guard status store (req guest .post "/orgs" "{\"name\":\"Acme\"}") == 409
 #guard status store (req guest .post "/orgs" "{\"name\":\"Acme2\"}") == 201
--- 文書を作った利用者は消せない(409)。文書の無い利用者は自分を消せ、所属行も連鎖で消える。他人は 403
+-- A user who created documents cannot be deleted (409). A user without documents can delete themselves, and their
+-- membership rows are deleted by cascade. Others get 403
 #guard status store (req editor .delete "/users/editor") == 409
 #guard issuedCount store (req editor .delete "/users/editor") == 0
 #guard status store (req viewer .delete "/users/viewer") == 204
@@ -643,13 +677,14 @@ def issued := (trace app store requests).issued
 #guard ((handleRequest app store (req viewer .delete "/users/viewer")).store.find? memT "m-viewer-acme").isNone
 #guard status store (req viewer .delete "/users/editor") == 403
 #guard status store (req anon .delete "/users/editor") == 403
--- 組織の削除は owner だけ。文書が連鎖で消え、各文書は deleteDoc で判定される
+-- Deleting an org is owner only. Documents are deleted by cascade, each judged by deleteDoc
 #guard [owner, editor, viewer, multi, outsider, guest, anon].map (fun p => status store (req p .delete "/orgs/acme"))
-  == [403, 403, 403, 403, 403, 403, 403]   -- acme には editor の文書 a1 があり、owner には deleteDoc が permit されない
+  == [403, 403, 403, 403, 403, 403, 403]   -- acme has editor's document a1, and deleteDoc is not permitted to owner
 #guard issuedCount store (req owner .delete "/orgs/acme") == 0
 #guard (handleRequest app store (req owner .delete "/orgs/acme")).store == store
--- zen と solo の文書はすべて outsider(owner)のもの: 消せて、組・所属行(multi の viewer の所属)・文書も消える
--- (深い行が先: 組の所属行はその組より前、組織は最後)
+-- The zen and solo documents all belong to outsider (owner): they can be deleted, and the teams, membership rows
+-- (multi's viewer membership) and documents are deleted too (deeper rows first: a team's membership rows before the
+-- team, the org last)
 #guard status store (req outsider .delete "/orgs/zen") == 204
 #guard issuedActions store (req outsider .delete "/orgs/zen") == ["deleteTeam", "removeMember", "deleteTeam", "deleteDoc", "deleteOrg"]
 #guard ((handleRequest app store (req outsider .delete "/orgs/zen")).store.find? docT "z1").isNone
@@ -659,12 +694,13 @@ def issued := (trace app store requests).issued
 #guard ((handleRequest app store (req outsider .delete "/orgs/zen")).store.find? memT "m-multi-acme").isSome
 #guard ((handleRequest app store (req outsider .delete "/orgs/zen")).store.find? docT "s1").isSome
 #guard status store (req multi .delete "/orgs/zen") == 403
--- a1 を editor が消した後なら owner は acme を消せる(組と所属行 3 行が連鎖で消える。各所属行は removeMember で owner に permit)
+-- After editor deleted a1, owner can delete acme (the teams and 3 membership rows are deleted by cascade; each
+-- membership row is permitted to owner by removeMember)
 #guard (run store [req editor .delete "/docs/a1", req owner .delete "/orgs/acme", req viewer .get "/orgs/acme"]).1.map (·.status.toCode)
   == [204, 204, 403]
 #guard ((run store [req editor .delete "/docs/a1", req owner .delete "/orgs/acme"]).2.find? memT "m-editor-acme").isNone
 #guard ((run store [req editor .delete "/docs/a1", req owner .delete "/orgs/acme"]).2.find? teamT "acme/editors").isNone
--- 無い組織の削除はポリシーが評価できず 403
+-- A deletion of a missing org cannot be evaluated by the policy: 403
 #guard status store (req owner .delete "/orgs/nope") == 403
 
 end TeamDocsTest.Model

@@ -1,118 +1,118 @@
-# Nyxis 公式サンプル(掲示板)フロントエンド — デザイン
+# Official Nyxis sample (bulletin board) frontend — design
 
-公式サンプルのフロントエンドの、画面構成・レイアウト・状態・トークン・模型。Next.js の実装は後工程で行う(この資料には実装コードは無い)。
+Screen structure, layout, states, tokens, and mockups for the frontend of the official sample. The Next.js implementation is a later step (this material contains no implementation code).
 
-- `screens.md` — 画面一覧(画面 ID、ルート、誰にどう見えるか、操作、エラー状態、検査用の到達性一覧、画面の言葉と技術的な意味の対応)
-- `tokens.json` — デザイントークン(色のライト/ダーク、書体、余白、角丸、罫線、印、サイズ、ブレークポイント)
-- `*.png` — 各画面の模型画像(下の一覧)
-- `../mockups/*.html` — 同じ画面の静的 HTML/CSS 模型。`../mockups/index.html` から開ける
-- Design キャンバス(13 枚のアートボード): https://claude.ai/artifact/QAkdCBx6Ym8qx2jcS3VqBS — 作成者のアカウントで非公開。共有するまで他の人は開けない。PNG と HTML 模型は同じ内容
+- `screens.md` — screen list (screen IDs, routes, what each person sees and how, operations, error states, the reachability list for checks, and the mapping between screen wording and technical meaning)
+- `tokens.json` — design tokens (light/dark colors, typefaces, spacing, corner radii, rules, stamps, sizes, breakpoints)
+- `*.png` — mockup images of each screen (list below)
+- `../mockups/*.html` — static HTML/CSS mockups of the same screens. They can be opened from `../mockups/index.html`
+- Design canvas (13 artboards): https://claude.ai/artifact/QAkdCBx6Ym8qx2jcS3VqBS — private to the author's account. Others cannot open it until it is shared. The PNGs and HTML mockups have the same content
 
-## 模型画像の一覧
+## Mockup images
 
-| 画像 | 画面 | 誰と状態 |
+| Image | Screen | Who and state |
 |---|---|---|
-| `post-list-anonymous.png` | S1 ホーム | ゲスト。公開中だけ、「投稿」は無い |
-| `post-list-admin.png` | S1 ホーム | 管理者。全員の下書きが並ぶ |
-| `post-detail-author.png` | S2 投稿 | 書いた人。下書き、ボタン列、削除のたしかめ |
-| `post-detail-denied.png` | S2 投稿 | ゲストがほかの人の下書き(または存在しない ID)を開いた。朱い印「見られません」。この設計の中心 |
-| `post-create.png` | S3 投稿 | ログイン中 |
-| `post-edit.png` | S4 編集 | 書いた人。題名・本文と、公開するの行を分ける |
-| `response-states.png` | 部品 | 印(朱・緑)、見つかりません、つながりません、入力をたしかめる、すでにあります、タグ、人物マーク、ボタン、たしかめる |
-| `login.png` | S5 ログイン | ゲスト |
-| `auth-callback.png` | S6 ログインしています | 初回ログイン、利用登録中 |
-| `me.png` | S7 あなた | ログイン中(管理者でない)。できること 4 枚、ためす |
-| `admin-users.png` | S8 管理 | 管理者。調べた相手を管理者にした直後 |
-| `mobile-post-list.png` | S1 ホーム | ログイン中、390px 幅 |
-| `mobile-post-detail-denied.png` | S2 投稿 | ゲストの「見られません」、390px 幅 |
+| `post-list-anonymous.png` | S1 Home | Guest. Only published posts, no "New post" |
+| `post-list-admin.png` | S1 Home | Admin. Everyone's drafts are listed |
+| `post-detail-author.png` | S2 Post | Author. Draft, button row, delete confirmation |
+| `post-detail-denied.png` | S2 Post | A guest opened someone else's draft (or a nonexistent ID). Vermilion "Can't view" stamp. The center of this design |
+| `post-create.png` | S3 New post | Signed in |
+| `post-edit.png` | S4 Edit | Author. The title/body are separated from the publish row |
+| `response-states.png` | Components | Stamps (vermilion, green), Not found, Can't connect, Check your input, Already exists, tags, person marks, buttons, confirmation |
+| `login.png` | S5 Sign in | Guest |
+| `auth-callback.png` | S6 Signing in | First sign-in, registering |
+| `me.png` | S7 You | Signed in (not an admin). Four What you can do cards, Try it |
+| `admin-users.png` | S8 Admin | Admin. Right after making the looked-up person an admin |
+| `mobile-post-list.png` | S1 Home | Signed in, 390px wide |
+| `mobile-post-detail-denied.png` | S2 Post | Guest's "Can't view", 390px wide |
 
-PNG は `../mockups/*.html` を headless Chrome で幅 1280px(モバイルは 390px)、倍率 1 で描画したもの。模型を直した場合は同じ条件で描画し直す。例:
+The PNGs are `../mockups/*.html` rendered with headless Chrome at 1280px wide (390px for mobile) and scale factor 1. When a mockup is changed, re-render it under the same conditions. Example:
 
 ```sh
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu --hide-scrollbars \
   --force-device-scale-factor=1 --window-size=1280,820 --screenshot=design/post-edit.png mockups/post-edit.html
 ```
 
-## デザインの意図
+## Design intent
 
-### 言葉で説明しない
+### Don't explain in words
 
-OSS の利用者が画面を操作しながら「ルールどおりに見られる・できる、ルールどおりに見られない・できない」ことを確かめられるようにする。画面には説明文・注意書き・技術用語(API、HTTP、ポリシー、アクション、JWT)を置かない。代わりに次の 3 つの部品で伝える。
+Let OSS users confirm, while operating the screens, that "what the rules allow can be viewed and done, and what the rules do not allow cannot be viewed or done". The screens carry no explanatory text, notes, or technical terms (API, HTTP, policy, action, JWT). Instead, the following three components convey it.
 
-1. **人物マーク**(右上に常時) — いま誰として見ているか。破線の丸 = ゲスト、黒い丸に ID 2 桁 = ログイン中、朱の丸 + 「管理者」タグ = 管理者、黄の輪郭 = 利用登録まだ。押すと「あなた」の画面で、できることが 4 枚の札(○/×)で分かる。
-2. **印**(判子) — 結果。見られない・できないときは朱の「見られません」「できません」が紙の上に斜めに押される。できたときは緑の「公開しました」「保存しました」「できました」が押されて消える。
-3. **紙と罫** — 投稿は上辺に太い罫を引いた白い紙。読めない紙は中身が灰色のシルエットになり、その上に印が押される。印の下に、必要なときだけ一文(「存在しないか、下書きです。下書きは、書いた人と管理者だけが見られます。」)を置く。
+1. **Person mark** (always at the top right) — who you are viewing as right now. Dashed circle = Guest, black circle with 2 ID digits = Signed in, vermilion circle + "Admin" tag = Admin, amber outline = Not registered. Pressing it opens the "You" screen, where four cards (○/×) show what you can do.
+2. **Stamps** (seals) — the result. When something cannot be viewed or done, a vermilion "Can't view" / "Not allowed" is pressed diagonally onto the sheet. When it worked, a green "Published" / "Saved" / "Done" is pressed and then fades.
+3. **Sheets and rules** — a post is a white sheet with a thick rule along its top edge. An unreadable sheet has gray silhouettes in place of its contents, and a stamp is pressed on top. Below the stamp, a single sentence is placed only when needed ("It doesn't exist, or it's a draft. Drafts can be viewed only by their author and admins.").
 
-技術者向けの情報は「くわしく」の折りたたみにだけ入れる(状態コード・アクション名・ポリシー ID を 1 行)。
+Information for engineers goes only into the "Details" disclosure (status code, action name, and policy ID on one line).
 
-### 画面の言葉
+### Screen wording
 
-非エンジニアが読める言葉に揃える。対応表は `screens.md` の冒頭。
+Use words that non-engineers can read. The mapping table is at the top of `screens.md`.
 
-| 画面の言葉 | 技術的な意味 |
+| Screen wording | Technical meaning |
 |---|---|
-| ゲスト / ログイン中 / 管理者 / 利用登録まだ | 匿名 / 認証済み / admin / 未登録 |
-| 「あなた」タグ | 作者が自分 |
-| 見られません・できません(朱の印) | 403 認可により拒否 |
-| 公開しました・保存しました・できました(緑の印) | 2xx |
-| 見つかりません / つながりません / 入力をたしかめる / すでにあります | 404 / 503・通信失敗 / 400 / 409 |
-| 投稿 / 編集 / 削除 → 消す / 公開する / 下書きにもどす | create / edit / delete / publish / unpublish |
-| 管理者にする / 管理者を外す | setAdmin true / false |
-| 利用登録 | 自分の利用者行の作成 |
+| Guest / Signed in / Admin / Not registered | anonymous / authenticated / admin / unregistered |
+| "You" tag | the author is you |
+| Can't view, Not allowed (vermilion stamps) | 403 denied by authorization |
+| Published, Saved, Done (green stamps) | 2xx |
+| Not found / Can't connect / Check your input / Already exists | 404 / 503 or network failure / 400 / 409 |
+| New post / Edit / Delete → Delete / Publish / Back to draft | create / edit / delete / publish / unpublish |
+| Make admin / Remove admin | setAdmin true / false |
+| Registration | creating your own user row |
 
-### 403 の見せ方
+### How 403 is shown
 
-403 は失敗ではなく「ルールが働いた」結果なので、エラー風の赤い箱ではなく、紙に押された朱の印で見せる。中身はシルエット(幅は固定で、本文の長さを映さない)で、タグは出さない(存在しない ID でも同じ紙になるので、「下書き」と断定しない。Q5)。404(破線の空の枠)、400(入力欄の黄の下線)、409(ID の取り消し線)、つながりません(黒い帯)とは、色だけでなく形で区別する。印は通知(トースト)では出さず、必ず主内容の上に置く。
+A 403 is not a failure but the result of "a rule took effect", so it is shown as a vermilion stamp pressed on the sheet, not as an error-style red box. The contents are silhouettes (fixed width, not reflecting the length of the body), and no tag is shown (a nonexistent ID gets the same sheet, so it does not assert "Draft". Q5). It is distinguished from 404 (an empty dashed box), 400 (an amber underline on the input), 409 (a strikethrough on the ID), and Can't connect (a black band) by shape, not only by color. A stamp is never shown as a notification (toast); it is always placed on top of the main content.
 
-### できないことは隠す、でも試せる
+### Hide what you can't do, but keep it testable
 
-- ゲストには「投稿」を出さない。書いた人・管理者でなければボタン列を出さない。無効化したボタンに理由を添える、という形は使わない。
-- それでも試せるよう、一覧の末尾の「IDで開く」、投稿の「リンクをコピー」、「あなた」の「ためす」(ほかの人の下書きを開く / 管理の画面を開く)を残す。`/admin` と `/posts/[id]/edit` は誰でも開け、押した結果が印で返る。
-- 画面の表示・非表示は体験のためのもので、認可の担保ではない(判定はバックエンド)。
+- Guests are not shown "New post". The button row is shown only to the author and admins. Disabled buttons with an attached reason are not used.
+- So that it can still be tried, keep "Open by ID" at the end of the list, "Copy link" on a post, and "Try it" on "You" (Open someone else's draft / Open the admin page). `/admin` and `/posts/[id]/edit` can be opened by anyone, and the result of pressing a button comes back as a stamp.
+- Showing or hiding things on screen is for the experience, not a guarantee of authorization (the backend decides).
 
-### ほかの人の下書きの存在を漏らさない
+### Don't leak the existence of someone else's draft
 
-一覧には読める行しか出ない(API が返さない)。「見られません」の紙は、存在するかどうかも示さない(存在しない ID でも同じ紙と同じ一文。Q5)。題名・本文・書いた人は出さない。印の下の一文はアクションごとに固定で、行の内容に依存しない。
+The list shows only rows you can read (the API does not return the others). The "Can't view" sheet does not even indicate whether the post exists (a nonexistent ID gets the same sheet and the same sentence. Q5). The title, body, and author are not shown. The sentence below the stamp is fixed per action and does not depend on the row's contents.
 
-### 見た目
+### Look
 
-- 地は黄みの無い生成り、文字と罫とボタンは墨。朱は印・削除・管理者・ワードマークの四角にだけ、緑は公開中とできた印にだけ使う。青は「あなた」タグだけ。
-- 書体は Zen Kaku Gothic New(400/500/700/900)。見出しと印は 900。ID と番号だけ DM Mono。
-- 角はほぼ立てる(ボタン 4px、タグ 2px、入力は下線だけ)。一覧はカードにせず、番号と細い罫で並べる。紙の上辺とヘッダの下だけ 3px の太い罫。
-- 印は斜め 7 度、外側 3px + 内側 1px の二重線、字間を広く。押されるときに少し縮む(`tokens.json` の motion)。
-- アイコンは線画の SVG を最小限に(絵文字は使わない)。色だけに頼らず、タグと印には必ず文字がある。
-- タッチ目標は 44px 以上。モバイル幅(390px)ではヘッダを 2 段に、ボタン列を縦に積む。
-- ダークモードは任意。`tokens.json` にダークの色を入れてあるが、模型はライトのみ。
+- The background is an off-white with no yellow tint; text, rules, and buttons are ink. Vermilion is used only for stamps, delete, admin, and the wordmark square; green only for published and success stamps. Blue is used only for the "You" tag.
+- The typeface is Zen Kaku Gothic New (400/500/700/900). Headings and stamps use 900. Only IDs and numbers use DM Mono.
+- Corners are nearly square (buttons 4px, tags 2px, inputs are underline only). The list is not made of cards; it is numbered and separated by thin rules. Only the top edge of a sheet and the bottom of the header have the thick 3px rule.
+- Stamps are tilted 7 degrees, with a double line of 3px outside + 1px inside, and wide letter spacing. They shrink slightly when pressed (motion in `tokens.json`).
+- Icons are a minimal set of line-art SVGs (no emoji). Never rely on color alone; tags and stamps always have text.
+- Touch targets are 44px or larger. At mobile width (390px), the header wraps to two rows and button rows stack vertically.
+- Dark mode is optional. `tokens.json` contains dark colors, but the mockups are light only.
 
-### 実装への引き渡し
+### Handoff to implementation
 
-- ルート、画面 ID、状態 ID は `screens.md` のとおり。到達性検査のため、ルート要素に `data-screen` と `data-state` を必ず付ける(U1)。
-- 応答の分類は HTTP 状態だけで決める: 2xx 緑の印 / 403 朱の印 / 404 見つかりません / 409 すでにあります / 400 入力をたしかめる / 503 と通信失敗 つながりません。存在しない投稿の読み取り・編集・公開・削除も、管理者を含め 403 で返るので、「見られません」の紙は存在を断定しない(`screens.md` の「403 と 404 の順序」)。
-- 認可はバックエンドが判定する。フロントエンドは anon キーと利用者の JWT だけを持ち、Supabase の Data API や DB には触れない。
+- Routes, screen IDs, and state IDs follow `screens.md`. For the reachability check, the root element must have `data-screen` and `data-state` (U1).
+- Responses are classified by HTTP status alone: 2xx green stamp / 403 vermilion stamp / 404 Not found / 409 Already exists / 400 Check your input / 503 and network failure Can't connect. Reading, editing, publishing, or deleting a nonexistent post also returns 403, including for admins, so the "Can't view" sheet does not assert existence ("Order of 403 and 404" in `screens.md`).
+- Authorization is decided by the backend. The frontend holds only the anon key and the user's JWT, and never touches Supabase's Data API or the DB.
 
-## 未決事項
+## Open items
 
-- **U1** 到達性検査の方法。`data-screen` / `data-state` 属性で検査する(2026-10-19 に採用済み)。属性は推奨ではなく必須。
-- **U2** 一覧のページング。件数が少ない前提で全件表示にしてある。一覧 API がページングを持つなら、一覧の末尾に「もっと見る」を足す。
-- **U3** 「くわしく」の中身。状態コード・アクション名・ポリシー ID の 1 行にしてある。生のリクエスト/レスポンスまで出すかは未決。JWT と本文は出さない。
-- **U4** 投稿 ID の表示形式。一覧は書いた人の ID 先頭 8 桁、人物マークは先頭 2 桁、投稿の紙と「あなた」は全文 + コピー、とした。
-- **U5** Google ログインボタンの意匠。模型は仮の「G」の丸。実装は Google のブランドガイドラインに従う。
-- **U6** ログアウト時の確認を挟まない。入力中の内容がある画面でのみ「離れますか」を出すかは未決。
-- **U7** 「IDで開く」と「ためす」は学習用の導線で、削るなら「ためす」だけ残す。
-- **U8** 認可の実験ページ(`/try`)。任意の投稿 ID・操作・人を選んで送り、印を並べて見る専用画面の案。今回は `screens.md` に入れていない。入れるなら S10 として追加する。
-- **U9** ダークモードの採否。トークンは用意したが模型は無い。
-- **U10** 日本語のみ。英語 UI は範囲外とした。
-- **U11** 緑の印を 2 秒で消す動きと、朱の印が押される動き。`prefers-reduced-motion` では動かさない。
+- **U1** How to check reachability. Check with the `data-screen` / `data-state` attributes (adopted on 2026-10-19). The attributes are required, not recommended.
+- **U2** Paging of the list. Everything is shown, assuming few posts. If the list API gets paging, add "Show more" at the end of the list.
+- **U3** Contents of "Details". Currently one line of status code, action name, and policy ID. Whether to show the raw request/response is undecided. The JWT and the body are not shown.
+- **U4** Display format of IDs. The list shows the first 8 digits of the author's ID, the person mark the first 2 digits, and the post sheet and "You" show the full ID + copy.
+- **U5** Design of the Google sign-in button. The mockups use a placeholder "G" circle. The implementation follows Google's brand guidelines.
+- **U6** No confirmation on sign-out. Whether to show "Leave this page?" only on screens with unsaved input is undecided.
+- **U7** "Open by ID" and "Try it" are learning paths; if they are cut, keep only "Try it".
+- **U8** An authorization experiment page (`/try`). A proposed dedicated screen for choosing any post ID, operation, and person, sending them, and viewing the stamps side by side. It is not in `screens.md` this time. If added, it becomes S10.
+- **U9** Whether to adopt dark mode. Tokens are prepared but there are no mockups.
+- **U10** English only. Localization is out of scope.
+- **U11** The motion that fades the green stamp after 2 seconds, and the motion of pressing the vermilion stamp. No motion under `prefers-reduced-motion`.
 
-## 疑問点と確認結果(2026-10-19 にバックエンドの振る舞いで確認)
+## Questions and confirmed answers (confirmed against the backend's behavior on 2026-10-19)
 
-- **Q1** 追加予定 API の形。一覧は `GET /posts`(読める行の配列)、登録は `POST /users/{自分の ID}`(本文なしか `{}`)、読み取りは `GET /users/{id}`(`{ "admin": bool }`)と仮定した。パスと本文、201/204 の別、登録済みの応答(409 か 200)を確認したい。 → **確認済み**: 一覧は `GET /posts`(アクション `listPosts`)。登録は `POST /users/{id}`(自分の ID のみ。アクション `registerUser`。201、登録済みは 409)。読み取りは `GET /users/{id}`(アクション `readUser`。本人と管理者。200 で `{ "admin": bool }` 相当、行が無ければ 404、他人の行を本人以外が読むと 403)。
-- **Q2** 一覧の並び順。スキーマに作成日時が無いので、ID 順か DB の返す順になる。画面上は「新しい順」と言えないので番号だけ振っている。並び順を保証するか、または列を足すか(ポリシーの変更は範囲外なので、足すなら別途人間の判断)。 → **確認済み**: 作成日時の列は今回足さない(スキーマ変更は人間の判断)。並び順は保証しない。画面は番号だけ振る。
-- **Q3** 一覧の 403。「読める行だけ返す」なら一覧 API は 403 を返さない想定だが、主体が `User` でも利用者行が無い場合(利用登録まだ)に `principal.admin` の評価でエラー → deny となり、ほかの人の下書きがあるときだけ振る舞いが変わらないか。 → **確認済み**: 一覧は読める行だけを返し、403 にはならない。利用登録まだでも振る舞いは変わらない。`PostList.denied` は念のための状態で、通常は起きない。
-- **Q4** 利用登録まだ(利用者行が無い)で `createPost` が通るか。ポリシー `create-own-post` は `resource.author == principal` だけを見るので permit に見えるが、nyxis が主体の行の存在を要求するかは未確認。通るなら、書いた人の行が無い投稿ができる。画面は「保存を許す」にしてある。 → **確認済み**: 利用登録まだでも `createPost` は通る。「保存を許す」は正しい。
-- **Q5** 404 と 403 の順序。存在しない ID をゲストで `GET` すると 404(行が無い)か、403(先に認可)か。`Handlers.lean` の写像では `notFound → 404` だが、認可層が「行が無い」を先に返すことを前提に、「見られません」の紙に「下書き」タグを出している。この前提が正しいか確認したい。 → **確認済み(前提は誤りだった)**: 投稿の読み取り・編集・削除は、行が無くても 404 ではなく 403(ポリシーが行の属性を評価できず deny。存在を漏らさない既存の設計)。管理者も例外ではない。`manage-post` の `resource.author == principal || principal.admin` は、左辺で存在しない行の属性を参照すると error → deny になるため、管理者の編集・公開・削除も 403。読み取りも管理者を含め 403。これに合わせ、「見られません」の紙から「下書き」タグを外し、一文を「存在しないか、下書きです。下書きは、書いた人と管理者だけが見られます。」に改めた。`PostDetail.notFound` / `PostEdit.notFound` / `PostDetail.actionNotFound` は汎用の 404 表示としてのみ残し、現行の投稿 API では到達しないと明記する。
-- **Q6** `PUT /users/{id}/admin` の対象の行が無いときの応答(404 を想定)と、自分自身を外した直後の同一リクエスト内の扱い。 → **確認済み**: 行が無ければ 404。自分を外した直後は、次のリクエストから管理者でなくなる。
-- **Q7** 削除後に同じ ID で再作成できるか(409 にならないか)。 → **確認済み**: 削除後に同じ ID で再作成できる。
-- **Q8** ログイン切れ。期限切れの JWT を付けたまま送ると 403 ではなく「ゲストとして」判定される。画面は期限をローカルで見て先に案内する(S7 `Me.expired`)が、Supabase のセッション更新(refresh)をいつ行うかは実装で決める。 → **確認済み**: 期限切れの JWT は匿名(ゲスト)として扱われる。更新のタイミングは実装で決める。
-- **Q9** CORS。フロントエンドから Nyxis のバックエンドを別オリジンで呼ぶ場合、バックエンド側の CORS 設定が必要。同一オリジンに置く(前段で経路を分ける)かどうか。 → **確認済み(方針決定)**: バックエンド(nyxis の HTTP ランタイム)に CORS を加える。許可オリジンはコア設定で渡し、プリフライト OPTIONS は固定応答。フロントエンド側の中継は不要。
-- **Q10** `GET /posts/{id}` の応答の `author` は ID の文字列(`cellToJson`)。表示用の名前は無いので ID の先頭 8 桁で統一した。 → **確認済み**: 正しい。
+- **Q1** Shape of the planned APIs. Assumed: list is `GET /posts` (an array of readable rows), registration is `POST /users/{your own ID}` (no body or `{}`), and reading is `GET /users/{id}` (`{ "admin": bool }`). We want to confirm the paths and bodies, 201 vs 204, and the response when already registered (409 or 200). → **Confirmed**: the list is `GET /posts` (action `listPosts`). Registration is `POST /users/{id}` (your own ID only. Action `registerUser`. 201, and 409 if already registered). Reading is `GET /users/{id}` (action `readUser`. The user themselves and admins. 200 with the equivalent of `{ "admin": bool }`, 404 if there is no row, and 403 when someone other than the user reads another person's row).
+- **Q2** Sort order of the list. The schema has no creation time, so the order is by ID or whatever the DB returns. The screen cannot say "newest first", so it only shows numbers. Should the order be guaranteed, or a column added (changing the policy is out of scope, so adding one would be a separate human decision)? → **Confirmed**: no creation-time column is added this time (schema changes are a human decision). The order is not guaranteed. The screen only shows numbers.
+- **Q3** 403 on the list. If it "returns only readable rows", the list API is expected never to return 403, but when the principal is a `User` with no user row (Not registered), does evaluating `principal.admin` error → deny, changing the behavior only when someone else's draft exists? → **Confirmed**: the list returns only readable rows and never returns 403. The behavior does not change for Not registered either. `PostList.denied` is a just-in-case state that normally does not occur.
+- **Q4** Does `createPost` succeed while Not registered (no user row)? The policy `create-own-post` looks only at `resource.author == principal`, so it seems to permit, but whether nyxis requires the principal's row to exist is unconfirmed. If it succeeds, a post whose author has no row can be created. The screen is set to "allow saving". → **Confirmed**: `createPost` succeeds even while Not registered. "Allow saving" is correct.
+- **Q5** Order of 404 and 403. When a guest `GET`s a nonexistent ID, is it 404 (no row) or 403 (authorization first)? The mapping in `Handlers.lean` is `notFound → 404`, but the "Can't view" sheet shows a "Draft" tag on the assumption that the authorization layer returns "no row" first. We want to confirm that this assumption is correct. → **Confirmed (the assumption was wrong)**: reading, editing, and deleting a post return **403**, not 404, even when the row does not exist (the policy cannot evaluate the row's attributes and denies. This is the existing design that avoids leaking existence). Admins are no exception. In `manage-post`'s `resource.author == principal || principal.admin`, referencing an attribute of a nonexistent row on the left-hand side errors → deny, so an admin's edit, publish, and delete are also 403. Reading is also 403, including for admins. Accordingly, the "Draft" tag was removed from the "Can't view" sheet, and the sentence was changed to "It doesn't exist, or it's a draft. Drafts can be viewed only by their author and admins." `PostDetail.notFound` / `PostEdit.notFound` / `PostDetail.actionNotFound` are kept only as generic 404 displays, with an explicit note that the current post API never reaches them.
+- **Q6** The response of `PUT /users/{id}/admin` when the target row does not exist (404 expected), and the handling within the same request right after removing yourself. → **Confirmed**: 404 if there is no row. After removing yourself, you are no longer an admin from the next request on.
+- **Q7** Can a post be re-created with the same ID after deletion (without a 409)? → **Confirmed**: it can be re-created with the same ID after deletion.
+- **Q8** Expired sign-in. Sending an expired JWT is judged "as a guest", not 403. The screen checks the expiry locally and guides the user first (S7 `Me.expired`), but when to refresh the Supabase session is decided in the implementation. → **Confirmed**: an expired JWT is treated as anonymous (guest). The refresh timing is decided in the implementation.
+- **Q9** CORS. If the frontend calls the Nyxis backend from a different origin, the backend needs CORS configuration. Should they be placed on the same origin (splitting routes in front)? → **Confirmed (policy decided)**: add CORS to the backend (the nyxis HTTP runtime). The allowed origins are passed through the core configuration, and the preflight OPTIONS gets a fixed response. No relay on the frontend side is needed.
+- **Q10** The `author` in the `GET /posts/{id}` response is the ID string (`cellToJson`). There is no display name, so the first 8 digits of the ID are used throughout. → **Confirmed**: correct.

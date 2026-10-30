@@ -1,12 +1,11 @@
 import Test.Fixture
 
 /-!
-# Test.Smoke — ランタイムの意味論の煙テスト
+# Test.Smoke — smoke tests of the runtime semantics
 
-定理 `Nyxis.Runtime.authorization_safety` が空虚に成り立っていないことを確かめる。
-`Test.Fixture` のスキーマとポリシーで、ポリシーが許可する呼び出しでは DB 操作が発行されて結果が返り、
-許可しない呼び出しでは何も発行されず `denied` が返ることを `#guard` で検査する。
-`lake build` で実行される(失敗すればビルドが失敗する)。
+Confirms that the theorem `Nyxis.Runtime.authorization_safety` does not hold vacuously. With the schema and policies of
+`Test.Fixture`, checks with `#guard` that a call the policies allow issues DB operations and returns a result, and a
+call they do not allow issues nothing and returns `denied`. Run by `lake build` (if it fails, the build fails).
 -/
 
 namespace Test.Smoke
@@ -19,19 +18,19 @@ open Nyxis.Authz
 open Nyxis.Runtime
 open Test.Fixture
 
--- 公開済み投稿は匿名を含む誰でも読める。
+-- A published post can be read by anyone, including anonymous.
 #guard allowed anon store "readPost" "pub1"
 #guard allowed bob store "readPost" "pub1"
--- 下書きは作者と管理者だけが読める。
+-- A draft can be read only by its author and administrators.
 #guard denied anon store "readPost" "draft1"
 #guard denied bob store "readPost" "draft1"
 #guard allowed alice store "readPost" "draft1"
 #guard allowed root store "readPost" "draft1"
--- 認証済みユーザーは自分を作者とする投稿を作成できる。
+-- An authenticated user can create a post with themselves as author.
 #guard allowed alice store "createPost" "new1" (postRow "alice" "new" false)
 #guard denied bob store "createPost" "new1" (postRow "alice" "new" false)
 #guard denied anon store "createPost" "new1" (postRow "alice" "new" false)
--- 編集・公開・削除は作者と管理者だけ。
+-- Editing, publishing and deleting are allowed only for the author and administrators.
 #guard allowed alice store "editPost" "draft1" (row [("title", "edited")])
 #guard allowed root store "editPost" "draft1" (row [("title", "edited")])
 #guard denied bob store "editPost" "draft1" (row [("title", "edited")])
@@ -39,16 +38,16 @@ open Test.Fixture
 #guard denied bob store "publishPost" "draft1" (row [("published", true)])
 #guard allowed alice store "deletePost" "pub1"
 #guard denied bob store "deletePost" "pub1"
--- 効果の範囲外の列(editPost で published)は、作者でも拒否される。
+-- A column outside the effect's range (published in editPost) is denied even for the author.
 #guard denied alice store "editPost" "draft1" (row [("published", true)])
--- 管理者権限の付与は管理者だけ。
+-- Only administrators can grant administrator rights.
 #guard allowed root store "setAdmin" "bob" (row [("admin", true)])
 #guard denied bob store "setAdmin" "bob" (row [("admin", true)])
 #guard denied alice store "setAdmin" "bob" (row [("admin", true)])
--- 宣言の無いアクションは拒否される。
+-- An action without a declaration is denied.
 #guard denied root store "dropEverything" "pub1"
 
-/-! ## 発行された操作が DB の状態を変えること -/
+/-! ## Issued operations change the DB state -/
 
 def after (p : Principal) (s : Store) (action : String) (key : Key) (values : Row := Map.empty) : Store :=
   (step schema policies p gen s (act action) key values {}).store
@@ -60,52 +59,54 @@ def after (p : Principal) (s : Store) (action : String) (key : Key) (values : Ro
   (fun r => r.find? "admin") == some (some (Value.prim (.bool true)))
 #guard ((after alice store "createPost" "new1" (postRow "alice" "new" false)).find? postT "new1").isSome
 
-/-! ## 一覧
+/-! ## Lists
 
-fixture のスキーマ・ポリシーで、一覧が permit された行だけを返し、
-行ごとの読み取りを発行し、DB の状態を変えないことを検査する。 -/
+With the fixture's schema and policies, checks that a list returns only the permitted rows, issues a read per row, and
+does not change the DB state. -/
 
-/-- 一覧の呼び出し。主キーと値は使われない。 -/
+/-- A list call. The primary key and values are unused. -/
 def listStep (p : Principal) (s : Store := store) (action : String := "listPosts") : StepResult :=
   step schema policies p gen s (act action) "" Map.empty {}
 
-/-- 一覧が返した行の主キー(主キーの順)。一覧でなければ空。 -/
+/-- The primary keys of the rows returned by a list (in primary-key order). Empty if not a list. -/
 def listed (p : Principal) (s : Store := store) (action : String := "listPosts") : List Key :=
   match (listStep p s action).outcome with
   | .list rows _ => rows.map Prod.fst
   | _ => []
 
--- 公開済み投稿は匿名を含む誰にも現れ、下書きは作者と管理者にだけ現れる。
+-- Published posts appear to everyone, including anonymous; drafts appear only to their author and administrators.
 #guard listed anon == ["pub1"]
 #guard listed bob == ["pub1"]
 #guard listed alice == ["draft1", "pub1"]
 #guard listed root == ["draft1", "pub1"]
--- 返した行は現在の行そのもの。
+-- The rows returned are exactly the current rows.
 #guard (match (listStep alice).outcome with
   | .list rows _ => rows.all (fun kv => store.find? postT kv.1 == some kv.2)
   | _ => false)
--- 発行される操作は permit された行ごとの Post の読み取りで、主体はその呼び出しの主体。
+-- The operations issued are a Post read per permitted row, and the principal is that of the call.
 #guard (listStep alice).issued.map (fun i => i.op.target.eid) == ["draft1", "pub1"]
 #guard (listStep anon).issued.map (fun i => i.op.target.eid) == ["pub1"]
 #guard (listStep root).issued.all (fun i =>
   i.principal == root && i.action == act "listPosts" && i.store == store &&
   (match i.op with | .read t _ => t == postT | _ => false))
--- 一覧は DB の状態を変えない。
+-- A list does not change the DB state.
 #guard (listStep alice).store == store
--- 一覧に現れる行は、同じ主体が readPost で読める行と一致する(ポリシーが同じ条件なので)。
+-- The rows that appear in a list match the rows the same principal can read with readPost (since the policies use the
+-- same condition).
 #guard (listed alice).all (fun k => allowed alice store "readPost" k)
 #guard (listed anon).all (fun k => allowed anon store "readPost" k)
 #guard !(allowed bob store "readPost" "draft1") && !((listed bob).contains "draft1")
--- 一覧の宣言が無いスキーマでは拒否され、何も発行されない。
+-- With a schema that has no list declaration, the call is denied and nothing is issued.
 #guard (match (step { schema with actions := schema.actions.filter (·.action != act "listPosts") }
   policies alice gen store (act "listPosts") "" Map.empty {}).outcome with
   | .denied => true
   | _ => false)
--- 書き込みの後の一覧は、新しい状態を反映する。
+-- A list after a write reflects the new state.
 #guard listed alice (after alice store "deletePost" "pub1") == ["draft1"]
 #guard listed anon (after alice store "publishPost" "draft1" (row [("published", true)])) == ["draft1", "pub1"]
--- 主体自身の行を含むテーブルの一覧: 本人は自分の行だけ、管理者は全行、匿名と DB に無い主体には何も現れない
--- (ポリシーが `principal.admin` を参照し、主体の実体は DB の現在の行からしか作られない)。
+-- A list of the table containing the principals' own rows: a user sees only their own row, an administrator sees all
+-- rows, and anonymous and a principal not in the DB see nothing (the policies refer to `principal.admin`, and the
+-- principal's entity is built only from the DB's current row).
 #guard listed bob store "listUsers" == ["bob"]
 #guard listed root store "listUsers" == ["alice", "bob", "root"]
 #guard listed anon store "listUsers" == []
@@ -113,7 +114,7 @@ def listed (p : Principal) (s : Store := store) (action : String := "listPosts")
 #guard (listStep anon store "listUsers").issued.isEmpty
 #guard (listStep (.user (user "stranger")) store "listUsers").issued.isEmpty
 
-/-! ## HTTP リクエスト列の処理 -/
+/-! ## Processing a sequence of HTTP requests -/
 
 def readHandler (key : Key) : Principal → Generated → Http.Request → Handler Http.Response :=
   fun _ _ _ => do
@@ -138,13 +139,14 @@ def requests : List AuthenticatedRequest :=
 
 def issued := (trace app store requests).issued
 
--- 許可された 2 件(匿名の pub1、alice の draft1)だけが発行され、主体とサーバー生成値はそのリクエストのもの。
+-- Only the 2 allowed ones (anonymous pub1, alice's draft1) are issued, and the principal and server-generated values
+-- are those of the request.
 #guard issued.length == 2
 #guard issued.all (fun ri => ri.2.principal == ri.1.principal && ri.2.generated == ri.1.generated)
 #guard (issued.map (fun ri => ri.1.request.path)) == ["/posts/pub1", "/posts/draft1"]
 #guard (issued.map (fun ri => ri.2.principal)) == [anon, alice]
 
-/-! ### 一覧を含むリクエスト列 -/
+/-! ### A request sequence including a list -/
 
 def listHandler : Principal → Generated → Http.Request → Handler Http.Response :=
   fun _ _ _ => do
@@ -160,18 +162,19 @@ def listRouter : Http.Router := fun method path =>
 
 def listApp : App := { schema := schema, policies := policies, router := listRouter }
 
--- 一覧の応答は permit された行の主キーだけ。
+-- The list response contains only the primary keys of the permitted rows.
 #guard (handleRequest listApp store (req anon "/posts")).result.body == "pub1"
 #guard (handleRequest listApp store (req alice "/posts")).result.body == "draft1,pub1"
 #guard (handleRequest listApp store (req bob "/posts")).result.body == "pub1"
--- 発行は permit された行ごとの読み取りで、主体はそのリクエストのもの。
+-- The issued operations are a read per permitted row, and the principal is that of the request.
 #guard (handleRequest listApp store (req anon "/posts")).issued.length == 1
 #guard (handleRequest listApp store (req alice "/posts")).issued.length == 2
 #guard (trace listApp store [req anon "/posts", req alice "/posts", req bob "/posts/draft1"]).issued.length == 3
 #guard (trace listApp store [req anon "/posts", req alice "/posts"]).issued.all
   (fun ri => ri.2.principal == ri.1.principal && ri.2.action == act "listPosts")
--- 観測 `traceCalls` は各リクエストの呼び出し(アクション・主キー・結果)を辿り、渡った(主キー, 行)の組は
--- 現在の行そのもの(読み取りの成功では呼び出しの主キー、一覧では返した各組)。
+-- The observation `traceCalls` follows each request's calls (action, primary key, result), and the (primary key, row)
+-- pairs passed are exactly the current rows (the call's primary key for a successful read, each returned pair for a
+-- list).
 #guard (traceCalls listApp store [req anon "/posts", req bob "/nope", req alice "/posts/draft1"]).map
   (fun rc => rc.2.map (·.action.eid)) == [["listPosts"], [], ["readPost"]]
 #guard ((traceCalls listApp store [req alice "/posts", req alice "/posts/draft1"]).map (fun rc => rc.2.map

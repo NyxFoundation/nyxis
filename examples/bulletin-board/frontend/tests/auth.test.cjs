@@ -103,14 +103,14 @@ test('registration conflict is accepted; backend denial stays distinct', async (
 test('post creation sends content and JWT without trusting a supplied author', async () => {
   global.fetch = async (url, init) => { requests.push({ url, init }); return new Response(null, { status: 201 }); };
   for (const published of [false, true]) {
-    await api.createPost('post/id', { title: '題名', body: '本文', published, author: 'other-user' }, new AbortController().signal, 'test-access');
+    await api.createPost('post/id', { title: 'Title', body: 'Body', published, author: 'other-user' }, new AbortController().signal, 'test-access');
     const request = requests.at(-1);
     assert.equal(request.url, 'http://127.0.0.1:8080/posts/post%2Fid');
     assert.equal(request.init.method, 'POST');
     assert.equal(request.init.headers.Authorization, 'Bearer test-access');
     assert.equal(request.init.headers['Content-Type'], 'application/json');
     assert.equal(request.init.credentials, 'omit');
-    assert.deepEqual(JSON.parse(request.init.body), { title: '題名', body: '本文', published });
+    assert.deepEqual(JSON.parse(request.init.body), { title: 'Title', body: 'Body', published });
   }
 });
 test('creation distinguishes denial, conflict, bad input and unavailable backend', async () => {
@@ -123,13 +123,13 @@ test('creation distinguishes denial, conflict, bad input and unavailable backend
 });
 test('editing sends only title/body; author and publication cannot ride along', async () => {
   global.fetch = async (url, init) => { requests.push({ url, init }); return new Response(null, { status: 204 }); };
-  await api.editPost('post/id', { title: '新しい題名', body: '新しい本文', author: 'other', published: true }, new AbortController().signal, 'test-access');
+  await api.editPost('post/id', { title: 'New title', body: 'New body', author: 'other', published: true }, new AbortController().signal, 'test-access');
   const request = requests.at(-1);
   assert.equal(request.url, 'http://127.0.0.1:8080/posts/post%2Fid');
   assert.equal(request.init.method, 'PATCH');
   assert.equal(request.init.headers.Authorization, 'Bearer test-access');
   assert.equal(request.init.credentials, 'omit');
-  assert.deepEqual(JSON.parse(request.init.body), { title: '新しい題名', body: '新しい本文' });
+  assert.deepEqual(JSON.parse(request.init.body), { title: 'New title', body: 'New body' });
 });
 test('editing keeps refusal, absence, conflict, invalid input and connection failure distinct', async () => {
   for (const [status, kind] of [[403, 'denied'], [404, 'notFound'], [409, 'conflict'], [400, 'badRequest'], [503, 'offline'], [200, 'offline'], [201, 'offline']]) {

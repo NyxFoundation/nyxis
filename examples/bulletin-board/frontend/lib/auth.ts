@@ -25,11 +25,11 @@ async function authRequest(path: string, init: RequestInit = {}) {
   try {
     response = await fetch(base + path, { ...init, cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(15000), headers: { apikey: key, "Content-Type": "application/json", ...init.headers } });
   } catch { throw new AuthError("offline"); }
-  // 5xx と 429(流量制限)は拒否ではない。セッションを保ったまま後で再試行する。
+  // 5xx and 429 (rate limiting) are not refusals. Keep the session and retry later.
   if (!response.ok) throw new AuthError(response.status >= 500 || response.status === 429 ? "offline" : "oauth");
   return response;
 }
-// Auth が 2xx で壊れた本文を返すのは Auth 側の障害(通信失敗と同じ扱い)。
+// A malformed body with a 2xx from Auth is an Auth-side failure (treated like a network failure).
 async function authJson(response: Response): Promise<Record<string, unknown>> {
   let data: unknown;
   try { data = await response.json(); } catch { throw new AuthError("offline"); }

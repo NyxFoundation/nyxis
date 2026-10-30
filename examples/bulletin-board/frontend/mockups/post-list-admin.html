@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ホーム 管理者</title>
+<title>Home Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -47,77 +47,77 @@ h1,h2,h3,p{margin:0}
 <body>
 <div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
 <header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
-  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
-  <nav class="nav" aria-label="メニュー">
-    <a class="on" href="post-list-admin.html">ホーム</a>
-    <a href="post-create.html">投稿</a>
-    <a href="admin-users.html">管理</a>
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis Board</a>
+  <nav class="nav" aria-label="Menu">
+    <a class="on" href="post-list-admin.html">Home</a>
+    <a href="post-create.html">New post</a>
+    <a href="admin-users.html">Admin</a>
   </nav>
   <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
-    <a class="who" href="me.html" aria-label="いまは管理者 6c0fe2a1 としてログイン中です"><span class="avatar admin">6c</span><span class="tag admin">管理者</span></a>
-    <button class="btn plain sm" type="button">ログアウト</button>
+    <a class="who" href="me.html" aria-label="Signed in as admin 6c0fe2a1"><span class="avatar admin">6c</span><span class="tag admin">Admin</span></a>
+    <button class="btn plain sm" type="button">Sign out</button>
   </div>
 </header>
 <div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
 <main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 28px; padding-top: 36px; padding-bottom: 56px">
   <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px">
-    <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">ホーム</h1>
+    <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">Home</h1>
     <span class="mono" style="color: #6E7177">6</span>
     <a class="btn sm" href="post-create.html" style="margin-left: auto">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
-      投稿
+      New post
     </a>
   </div>
   <div class="list">
     <article class="row draft">
       <span class="num">01</span>
-      <a class="title" href="post-detail-author.html">運用メモ</a>
-      <span class="tags"><span class="tag draft">下書き</span><span class="tag me">あなた</span></span>
-      <p class="excerpt">管理者を増やすときは、管理の画面から。</p>
+      <a class="title" href="post-detail-author.html">Operations notes</a>
+      <span class="tags"><span class="tag draft">Draft</span><span class="tag me">You</span></span>
+      <p class="excerpt">To add admins, use the admin page.</p>
       <div class="by"><span>6c0fe2a1</span></div>
     </article>
     <article class="row draft">
       <span class="num">02</span>
-      <a class="title" href="post-detail-author.html">次回リリースの案内</a>
-      <span class="tags"><span class="tag draft">下書き</span></span>
-      <p class="excerpt">来週、新しい機能を追加します。公開前の下書きです。</p>
+      <a class="title" href="post-detail-author.html">Next release announcement</a>
+      <span class="tags"><span class="tag draft">Draft</span></span>
+      <p class="excerpt">We are adding new features next week. This is an unpublished draft.</p>
       <div class="by"><span>3f2a9c1e</span></div>
     </article>
     <article class="row draft">
       <span class="num">03</span>
-      <a class="title" href="post-detail-author.html">投稿のテンプレート</a>
-      <span class="tags"><span class="tag draft">下書き</span></span>
-      <p class="excerpt">題名・本文・公開するかどうか。それだけです。</p>
+      <a class="title" href="post-detail-author.html">Post template</a>
+      <span class="tags"><span class="tag draft">Draft</span></span>
+      <p class="excerpt">Title, body, and whether to publish. That's all.</p>
       <div class="by"><span>b7d104af</span></div>
     </article>
     <article class="row">
       <span class="num">04</span>
-      <a class="title" href="post-detail-author.html">Nyxis 掲示板へようこそ</a>
-      <span class="tags"><span class="tag pub">公開中</span><span class="tag me">あなた</span></span>
-      <p class="excerpt">この掲示板では、見ていい人だけが見られ、できる人だけができます。</p>
+      <a class="title" href="post-detail-author.html">Welcome to Nyxis Board</a>
+      <span class="tags"><span class="tag pub">Published</span><span class="tag me">You</span></span>
+      <p class="excerpt">On this board, only people allowed to view can view, and only people allowed to act can act.</p>
       <div class="by"><span>6c0fe2a1</span></div>
     </article>
     <article class="row">
       <span class="num">05</span>
-      <a class="title" href="post-detail-author.html">ルールの読み方</a>
-      <span class="tags"><span class="tag pub">公開中</span></span>
-      <p class="excerpt">書かれていないことは、すべてできません。</p>
+      <a class="title" href="post-detail-author.html">How to read the rules</a>
+      <span class="tags"><span class="tag pub">Published</span></span>
+      <p class="excerpt">Anything not written down is not allowed.</p>
       <div class="by"><span>3f2a9c1e</span></div>
     </article>
     <article class="row">
       <span class="num">06</span>
-      <a class="title" href="post-detail-author.html">手元で動かすメモ</a>
-      <span class="tags"><span class="tag pub">公開中</span></span>
-      <p class="excerpt">Google アカウントでログインすると、自分の投稿を書けます。</p>
+      <a class="title" href="post-detail-author.html">Notes on running it locally</a>
+      <span class="tags"><span class="tag pub">Published</span></span>
+      <p class="excerpt">Sign in with a Google account to write your own posts.</p>
       <div class="by"><span>b7d104af</span></div>
     </article>
   </div>
   <form style="display: flex; align-items: flex-end; gap: 12px; max-width: 460px">
     <div style="flex: 1; display: flex; flex-direction: column; gap: 4px">
-      <label for="open-id" style="font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #6E7177">IDで開く</label>
-      <input class="input mono" id="open-id" type="text" placeholder="投稿のID">
+      <label for="open-id" style="font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #6E7177">Open by ID</label>
+      <input class="input mono" id="open-id" type="text" placeholder="Post ID">
     </div>
-    <button class="btn line" type="button">開く</button>
+    <button class="btn line" type="button">Open</button>
   </form>
 </main>
 </div>

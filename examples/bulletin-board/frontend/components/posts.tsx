@@ -22,7 +22,7 @@ export function useRead<T>(path: string, parse: (value: unknown) => T) {
       if (!controller.signal.aborted) setResult({ status: error instanceof ApiError ? error.kind : "offline" });
     });
     return () => controller.abort();
-  // 同じ人のトークン回転では読み直さない(編集中の入力を消さない)。送るトークンは実行時点のもの。
+  // A token rotation for the same person does not reload (so in-progress input is not lost). The token sent is the one current at run time.
   }, [path, parse, attempt, session?.userId, ready]);
   return [result, () => { setResult({ status: "loading" }); setAttempt(n => n + 1); }] as const;
 }
@@ -36,12 +36,12 @@ export function parsePost(value: unknown): Post {
 }
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function ResponseState({ status, retry }: { status: string; retry: () => void }) {
-  if (status === "loading") return <div role="status" aria-label="読み込み中" className="skeleton"><i /><i /><i /></div>;
-  if (status === "denied") return <section className="sheet denied" role="alert"><div className="skeleton" aria-hidden="true"><i /><i /><i /></div><strong className="stamp" data-screen="P2" data-state="Stamp.denied.read">見られません</strong><p>存在しないか、下書きです。下書きは、書いた人と管理者だけが見られます。</p></section>;
-  if (status === "notFound") return <div className="empty" role="alert">見つかりません</div>;
-  if (status === "badRequest") return <div className="invalid" role="alert">入力をたしかめてください</div>;
-  if (status === "conflict") return <div className="empty" role="alert">すでにあります</div>;
-  return <div className="offline" role="alert"><span>つながりません</span><button onClick={retry}>もう一度</button></div>;
+  if (status === "loading") return <div role="status" aria-label="Loading" className="skeleton"><i /><i /><i /></div>;
+  if (status === "denied") return <section className="sheet denied" role="alert"><div className="skeleton" aria-hidden="true"><i /><i /><i /></div><strong className="stamp" data-screen="P2" data-state="Stamp.denied.read">Can't view</strong><p>It doesn't exist, or it's a draft. Drafts can be viewed only by their author and admins.</p></section>;
+  if (status === "notFound") return <div className="empty" role="alert">Not found</div>;
+  if (status === "badRequest") return <div className="invalid" role="alert">Check your input</div>;
+  if (status === "conflict") return <div className="empty" role="alert">Already exists</div>;
+  return <div className="offline" role="alert"><span>Can't connect</span><button onClick={retry}>Try again</button></div>;
 }
 export function PostList() {
   const { session, ready, identity } = useAuth();
@@ -50,7 +50,7 @@ export function PostList() {
   const [notice, setNotice] = useState("");
   useEffect(() => {
     if (!ready || new URLSearchParams(location.search).get("deleted") !== "1") return;
-    setNotice("消しました");
+    setNotice("Deleted");
     history.replaceState(history.state, "", location.pathname);
   }, [ready]);
   useEffect(() => {
@@ -65,11 +65,11 @@ export function PostList() {
   const state = pending ? "loading" : result.status !== "ready" ? result.status : !result.data.length ? "empty" : !session ? "anonymous" : identity === "admin" ? "admin" : identity === "unregistered" ? "unregistered" : "user";
   return <main className="wrap main" data-screen="S1" data-state={`PostList.${state}`}>
     {notice && result.status === "ready" && <p className="success-notice" role="status">{notice}</p>}
-    <div className="heading"><h1>ホーム</h1>{result.status === "ready" && <span className="mono">{result.data.length}</span>}</div>
-    {pending ? <ResponseState status="loading" retry={retry} /> : result.status !== "ready" ? <ResponseState status={result.status} retry={retry} /> : result.data.length === 0 ? <div className="empty">まだ投稿がありません</div> : <div className="list">{result.data.map((post, i) => <article className="row" key={post.id}>
+    <div className="heading"><h1>Home</h1>{result.status === "ready" && <span className="mono">{result.data.length}</span>}</div>
+    {pending ? <ResponseState status="loading" retry={retry} /> : result.status !== "ready" ? <ResponseState status={result.status} retry={retry} /> : result.data.length === 0 ? <div className="empty">No posts yet</div> : <div className="list">{result.data.map((post, i) => <article className="row" key={post.id}>
       <span className="num">{String(i + 1).padStart(2, "0")}</span>
       <Link className="title" href={`/posts/${encodeURIComponent(post.id)}`}>{post.title}</Link>
-      <span className={`tag ${post.published ? "pub" : "draft"}`}>{post.published ? "公開中" : "下書き"}</span>
+      <span className={`tag ${post.published ? "pub" : "draft"}`}>{post.published ? "Published" : "Draft"}</span>
       <p className="excerpt">{post.body}</p><span className="by mono">{post.author.slice(0, 8)}</span>
     </article>)}</div>}
     <form className="open-id" onSubmit={event => {
@@ -77,8 +77,8 @@ export function PostList() {
       if (!uuidPattern.test(id.trim())) { setInvalid(true); return; }
       router.push(`/posts/${encodeURIComponent(id.trim())}`);
     }}>
-      <div><label htmlFor="open-id">IDで開く</label><input id="open-id" className={invalid ? "invalid" : ""} value={id} onChange={event => { setId(event.target.value); setInvalid(false); }} placeholder="投稿のID" aria-invalid={invalid} aria-describedby={invalid ? "id-error" : undefined} />{invalid && <p id="id-error">IDをたしかめてください</p>}</div>
-      <button className="btn line" type="submit">開く</button>
+      <div><label htmlFor="open-id">Open by ID</label><input id="open-id" className={invalid ? "invalid" : ""} value={id} onChange={event => { setId(event.target.value); setInvalid(false); }} placeholder="Post ID" aria-invalid={invalid} aria-describedby={invalid ? "id-error" : undefined} />{invalid && <p id="id-error">Check the ID</p>}</div>
+      <button className="btn line" type="submit">Open</button>
     </form>
   </main>;
 }
@@ -103,7 +103,7 @@ function PostDetailView({ id }: { id: string }) {
     const query = new URLSearchParams(location.search);
     const created = query.get("created");
     if (created !== "published" && created !== "draft" && query.get("saved") !== "1") return;
-    setNotice(created === "published" ? "公開しました" : "保存しました");
+    setNotice(created === "published" ? "Published" : "Saved");
     history.replaceState(history.state, "", location.pathname);
   }, [id]);
   useEffect(() => {
@@ -124,7 +124,7 @@ function PostDetailView({ id }: { id: string }) {
       await setPostPublished(id, next, withTimeout(controller.signal), session.accessToken);
       if (!controller.signal.aborted) {
         retry();
-        setNotice(next ? "公開しました" : "下書きにしました");
+        setNotice(next ? "Published" : "Moved to draft");
       }
     } catch (error) {
       if (!controller.signal.aborted) setFailure(error instanceof ApiError ? error.kind : "offline");
@@ -160,28 +160,28 @@ function PostDetailView({ id }: { id: string }) {
   const identityPending = result.status === "ready" && !!session && identity === "loading";
   const state = result.status !== "ready" ? result.status : identityPending ? "loading" : actionState || (confirmDelete ? "confirmDelete" : null) || (admin ? "any.admin" : `${result.data.published ? "published" : "draft"}.${session ? result.data.author === session.userId ? "author" : "user" : "anonymous"}`);
   return <main className="wrap main" data-screen="S2" data-state={`PostDetail.${state}`}>
-    {notice && result.status === "ready" && <p className="success-notice" role="status" data-screen={notice === "公開しました" || notice === "保存しました" ? "P2" : undefined} data-state={notice === "公開しました" ? "Stamp.ok.published" : notice === "保存しました" ? "Stamp.ok.saved" : undefined}>{notice}</p>}
+    {notice && result.status === "ready" && <p className="success-notice" role="status" data-screen={notice === "Published" || notice === "Saved" ? "P2" : undefined} data-state={notice === "Published" ? "Stamp.ok.published" : notice === "Saved" ? "Stamp.ok.saved" : undefined}>{notice}</p>}
     {result.status !== "ready" ? <ResponseState status={result.status} retry={reload} /> : identityPending ? <ResponseState status="loading" retry={reload} /> : <><article className="sheet">
-      <span className={`tag ${result.data.published ? "pub" : "draft"}`}>{result.data.published ? "公開中" : "下書き"}</span>
+      <span className={`tag ${result.data.published ? "pub" : "draft"}`}>{result.data.published ? "Published" : "Draft"}</span>
       <p className="mono post-id">{id}</p><h1>{result.data.title}</h1><p className="body">{result.data.body}</p>
       <p className="mono by">{result.data.author.slice(0, 8)}</p>
     </article>
       {session && (result.data.author === session.userId || admin) && <div className="detail-actions" aria-busy={busy}>
-        <Link className="btn line" href={`/posts/${encodeURIComponent(id)}/edit`}>編集</Link>
-        <button className="btn line" type="button" disabled={busy || confirmDelete} onClick={togglePublished}>{busy && !confirmDelete ? "変更中" : result.data.published ? "下書きにもどす" : "公開する"}</button>
-        <button ref={deleteButton} className="btn line danger" type="button" disabled={busy || confirmDelete} onClick={() => { setFailure(null); setNotice(""); setConfirmDelete(true); }}>削除</button>
+        <Link className="btn line" href={`/posts/${encodeURIComponent(id)}/edit`}>Edit</Link>
+        <button className="btn line" type="button" disabled={busy || confirmDelete} onClick={togglePublished}>{busy && !confirmDelete ? "Changing" : result.data.published ? "Back to draft" : "Publish"}</button>
+        <button ref={deleteButton} className="btn line danger" type="button" disabled={busy || confirmDelete} onClick={() => { setFailure(null); setNotice(""); setConfirmDelete(true); }}>Delete</button>
         {confirmDelete && <div className="delete-confirm" role="group" aria-labelledby="delete-question">
-          <p id="delete-question">この投稿を消しますか?</p>
-          <button className="btn danger" type="button" disabled={busy} onClick={removePost}>{busy ? "削除中" : "消す"}</button>
-          <button className="btn line" type="button" disabled={busy} autoFocus onClick={() => { setConfirmDelete(false); requestAnimationFrame(() => deleteButton.current?.focus()); }}>やめる</button>
+          <p id="delete-question">Delete this post?</p>
+          <button className="btn danger" type="button" disabled={busy} onClick={removePost}>{busy ? "Deleting" : "Delete"}</button>
+          <button className="btn line" type="button" disabled={busy} autoFocus onClick={() => { setConfirmDelete(false); requestAnimationFrame(() => deleteButton.current?.focus()); }}>Cancel</button>
         </div>}
-        {failure === "denied" && <strong className="stamp" role="alert" data-screen="P2" data-state="Stamp.denied.act">できません</strong>}
-        {failure === "conflict" && <p role="alert">すでに変わっています <button type="button" onClick={reload}>読み直す</button></p>}
-        {failure === "notFound" && <p className="empty" role="alert">見つかりません</p>}
-        {failure === "badRequest" && <p className="invalid" role="alert">入力をたしかめてください</p>}
-        {failure === "offline" && <div className="offline" role="alert"><span>つながりません</span><button type="button" disabled={busy} onClick={reload}>もう一度</button></div>}
+        {failure === "denied" && <strong className="stamp" role="alert" data-screen="P2" data-state="Stamp.denied.act">Not allowed</strong>}
+        {failure === "conflict" && <p role="alert">Already changed <button type="button" onClick={reload}>Reload</button></p>}
+        {failure === "notFound" && <p className="empty" role="alert">Not found</p>}
+        {failure === "badRequest" && <p className="invalid" role="alert">Check your input</p>}
+        {failure === "offline" && <div className="offline" role="alert"><span>Can't connect</span><button type="button" disabled={busy} onClick={reload}>Try again</button></div>}
       </div>}
     </>}
-    <Link href="/">ホームにもどる</Link>
+    <Link href="/">Back to home</Link>
   </main>;
 }

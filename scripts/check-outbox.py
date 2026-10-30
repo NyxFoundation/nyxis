@@ -234,7 +234,7 @@ def main():
                            and row['url'] == base + '/hooks/o-hook' and row['body'] == {'note': 'first'},
                            'hook row: ' + json.dumps(row))
                 elif row['target'] == 'Order/o-dead':
-                    # `url: 列` pointing at a closed port: every attempt is a transport failure.
+                    # `url: <column>` pointing at a closed port: every attempt is a transport failure.
                     expect(row['action'] == 'pingHook' and row['destination'] == 'Hook' and row['method'] == 'POST'
                            and row['url'] == 'https://localhost:1/dead' and row['body'] == {'note': 'first'},
                            'dead hook row: ' + json.dumps(row))

@@ -1,12 +1,13 @@
 import Nyxis.Http
 
 /-!
-# Test.Http — HTTP の要約と応答の行の純粋検査
+# Test.Http — pure checks of the HTTP summary and the response line
 
-`Nyxis.Http` の純粋関数を `#guard` で検査する: 要求ヘッダの選別(`selectHeaders`。Authorization・Cookie を含む
-列挙外の名前は落ちる)、問い合わせ文字列の復号(`decodeComponent` / `parseQuery`)、応答の行の構成(`responseBuilder`。
-Content-Type の既定と、妥当でない値の破棄。`ResponseHeader` に無い名前は表せない)。
-実 HTTP での統合検査は `scripts/check-http-headers.py`(実行ファイル `serveHttpHeaders`)。
+Checks the pure functions of `Nyxis.Http` with `#guard`: selecting request headers (`selectHeaders`; names outside the
+enumeration, including Authorization and Cookie, are dropped), decoding the query string (`decodeComponent` /
+`parseQuery`), and building the response line (`responseBuilder`; the default Content-Type and dropping invalid values;
+names not in `ResponseHeader` cannot be represented). The integration check over real HTTP is
+`scripts/check-http-headers.py` (executable `serveHttpHeaders`).
 -/
 
 namespace Test.Http
@@ -17,9 +18,10 @@ private def hdrs (pairs : List (String × String)) : Std.Http.Headers :=
   Std.Http.Headers.ofList (pairs.map fun p =>
     (Std.Http.Header.Name.ofString! p.1, Std.Http.Header.Value.ofString! p.2))
 
-/-! ## 要求ヘッダの選別 -/
+/-! ## Selecting request headers -/
 
--- 列挙した名前だけが受け取った順に残り、Authorization・Cookie・その他は落ちる。名前の大小は区別しない。
+-- Only the enumerated names remain, in the order received; Authorization, Cookie and others are dropped. Names are
+-- case-insensitive.
 #guard selectHeaders (hdrs [("Authorization", "Bearer secret"), ("Cookie", "s=1"), ("Accept", "application/json"),
     ("X-Principal", "root"), ("CONTENT-TYPE", "text/plain"), ("If-None-Match", "\"v1\""), ("Accept", "text/html"),
     ("Accept-Language", "ja"), ("If-Match", "\"v2\""), ("Set-Cookie", "a=b"), ("Proxy-Authorization", "Basic x"),
@@ -28,7 +30,7 @@ private def hdrs (pairs : List (String × String)) : Std.Http.Headers :=
    (.acceptLanguage, "ja"), (.ifMatch, "\"v2\"")]
 #guard selectHeaders (hdrs []) == []
 #guard selectHeaders (hdrs [("Authorization", "Bearer secret"), ("Cookie", "s=1")]) == []
--- 選別の名前に Authorization・Cookie は無く、名前からの変換もそれらに対しては `none`。
+-- Authorization and Cookie are not among the selected names, and conversion from a name gives `none` for them.
 #guard RequestHeader.all.all (fun h => h.name != "authorization" && h.name != "cookie")
 #guard RequestHeader.ofName? "authorization" == none
 #guard RequestHeader.ofName? "cookie" == none
@@ -36,10 +38,10 @@ private def hdrs (pairs : List (String × String)) : Std.Http.Headers :=
 #guard RequestHeader.ofName? "if-none-match" == some .ifNoneMatch
 #guard RequestHeader.all.map (·.name) == ["accept", "accept-language", "content-type", "if-none-match", "if-match"]
 
-/-! ## 問い合わせ文字列 -/
+/-! ## Query string -/
 
 #guard decodeComponent "a%20b+c" == some "a b c"
-#guard decodeComponent "%E3%81%82" == some "あ"
+#guard decodeComponent "%E3%81%82" == some "\u3042"
 #guard decodeComponent "plain" == some "plain"
 #guard decodeComponent "" == some ""
 #guard decodeComponent "%zz" == none
@@ -59,7 +61,7 @@ private def hdrs (pairs : List (String × String)) : Std.Http.Headers :=
   == some "a"
 #guard ({ method := .get, path := "/", body := "" } : Request).header? .accept == none
 
--- リクエスト行からの取り出し: パスは問い合わせを含まず、問い合わせは符号化のまま。
+-- Extraction from the request line: the path does not include the query, and the query stays encoded.
 private def targetOf (s : String) : Std.Http.RequestTarget :=
   match Std.Http.URI.parse? s with
   | some uri => .absoluteForm uri
@@ -71,39 +73,41 @@ private def targetOf (s : String) : Std.Http.RequestTarget :=
 #guard parseQuery (queryOf (targetOf "http://h/docs?limit=10&name=a%20b+c&flag")) ==
   [("limit", "10"), ("name", "a b c"), ("flag", "")]
 
-/-! ## 応答の行 -/
+/-! ## Response line -/
 
 private def lineOf (r : Response) := (responseBuilder r).line
 
-/-- 応答の行にある `name` の値(受け取った順)。 -/
+/-- The values of `name` in the response line (in the order received). -/
 private def valuesOf (r : Response) (name : String) : List String :=
   (((lineOf r).headers.getAll? (Std.Http.Header.Name.ofString! name)).map (·.toList.map (·.value))).getD []
 
 private def allowed : Response :=
   { status := .created, body := "", headers := [(.etag, "\"v1\""), (.cacheControl, "no-store"), (.location, "/docs/1")] }
 
--- Content-Type の既定と設定。同じ名前は最初のもの。
+-- The default Content-Type and setting it. For the same name, the first one is used.
 #guard valuesOf { status := .ok, body := "" } "content-type" == ["text/plain; charset=utf-8"]
 #guard valuesOf { status := .ok, body := "", headers := [(.contentType, "application/json")] } "content-type"
   == ["application/json"]
 #guard valuesOf { status := .ok, body := "", headers := [(.contentType, "application/json"), (.contentType, "text/html")] }
   "content-type" == ["application/json"]
--- 妥当でない値(改行を含む)は捨てる。Content-Type は既定に戻り、挿入を試みた名前は現れない。
+-- Invalid values (containing a newline) are dropped. Content-Type falls back to the default, and the name whose
+-- insertion was attempted does not appear.
 #guard valuesOf { status := .ok, body := "", headers := [(.contentType, "text/html\r\nSet-Cookie: a=b")] }
   "content-type" == ["text/plain; charset=utf-8"]
 #guard valuesOf { status := .ok, body := "", headers := [(.contentType, "text/html\r\nSet-Cookie: a=b")] }
   "set-cookie" == []
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "bad\nvalue")] } "etag" == []
--- 許可された他のヘッダ。
+-- Other allowed headers.
 #guard valuesOf allowed "etag" == ["\"v1\""]
 #guard valuesOf allowed "cache-control" == ["no-store"]
 #guard valuesOf allowed "location" == ["/docs/1"]
 #guard (lineOf allowed).status == .created
 #guard (lineOf allowed).headers.toList.map (·.1.value) == ["content-type", "cache-control", "etag", "location"]
--- 同じ名前は最初のものだけ(2 つめ以降は妥当でも使わない)。
+-- For the same name, only the first one is used (the second and later are not used even if valid).
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "\"a\""), (.etag, "\"b\"")] } "etag" == ["\"a\""]
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "bad\nvalue"), (.etag, "\"b\"")] } "etag" == []
--- Cache-Control: 共有キャッシュへの保存を許す public / s-maxage は捨てる(大小・空白を問わない)。
+-- Cache-Control: public / s-maxage, which allow storing in a shared cache, are dropped (regardless of case or
+-- whitespace).
 #guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "private, max-age=0")] } "cache-control"
   == ["private, max-age=0"]
 #guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "public, max-age=60")] } "cache-control" == []
@@ -114,7 +118,7 @@ private def allowed : Response :=
 #guard !acceptableCacheControl "s-maxage=1"
 #guard acceptable .etag "public"
 #guard (lineOf { status := .ok, body := "" }).headers.toList.map (·.1.value) == ["content-type"]
--- 許す名前に Set-Cookie は無い。
+-- Set-Cookie is not among the allowed names.
 #guard ResponseHeader.all.all (fun h => h.name != "set-cookie")
 #guard ResponseHeader.all.map (·.name) == ["content-type", "cache-control", "etag", "location"]
 #guard ResponseHeader.all.all (fun h => (headerName h).value == h.name)

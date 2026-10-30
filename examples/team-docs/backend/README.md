@@ -1,31 +1,31 @@
-# team-docs バックエンド
+# team-docs backend
 
-このパッケージは `require nyxis from "../../.."` でリポジトリ直下のコアを利用する。
-コアの Lean ソースのコピーは持たない。実行ファイルと検査はこのパッケージでビルドする。
+This package uses the core at the repository root through `require nyxis from "../../.."`.
+It holds no copy of the core's Lean sources. The executables and checks are built in this package.
 
-リポジトリ直下で依存とコアを準備する。
+Prepare the dependencies and the core at the repository root.
 
 ```sh
 python3 scripts/prepare-dependencies.py
 lake build
 ```
 
-続いてこのディレクトリで実行する。
+Then run in this directory.
 
 ```sh
 lake build
 ```
 
-`lake-manifest.json` はコアで準備済みの Cedar・batteries・JWT・PostgreSQL 依存を
-相対パスで参照する。リビジョンはコアの固定情報に従い、別のコピーを取得しない。
+`lake-manifest.json` references the Cedar, batteries, JWT and PostgreSQL dependencies already prepared by the core
+through relative paths. Revisions follow the core's pinned information, and no separate copies are fetched.
 
-承認する正本は `schema.cedarschema` と `policies.cedar`。
-`TeamDocs/Approved.lean` が `nyxis_approved` で宣言し、`TeamDocs/Server.lean` は
-その宣言から組む App をコアの起動 API へ渡す。
-`TeamDocs.lean` の末尾でアプリ全体を監査し、`Main.lean` がその後に起動処理を行う。
-`TeamDocsTest/` はこのアプリだけのモデル検査を持つ。
+The approved sources are `schema.cedarschema` and `policies.cedar`.
+`TeamDocs/Approved.lean` declares them with `nyxis_approved`, and `TeamDocs/Server.lean`
+passes the App built from that declaration to the core's startup API.
+The end of `TeamDocs.lean` audits the whole app, and `Main.lean` performs startup after that.
+`TeamDocsTest/` holds the model checks specific to this app.
 
-ビルド成果物はこのディレクトリの `.lake/build/bin/` にある。
-`teamDocs` は `NYXIS_DATABASE_URL`・`NYXIS_SUPABASE_ISSUER` を必須とし、
-ブラウザ向けには `NYXIS_CORS_ORIGINS` も指定する。`initTeamDocsDatabase` は新規テーブルの明示的な準備専用である。
-ローカル Supabase 上の統合テストは [公式サンプルの README](../README.md) を参照する。
+Build outputs are in `.lake/build/bin/` in this directory.
+`teamDocs` requires `NYXIS_DATABASE_URL` and `NYXIS_SUPABASE_ISSUER`,
+and for browsers `NYXIS_CORS_ORIGINS` is also specified. `initTeamDocsDatabase` is only for explicitly preparing new tables.
+For the integration test on local Supabase, see [the official sample's README](../README.md).

@@ -2,27 +2,29 @@ import Nyxis.Internal.StorageSign
 import Nyxis.Internal.MailSend
 import Nyxis.Internal.CallSend
 
-/-! 宣言された外部効果の実行(Assumption 1・2。コア専用、未証明)。
+/-! Execution of declared external effects (Assumptions 1 and 2; core only, unproven).
 
-認可層が記録した外部効果の内容(`Authz.Payload`)についてだけ、接続層(`PostgresRun.runStaged`)が種類に応じて
-Storage への発行(`StorageSign`)・メールの送信(`MailSend`)・外部 API の `sync` の呼び出し(`CallSend`)を行う。設定(`Config`)は
-コア設定で、要求のどの項目からも決めない。設定の無い種類の効果は実行できず例外(要求全体が 503)。`async` の呼び出しは
-接続層がアウトボックス(`Nyxis.Internal.Outbox`)に書き、ここには来ない。 -/
+Only for the external-effect contents recorded by the authorization layer (`Authz.Payload`), the connection layer
+(`PostgresRun.runStaged`) performs, according to the kind, issuing to Storage (`StorageSign`), sending mail
+(`MailSend`), or a `sync` external API call (`CallSend`). The configuration (`Config`) is core configuration and is not
+determined from any field of the request. An effect whose kind is not configured cannot be executed and throws (the
+whole request becomes 503). `async` calls are written by the connection layer to the outbox (`Nyxis.Internal.Outbox`)
+and never come here. -/
 namespace Nyxis.Internal.ExternalSend
 
-/-- 外部効果の設定。無い項目の効果は 503 になる。 -/
+/-- External-effect configuration. An effect whose field is absent results in 503. -/
 structure Config where
-  /-- Supabase Storage。 -/
+  /-- Supabase Storage. -/
   storage : Option StorageSign.Config := none
-  /-- メールの中継と差出人。 -/
+  /-- The mail relay and sender. -/
   mail : Option MailSend.Config := none
-  /-- 外部 API の送り先ごとの認証ヘッダと上限。 -/
+  /-- The authentication header and limits for each external API destination. -/
   calls : Option CallSend.Config := none
 
-/-- 記録された内容を実行する。署名付き URL の発行は結果の URL(`none` はオブジェクトが無い)、メールは `none`
-    (結果の値は無い)、`sync` の呼び出しは応答(`called` / `calledError`)。`async` の呼び出しはここでは送らない: 接続層
-    (`PostgresRun.driver`)が要求のトランザクションでアウトボックスに書く(`Nyxis.Internal.Outbox.enqueue`)ので、
-    ここに届くことは無い(例外)。 -/
+/-- Execute the recorded contents. Issuing a signed URL yields the resulting URL (`none` means the object does not
+    exist), mail yields `none` (no result value), and a `sync` call yields the response (`called` / `calledError`).
+    `async` calls are not sent here: the connection layer (`PostgresRun.driver`) writes them to the outbox in the
+    request's transaction (`Nyxis.Internal.Outbox.enqueue`), so they never reach here (exception). -/
 def send (config : Config) : Authz.Payload → IO Authz.ExternalResult
   | .upload object => sign true object
   | .download object => sign false object

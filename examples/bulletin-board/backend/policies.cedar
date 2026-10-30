@@ -1,9 +1,9 @@
-// サンプルアプリ(掲示板)の Cedar ポリシー。schema.cedarschema に対して妥当。
+// Cedar policies of the sample application (bulletin board). Valid against schema.cedarschema.
 //
-// 書かれていない操作はすべて拒否される(Cedar の既定は deny)。
-// 主体はリクエストの JWT から、対象は DB の現在の行(挿入・更新では提案される値)から nyxis が決める。
+// Every operation not written here is denied (Cedar's default is deny). nyxis determines the principal from the
+// request's JWT, and the target from the current DB row (the proposed values for inserts and updates).
 
-// 公開済み投稿は匿名を含む誰でも読める。
+// Published posts can be read by anyone, including anonymous principals.
 @id("read-published-post")
 permit (
   principal,
@@ -11,7 +11,7 @@ permit (
   resource is Post
 ) when { resource.published };
 
-// 下書きの投稿は作者と管理者だけが読める。
+// Draft posts can be read only by their author and admins.
 @id("read-draft-post")
 permit (
   principal is User,
@@ -19,7 +19,7 @@ permit (
   resource is Post
 ) when { resource.author == principal || principal.admin };
 
-// 認証済みユーザーは、自分を作者とする投稿を作成できる。
+// Authenticated users can create posts with themselves as the author.
 @id("create-own-post")
 permit (
   principal is User,
@@ -27,7 +27,7 @@ permit (
   resource is Post
 ) when { resource.author == principal };
 
-// 投稿の編集・公開・削除は作者と管理者だけができる。
+// Only the author and admins can edit, publish, and delete a post.
 @id("manage-post")
 permit (
   principal is User,
@@ -35,7 +35,7 @@ permit (
   resource is Post
 ) when { resource.author == principal || principal.admin };
 
-// 管理者権限の付与・剥奪は管理者だけができる。
+// Only admins can grant and revoke admin rights.
 @id("set-admin")
 permit (
   principal is User,
@@ -50,7 +50,7 @@ permit (
   resource is User
 ) when { resource == principal && context.values.admin == false };
 
-// 利用者の行は本人と管理者だけが読める。
+// A user row can be read only by the user themselves and admins.
 @id("read-user")
 permit (
   principal is User,

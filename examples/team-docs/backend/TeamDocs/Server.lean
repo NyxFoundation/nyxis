@@ -2,9 +2,10 @@ import TeamDocs.Approved
 import Nyxis.Internal.ApprovedServer
 import Nyxis.Internal.PostgresShapeBuild
 
-/-! 実起動の配線。宣言 `Approved.sources`・正本から構成した PostgreSQL の形状・利用者のエンティティ型を
-`Deployment` に固定し、ルータと定期処理とコア設定(CORS・外部効果・サービス主体・アウトボックスの内部ループ)だけを
-受け取る。監査(`TeamDocs.lean` 末尾)の後に起動処理からだけ import する。 -/
+/-! Wiring of the real startup. Fixes the declaration `Approved.sources`, the PostgreSQL shape built from the approved
+source, and the user entity type in a `Deployment`, and accepts only the router, periodic jobs and core settings (CORS,
+external effects, service principal, the outbox's internal loop). Imported only from startup, after the audit (end of
+`TeamDocs.lean`). -/
 open Nyxis Nyxis.Internal
 
 namespace TeamDocs.Server

@@ -1,6 +1,6 @@
-// コアの検査用スキーマ。アプリケーションのファイルではない。
-// datetime / decimal の拡張値、Set<実体> / Set<String>、レコード型の属性を列として持ち、
-// Doc は所有者(親を指す列 owner)を親に持つ(ポリシーの `resource in principal` で判定する)。
+// A schema for the core tests; not an application file. It has datetime / decimal extension values, Set<entity> /
+// Set<String>, and record-typed attributes as columns, and Doc has its owner (the parent column owner) as its parent
+// (judged by `resource in principal` in the policy).
 
 entity User = {
   "admin": Bool

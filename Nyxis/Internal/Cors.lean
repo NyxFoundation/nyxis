@@ -1,7 +1,7 @@
 import Nyxis.Http
 
-/-! コアの HTTP ミドルウェア(A4)。設定は配置から来るもので、アプリケーションのハンドラからは来ない。
-CORS はブラウザの輸送の方針であり、認可ではない。 -/
+/-! Core HTTP middleware (A4). The configuration comes from the deployment, never from the application's handlers. CORS
+is a browser transport policy, not authorization. -/
 namespace Nyxis.Internal.Cors
 open Std.Async
 
@@ -9,8 +9,8 @@ structure Config where
   allowedOrigins : List String := []
   deriving Inhabited
 
-/-- 明示的な HTTP(S) のオリジンだけを認める。ワイルドカード・不透明なオリジン・パス・資格情報は認めない。
-照合は完全一致で、接尾辞の照合やリクエスト入力の正規化は行わない。 -/
+/-- Accept only explicit HTTP(S) origins. Wildcards, opaque origins, paths and credentials are not accepted. Matching is
+exact; there is no suffix matching and no normalization of request input. -/
 def validOrigin (s : String) : Bool := Id.run do
   if !(s.startsWith "http://" || s.startsWith "https://") then return false
   let some uri := Std.Http.URI.parse? s | return false
@@ -20,7 +20,7 @@ def validOrigin (s : String) : Bool := Id.run do
     s.toList.all (fun c => c.isAlphanum || ":/.-[]".contains c) &&
     !(s.endsWith ":")
 
-/-- カンマ区切りの配置の設定。無い・空なら CORS を無効にする。 -/
+/-- The comma-separated deployment setting. If it is absent or empty, CORS is disabled. -/
 def parse (setting : String) : Except String Config := do
   if setting.isEmpty then return {}
   let origins := (setting.splitOn ",").map (fun s => s.trimAscii.toString)
@@ -36,7 +36,7 @@ def allowed (config : Config) (headers : Std.Http.Headers) : Option Std.Http.Hea
 
 def decorate (config : Config) (headers : Std.Http.Headers) (preflight : Bool)
     (response : Std.Http.Response Std.Http.Body.Any) : Std.Http.Response Std.Http.Body.Any := Id.run do
-  -- 拒否したオリジンや無いオリジンでも Vary を付け、共有キャッシュが許可を再利用できないようにする。
+  -- Add Vary even for rejected or missing origins, so that a shared cache cannot reuse an allowance.
   let mut result := { response with line.headers := response.line.headers.insert! "Vary" "Origin" }
   if let some origin := allowed config headers then
     result := { result with line.headers := result.line.headers.insert (Std.Http.Header.Name.ofString! "Access-Control-Allow-Origin") origin }
@@ -46,8 +46,8 @@ def decorate (config : Config) (headers : Std.Http.Headers) (preflight : Bool)
         |>.insert! "Access-Control-Allow-Headers" "Authorization, Content-Type") }
   return result
 
-/-- すべての OPTIONS は、本文の読み取り・認証・ルーティング・DB の IO の前で終わる。
-資格情報や cookie は許可しない。ブラウザのクライアントは Bearer ヘッダを使う。 -/
+/-- Every OPTIONS request finishes before body reading, authentication, routing and DB IO. Credentials and cookies are
+not allowed. Browser clients use the Bearer header. -/
 def wrap (config : Config)
     (next : Std.Http.Request Std.Http.Body.Stream →
       ContextAsync (Std.Http.Response Std.Http.Body.Any))
@@ -58,8 +58,8 @@ def wrap (config : Config)
     return decorate config req.line.headers true response
   return decorate config req.line.headers false (← next req)
 
-/-- 日本語: OPTIONSでは任意の次処理nextと無関係な固定204応答を構築する。
-ハンドラ・認証・認可・DBの処理を呼ばない。 -/
+/-- For OPTIONS, build a fixed 204 response that is independent of an arbitrary next step `next`. No handler,
+authentication, authorization or DB processing is invoked. -/
 theorem wrap_options (config : Config) (next)
     (req : Std.Http.Request Std.Http.Body.Stream) (h : req.line.method = .options) :
     wrap config next req = (do

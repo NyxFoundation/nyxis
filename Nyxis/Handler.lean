@@ -2,45 +2,47 @@ import Std.Http
 import Nyxis.Authz
 
 /-!
-# Nyxis.Handler — ハンドラの型
+# Nyxis.Handler — the handler type
 
-nyxis 上のアプリケーションが HTTP の各エンドポイントに対して書く処理の型。
+The type of the code an application on nyxis writes for each HTTP endpoint.
 
-ハンドラは `IO` ではなく、認可層へのアクション呼び出しだけを効果として持つプログラム
-(自由モナドの形)として表す。この型には IO・DB 層・外界への到達を表す構成子が無いので、
-ハンドラは認可層を経由せずに DB や外界に到達できない。どのアクションをどの行にどの値で呼ぶかだけを渡し、
-主体・対象・効果は渡せない。
+A handler is represented not as `IO` but as a program whose only effects are action calls to the authorization layer (in
+free-monad form). This type has no constructor representing access to IO, the DB layer or the outside world, so a
+handler cannot reach the DB or the outside world without going through the authorization layer. It passes only which
+action to call, on which row, with which values; it cannot pass the principal, resource or effect.
 
-## HTTP の要約
+## HTTP summary
 
-ハンドラが読める要求は `Http.Request`: メソッド・パス・生の問い合わせ文字列(`?` の後ろ。パーセント符号化のまま。
-`Request.queryParams` で復号した組にできる)・nyxis が選別したヘッダ(`RequestHeader`: Accept・Accept-Language・
-Content-Type・If-None-Match・If-Match。名前は型で列挙され、Authorization と Cookie には構成子が無いので
-ハンドラには届かない。JWT はランタイムが読んで主体に変える)・本文。
+The request a handler can read is `Http.Request`: the method, path, raw query string (after `?`, still percent-encoded;
+`Request.queryParams` decodes it into pairs), the headers selected by nyxis (`RequestHeader`: Accept, Accept-Language,
+Content-Type, If-None-Match, If-Match. The names are enumerated by the type, and Authorization and Cookie have no
+constructor, so they never reach the handler. The runtime reads the JWT and turns it into the principal), and the body.
 
-ハンドラが返す応答は `Http.Response`: 状態コード・本文・nyxis が許す少数の応答ヘッダ(`ResponseHeader`:
-Content-Type・Cache-Control・ETag・Location。名前は型で列挙され、Set-Cookie には構成子が無い)。
-Content-Type を設定しなければ `text/plain; charset=utf-8`。HTTP のヘッダ値として妥当でない値(改行・制御文字・非 ASCII)と、
-認証済みの主体への応答を共有キャッシュが別の主体へ再送することを許す Cache-Control の `public` / `s-maxage` は
-接続層が捨てる(`Nyxis.Http.responseBuilder`)。
+The response a handler returns is `Http.Response`: the status code, the body, and the few response headers nyxis allows
+(`ResponseHeader`: Content-Type, Cache-Control, ETag, Location. The names are enumerated by the type, and Set-Cookie has
+no constructor). If Content-Type is not set, it is `text/plain; charset=utf-8`. Values that are not valid HTTP header
+values (newlines, control characters, non-ASCII), and the Cache-Control directives `public` / `s-maxage`, which would
+let a shared cache resend a response for an authenticated principal to another principal, are dropped by the connection
+layer (`Nyxis.Http.responseBuilder`).
 -/
 
 namespace Nyxis
 
 open Cedar.Spec
 
-/-- ハンドラのプログラム。`pure` か、アクション呼び出し `call` の後に続きを待つかのどちらか。 -/
+/-- A handler program. Either `pure`, or an action call `call` followed by waiting for the continuation. -/
 inductive Handler (α : Type) : Type where
-  /-- 値を返して終わる。 -/
+  /-- Finish by returning a value. -/
   | pure (a : α) : Handler α
-  /-- アクション `action` を主キー `key` の行に、提案する値 `values` で呼び、結果を受けて続ける。一覧の効果では
-      `key` と `values` は使われず、問い合わせ `query`(絞り込み・並べ替え・ページ)が使われる。 -/
+  /-- Call the action `action` on the row with primary key `key` with the proposed values `values`, and continue with
+      the result. For a list effect, `key` and `values` are unused and the query `query` (filter, sort, page) is used.
+      -/
   | call (action : EntityUID) (key : Db.Key) (values : Db.Row) (query : Db.ListQuery) (k : Outcome → Handler α) :
       Handler α
 
 namespace Handler
 
-/-- 逐次合成。 -/
+/-- Sequential composition. -/
 protected def bind {α β : Type} : Handler α → (α → Handler β) → Handler β
   | .pure a, f => f a
   | .call action key values query k, f => .call action key values query (fun o => Handler.bind (k o) f)
@@ -49,13 +51,13 @@ instance : Monad Handler where
   pure := .pure
   bind := Handler.bind
 
-/-- アクションを呼ぶ。ハンドラが持てる唯一の効果。 -/
+/-- Call an action. The only effect a handler can have. -/
 def callAction (action : EntityUID) (key : Db.Key) (values : Db.Row := Cedar.Data.Map.empty) :
     Handler Outcome :=
   .call action key values {} .pure
 
-/-- 一覧のアクションを、絞り込み・並べ替え・ページの問い合わせを添えて呼ぶ。主キーと値は使われない。
-    結果は `Outcome.list rows total`(返す行と、絞り込みに合い permit された行の数)。 -/
+/-- Call a list action with a query for filtering, sorting and paging. The primary key and values are unused. The result
+    is `Outcome.list rows total` (the rows returned, and the number of rows that match the filter and are permitted). -/
 def callList (action : EntityUID) (query : Db.ListQuery := {}) : Handler Outcome :=
   .call action "" Cedar.Data.Map.empty query .pure
 
@@ -63,7 +65,8 @@ end Handler
 
 namespace Http
 
-/-- ハンドラに渡す要求ヘッダの名前。nyxis が選別した少数だけで、Authorization と Cookie は無い。 -/
+/-- Names of the request headers passed to handlers. Only the few selected by nyxis; Authorization and Cookie are
+    absent. -/
 inductive RequestHeader where
   | accept
   | acceptLanguage
@@ -74,7 +77,7 @@ inductive RequestHeader where
 
 namespace RequestHeader
 
-/-- HTTP 上の名前(小文字)。 -/
+/-- The name on the wire (lowercase). -/
 def name : RequestHeader → String
   | .accept => "accept"
   | .acceptLanguage => "accept-language"
@@ -82,16 +85,16 @@ def name : RequestHeader → String
   | .ifNoneMatch => "if-none-match"
   | .ifMatch => "if-match"
 
-/-- 選別するすべての名前。 -/
+/-- All selected names. -/
 def all : List RequestHeader := [.accept, .acceptLanguage, .contentType, .ifNoneMatch, .ifMatch]
 
-/-- 小文字の HTTP の名前から。選別に無い名前(Authorization・Cookie を含む)は `none`。 -/
+/-- From a lowercase HTTP name. Names outside the selection (including Authorization and Cookie) give `none`. -/
 def ofName? (name : String) : Option RequestHeader :=
   all.find? (·.name == name)
 
 end RequestHeader
 
-/-- ハンドラが設定できる応答ヘッダの名前。nyxis が許す少数だけで、Set-Cookie は無い。 -/
+/-- Names of the response headers a handler can set. Only the few nyxis allows; Set-Cookie is absent. -/
 inductive ResponseHeader where
   | contentType
   | cacheControl
@@ -101,21 +104,21 @@ inductive ResponseHeader where
 
 namespace ResponseHeader
 
-/-- HTTP 上の名前(小文字)。 -/
+/-- The name on the wire (lowercase). -/
 def name : ResponseHeader → String
   | .contentType => "content-type"
   | .cacheControl => "cache-control"
   | .etag => "etag"
   | .location => "location"
 
-/-- 許すすべての名前。 -/
+/-- All allowed names. -/
 def all : List ResponseHeader := [.contentType, .cacheControl, .etag, .location]
 
 end ResponseHeader
 
-/-- ハンドラに渡す HTTP リクエストの要約。JWT はランタイムが読んで主体に変え、ハンドラには渡さない。
-    `query` は生の問い合わせ文字列(`?` の後ろ。無ければ空)、`headers` は nyxis が選別した要求ヘッダ
-    (同じ名前が複数あれば受け取った順に複数)。 -/
+/-- The summary of an HTTP request passed to a handler. The runtime reads the JWT and turns it into the principal; it is
+    not passed to the handler. `query` is the raw query string (after `?`; empty if absent), and `headers` are the
+    request headers selected by nyxis (if the same name appears more than once, all of them in the order received). -/
 structure Request where
   method : Std.Http.Method
   path : String
@@ -123,30 +126,32 @@ structure Request where
   query : String := ""
   headers : List (RequestHeader × String) := []
 
-/-- ハンドラが返す HTTP レスポンス。`headers` は nyxis が許す応答ヘッダ(同じ名前は最初のものだけが使われ、
-    HTTP のヘッダ値として妥当でない値(改行・制御文字・非 ASCII)と、共有キャッシュへの保存を許す
-    Cache-Control の `public` / `s-maxage` は捨てられる)。Content-Type を設定しなければ `text/plain; charset=utf-8`。 -/
+/-- The HTTP response a handler returns. `headers` are the response headers nyxis allows (only the first of the same
+    name is used, and values that are not valid HTTP header values (newlines, control characters, non-ASCII) and the
+    Cache-Control directives `public` / `s-maxage`, which allow storing in a shared cache, are dropped). If Content-Type
+    is not set, it is `text/plain; charset=utf-8`. -/
 structure Response where
   status : Std.Http.Status
   body : String
   headers : List (ResponseHeader × String) := []
 
-/-- ルーティング。メソッドとパスから、主体・サーバー生成値(nyxis が要求ごとに決めた現在時刻と新しい一意 ID。
-    値の提案に使う)・リクエストを受け取るハンドラを選ぶ。`none` なら 404。 -/
+/-- Routing. From the method and path, select a handler that receives the principal, the server-generated values (the
+    current time and a fresh unique ID that nyxis determines per request, used for proposing values) and the request.
+    `none` means 404. -/
 abbrev Router :=
   Std.Http.Method → String → Option (Authz.Principal → Authz.Generated → Request → Handler Response)
 
-/-! ## 問い合わせ文字列の復号 -/
+/-! ## Decoding the query string -/
 
-/-- 16 進の 1 桁。 -/
+/-- A single hexadecimal digit. -/
 private def hexValue? (c : UInt8) : Option UInt8 :=
   if 48 ≤ c && c ≤ 57 then some (c - 48)
   else if 65 ≤ c && c ≤ 70 then some (c - 55)
   else if 97 ≤ c && c ≤ 102 then some (c - 87)
   else none
 
-/-- 問い合わせ文字列の要素を復号する: `%XX` はそのバイト、`+` は空白。`%` の後ろが 16 進 2 桁でない、または
-    結果が UTF-8 でなければ `none`。 -/
+/-- Decode a component of the query string: `%XX` is that byte and `+` is a space. Returns `none` if `%` is not followed
+    by two hexadecimal digits, or if the result is not UTF-8. -/
 def decodeComponent (s : String) : Option String := Id.run do
   let bytes := s.toUTF8
   let mut out := ByteArray.empty
@@ -169,8 +174,9 @@ def decodeComponent (s : String) : Option String := Id.run do
       i := i + 1
   return String.fromUTF8? out
 
-/-- 問い合わせ文字列を (名前, 値) の組に分ける。`&` で区切り、最初の `=` で名前と値に分け(`=` が無ければ値は空)、
-    それぞれを `decodeComponent` で復号する。復号できない組と空の要素は捨てる。 -/
+/-- Split the query string into (name, value) pairs. Split on `&`, split each piece into name and value at the first `=`
+    (if there is no `=`, the value is empty), and decode each with `decodeComponent`. Pairs that cannot be decoded and
+    empty pieces are dropped. -/
 def parseQuery (query : String) : List (String × String) :=
   (query.splitOn "&").filterMap fun piece =>
     if piece.isEmpty then none
@@ -182,14 +188,14 @@ def parseQuery (query : String) : List (String × String) :=
       | some n, some v => some (n, v)
       | _, _ => none
 
-/-- 復号した問い合わせの組。 -/
+/-- The decoded query pairs. -/
 def Request.queryParams (r : Request) : List (String × String) := parseQuery r.query
 
-/-- 問い合わせの最初の値。 -/
+/-- The first value of a query parameter. -/
 def Request.queryParam? (r : Request) (name : String) : Option String :=
   (r.queryParams.find? (·.1 == name)).map (·.2)
 
-/-- 選別された要求ヘッダの最初の値。 -/
+/-- The first value of a selected request header. -/
 def Request.header? (r : Request) (name : RequestHeader) : Option String :=
   (r.headers.find? (·.1 == name)).map (·.2)
 

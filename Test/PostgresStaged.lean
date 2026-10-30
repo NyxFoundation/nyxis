@@ -2,18 +2,19 @@ import Nyxis.Internal.PostgresRun
 import Test.Fixture
 
 /-!
-# Test.PostgresStaged — 段階的な実行(点検索)の注入ドライバによる検査
+# Test.PostgresStaged — tests of staged execution (point lookups) with an injected driver
 
-`PostgresRun.runStaged`(ハンドラのアクション呼び出しごとに判定に必要な実体だけを点検索で取得し、閉包の検査を
-通してから判定・SQL の再生・照合を行う経路)を、コア専用の fixture(`Test.Fixture`。アプリのファイルは読まない)と
-注入ドライバで検査する。実 DB・HTTP・JWT は通さない。
+Tests `PostgresRun.runStaged` (the path that, for each handler action call, fetches only the entities needed for the
+decision by point lookups, passes the closure check, and then decides, replays SQL and matches) with the core-only
+fixture (`Test.Fixture`; no app files are read) and an injected driver. No real DB, HTTP or JWT is involved.
 
-- 偽の DB(`Store` の参照)が点検索(主キーの SELECT)・対象テーブルの SELECT・書き込みに応じ、発行された SQL の
-  列を記録する。各要求について、応答と偽の DB の最終状態が純粋モデル `handleRequest` の応答・状態と一致し、
-  発行された SQL の列が期待どおり(主体の行・対象の行とその再生だけ。他のテーブルの全行は取得しない)であることを
-  確かめる。
-- 点検索の結果の不整合(重複行・別の主キー・型違いの行)、書き込み結果の不一致、SQL の失敗、COMMIT の失敗では
-  応答を公開せず ROLLBACK することを確かめる。
+- A fake DB (a reference to a `Store`) answers point lookups (primary-key SELECTs), SELECTs on the target table, and
+  writes, and records the sequence of issued SQL. For each request, checks that the response and the fake DB's final
+  state match the response and state of the pure model `handleRequest`, and that the sequence of issued SQL is as
+  expected (only the principal's row, the target's row and their replay; all rows of other tables are never fetched).
+- Checks that on inconsistent point-lookup results (duplicate rows, a different primary key, a wrongly typed row), a
+  mismatched write result, an SQL failure, or a COMMIT failure, no response is exposed and the transaction is rolled
+  back.
 -/
 
 open Nyxis Db Runtime Cedar.Spec Nyxis.Internal Test.Fixture
@@ -21,7 +22,7 @@ open LeanPq.Extern
 
 deriving instance BEq for Http.Response
 
-/-- fixture と同じテーブル・列の形状(手書き。`Test.PostgresShape` と同じ文書)。 -/
+/-- The same table and column shape as the fixture (hand-written; the same document as `Test.PostgresShape`). -/
 private def shapeSource := "
 entity User = {admin: Bool};
 entity Post = {author: User, title: String, body: String, published: Bool};
@@ -29,7 +30,7 @@ entity Anonymous;
 "
 private def shape : PostgresShape.Shape := (PostgresShape.compile shapeSource).toOption.getD []
 
-/-! ## 検査用のハンドラ(効果は認可層への呼び出しだけ) -/
+/-! ## Handlers for the tests (the only effects are calls to the authorization layer) -/
 
 private def respond (success : Std.Http.Status) : Outcome → Http.Response
   | .ok _ => ⟨success, "ok", []⟩
@@ -61,9 +62,11 @@ private def router : Http.Router := fun method path =>
       respond .created <$> Handler.callAction (act "registerUser") id (row [("admin", false)])
   | .get, ["users"] => some fun _ _ _ => respond .ok <$> Handler.callAction (act "listUsers") ""
   | .get, ["users", id] => some fun _ _ _ => respond .ok <$> Handler.callAction (act "readUser") id
-  -- 一覧の問い合わせ: 公開された投稿だけを題名の降順で 1 件(絞り込みは SELECT の WHERE、ページは permit 後)。
+  -- A list query: only published posts, by title descending, 1 item (filtering in the SELECT's WHERE, paging after
+  -- permit).
   | .get, ["published"] => some fun _ _ _ => respond .ok <$> Handler.callList (act "listPosts") publishedQuery
-  -- 1 つのハンドラが行を変え、変えた行を読み、消し、もう一度読む(各呼び出しは直前の状態で判定される)。
+  -- One handler changes a row, reads the changed row, deletes it, and reads it again (each call is decided on the
+  -- preceding state).
   | .get, ["multi", id] => some fun _ _ _ => do
       let _ ← Handler.callAction (act "editPost") id (row [("title", "changed")])
       let _ ← Handler.callAction (act "readPost") id
@@ -77,7 +80,7 @@ private def app : App := { schema := schema, policies := policies, router := rou
 private def req (p : Authz.Principal) (method : Std.Http.Method) (path : String) : AuthenticatedRequest :=
   { principal := p, generated := gen, request := { method, path, body := "" } }
 
-/-! ## 偽の DB と注入ドライバ -/
+/-! ## The fake DB and the injected driver -/
 
 private def columnsOf (table : Table) : List Column :=
   ((schema.tables.find? (·.1 == table)).map Prod.snd).getD []
@@ -109,8 +112,8 @@ private def writeReader (op : Operation) (outcome : Outcome) : PostgresWrite.Rea
   { status := pure .commandOk, tag := pure (tagPrefix ++ count), affected := pure count,
     rows := pure 0, columns := pure 0 }
 
-/-- コアが生成した SELECT を、テーブルの全行の取得か、検査用の問い合わせで絞った取得か、主キーの点検索かに分類する
-    (同じ生成器で再生して照合)。 -/
+/-- Classifies a core-generated SELECT as a fetch of all rows of a table, a fetch filtered by the test query, or a
+    primary-key point lookup (matched by regenerating with the same generator). -/
 private inductive Fetch where
   | all
   | filtered (query : ListQuery)
@@ -137,8 +140,8 @@ private structure Fake where
   events : IO.Ref (List String)
   writes : IO.Ref (List Operation)
 
-/-- 注入ドライバ。`fault`: 1 = 点検索が同じ行を 2 回返す、2 = 別の主キーの行を返す、3 = 型違いの行を返す、
-    4 = SELECT が失敗する、5 = 書き込みの件数が 2、6 = 書き込みが失敗する。 -/
+/-- The injected driver. `fault`: 1 = a point lookup returns the same row twice, 2 = returns a row with a different
+    primary key, 3 = returns a wrongly typed row, 4 = SELECT fails, 5 = a write's count is 2, 6 = a write fails. -/
 private def driver (fake : Fake) (fault : Nat) : PostgresRun.Driver where
   read := fun command => do
     let some (table, fetch) := classify command | throw (IO.userError "unexpected SELECT")
@@ -149,7 +152,8 @@ private def driver (fake : Fake) (fault : Nat) : PostgresRun.Driver where
       let rows := (db.rows table).map fun (k, r) => encodeRow table k r
       return reader ⟨"_nyxis_id" :: columnsOf table, rows⟩
     | .filtered query =>
-      -- 偽の DB は WHERE 句をモデルの `ListQuery.matches` で再現する(実 DB との一致は A4 の信頼)。
+      -- The fake DB reproduces the WHERE clause with the model's `ListQuery.matches` (agreement with the real DB is the
+      -- A4 trust).
       fake.events.modify (· ++ [s!"select {table.id} where"])
       let rows := ((db.rows table).filter fun kv => query.matches kv.2).map fun (k, r) => encodeRow table k r
       return reader ⟨"_nyxis_id" :: columnsOf table, rows⟩
@@ -191,7 +195,7 @@ private def controlDriver (events : IO.Ref (List String)) (badCommit : Bool) :
       | "ROLLBACK" => state.set .idle; pure "ROLLBACK"
       | _ => throw (IO.userError "unexpected control command") }
 
-/-- `handleStaged` と同じ本体(接続の代わりに注入ドライバ)。 -/
+/-- The same body as `handleStaged` (with the injected driver instead of a connection). -/
 private def body (fake : Fake) (fault : Nat) (request : AuthenticatedRequest) : IO Http.Response :=
   match app.router request.request.method request.request.path with
   | none => pure { status := .notFound, body := "not found" }
@@ -199,8 +203,8 @@ private def body (fake : Fake) (fault : Nat) (request : AuthenticatedRequest) : 
     PostgresRun.runStaged app shape (driver fake fault) request.principal request.generated
       (handler request.principal request.generated request.request)
 
-/-- 応答・最終状態がモデルと一致し、発行された SQL の列が期待どおりであること。`sql` は BEGIN と COMMIT の間の
-    列(省略すれば照合しない)。 -/
+/-- The response and final state match the model, and the sequence of issued SQL is as expected. `sql` is the sequence
+    between BEGIN and COMMIT (not matched if omitted). -/
 private def check (name : String) (request : AuthenticatedRequest) (writes : List Operation)
     (status : Nat) (sql : Option (List String) := none) (initial : Store := store) : IO Unit := do
   let model := handleRequest app initial request
@@ -220,8 +224,8 @@ private def check (name : String) (request : AuthenticatedRequest) (writes : Lis
       throw (IO.userError s!"{name}: SQL sequence {events} (expected {expected})")
   IO.println s!"{name}: passed"
 
-/-- 障害を注入すると応答を公開せず ROLLBACK し、偽の DB の状態がモデルと一致しない(途中の書き込みは
-    トランザクションの外へ出ない前提で、ここでは状態を照合しない)。 -/
+/-- Injecting a fault exposes no response and rolls back, and the fake DB's state does not match the model (assuming
+    intermediate writes never leave the transaction, the state is not matched here). -/
 private def checkFault (name : String) (request : AuthenticatedRequest) (writes : List Operation)
     (fault : Nat) (badCommit := false) : IO Unit := do
   let fake : Fake := ⟨← IO.mkRef store, ← IO.mkRef [], ← IO.mkRef writes⟩
@@ -236,7 +240,8 @@ private def checkFault (name : String) (request : AuthenticatedRequest) (writes 
   IO.println s!"{name}: passed"
 
 def main : IO Unit := do
-  -- 読み取り: 主体の行と対象の行だけを点検索し、permit された読み取りを再生する。他のテーブルは読まない。
+  -- Read: point-looks up only the principal's row and the target's row, and replays the permitted read. Other tables
+  -- are not read.
   check "anonymous reads a published post" (req anon .get "/posts/pub1") [] 200
     (some ["read Post pub1", "read Post pub1"])
   check "author reads a draft" (req alice .get "/posts/draft1") [] 200
@@ -251,7 +256,7 @@ def main : IO Unit := do
     (some ["read User alice", "read Post nope"])
   check "unknown principal row" (req (.user (user "stranger")) .get "/posts/pub1") [] 200
     (some ["read User stranger", "read Post pub1", "read Post pub1"])
-  -- 一覧: 対象テーブルの全行と主体の行を取得し、permit された行ごとの読み取りを再生する。
+  -- List: fetches all rows of the target table and the principal's row, and replays a read for each permitted row.
   check "anonymous lists published posts" (req anon .get "/posts") [] 200
     (some ["select Post", "read Post pub1"])
   check "author lists own draft too" (req alice .get "/posts") [] 200
@@ -260,13 +265,14 @@ def main : IO Unit := do
     (some ["select User", "read User bob"])
   check "admin lists all users" (req root .get "/users") [] 200
     (some ["select User", "read User alice", "read User bob", "read User root"])
-  -- 一覧の問い合わせ: 絞り込みは WHERE 句で取得し、permit 済みの行にページを切り、返す行の読み取りだけを再生する。
+  -- List query: fetches with the filters in a WHERE clause, pages over the permitted rows, and replays reads only for
+  -- the returned rows.
   let posts := store.put postT "pub2" (postRow "bob" "zeta" true) |>.put postT "draft2" (postRow "bob" "omega" false)
   check "filtered list: anonymous gets the last published title" (req anon .get "/published") [] 200
     (some ["select Post where", "read Post pub2"]) posts
   check "filtered list: author gets the same page (drafts are filtered before judgement)" (req alice .get "/published") [] 200
     (some ["select Post where", "read User alice", "read Post pub2"]) posts
-  -- 書き込み: 提案される行で判定し、1 つの書き込みを再生する。
+  -- Write: decides on the proposed row and replays one write.
   check "authenticated user creates a post" (req alice .post "/posts/new") [.insert postT "new" (newPost alice)] 201
     (some ["read User alice", "read Post new", "insert Post new"])
   check "anonymous cannot create" (req anon .post "/posts/new") [] 403 (some ["read Post new"])
@@ -289,20 +295,20 @@ def main : IO Unit := do
   check "registering someone else is denied" (req alice .post "/users/dave") [] 403
     (some ["read User alice", "read User dave"])
   check "route miss" (req alice .get "/nothing") [] 404 (some [])
-  -- 複数の呼び出し: 各呼び出しは直前の状態(前の書き込みを含む)を点検索し直して判定する。
+  -- Multiple calls: each call re-runs the point lookups on the preceding state (including earlier writes) and decides.
   check "multiple calls use the current state" (req alice .get "/multi/pub1")
     [.update postT "pub1" (row [("title", "changed")]), .delete postT "pub1"] 403
     (some ["read User alice", "read Post pub1", "update Post pub1",
       "read User alice", "read Post pub1", "read Post pub1",
       "read User alice", "read Post pub1", "delete Post pub1",
       "read User alice", "read Post pub1"])
-  -- 他のテーブルの大きさに依らない: 利用者の行を増やしても、投稿の読み取りの SQL は変わらない。
+  -- Independent of the size of other tables: adding user rows does not change the SQL for reading a post.
   let crowded := (List.range 200).foldl (fun s i => s.put userT s!"u{i}" (row [("admin", false)])) store
   check "crowded users do not change a post read" (req alice .get "/posts/draft1") [] 200
     (some ["read User alice", "read Post draft1", "read Post draft1"]) crowded
   check "crowded users do not change a post list" (req anon .get "/posts") [] 200
     (some ["select Post", "read Post pub1"]) crowded
-  -- 不整合・失敗: 応答を公開せず ROLLBACK する。
+  -- Inconsistency/failure: no response is exposed, and the transaction is rolled back.
   checkFault "duplicate rows in a point lookup" (req alice .get "/posts/pub1") [] 1
   checkFault "other key in a point lookup" (req alice .get "/posts/pub1") [] 2
   checkFault "wrong type in a fetched row" (req alice .get "/posts/pub1") [] 3

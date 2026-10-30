@@ -3,7 +3,7 @@ import Test.Fixture
 
 open Nyxis Nyxis.Db Cedar.Spec Nyxis.Internal.PostgresSql
 
-/-- 型環境が要らない検査用の空の型環境。 -/
+/-- An empty type environment for tests that do not need one. -/
 private def noTypes : Cedar.Validation.Schema := ⟨Cedar.Data.Map.empty, Cedar.Data.Map.empty⟩
 
 private def post : Table := ⟨"Post", []⟩
@@ -15,7 +15,8 @@ private def params (result : Except String Command) := result.toOption.map (·.p
 
 #guard sql (createTable Test.Fixture.schema user) ==
   some "CREATE TABLE \"public\".\"User\" (\"_nyxis_id\" text COLLATE \"C\" PRIMARY KEY, \"admin\" jsonb)"
--- 予約テーブル `_nyxis_outbox`: 正本のテーブルにはこの名前を使えず、形は docs/external-calls.md §4.3 に固定。
+-- The reserved table `_nyxis_outbox`: a source-of-truth table cannot use this name, and its shape is fixed by
+-- docs/external-calls.md §4.3.
 #guard (createTable { Test.Fixture.schema with tables := [(⟨"_nyxis_outbox", []⟩, ["x"])] } ⟨"_nyxis_outbox", []⟩).toOption.isNone
 #guard (operation { Test.Fixture.schema with tables := [(⟨"_nyxis_outbox", []⟩, ["x"])] } (.read ⟨"_nyxis_outbox", []⟩ "k")).toOption.isNone
 #guard outbox.map (·.2) == ["CREATE TABLE", "CREATE INDEX"]
@@ -31,7 +32,8 @@ private def params (result : Except String Command) := result.toOption.map (·.p
   some "SELECT \"_nyxis_id\", \"admin\" FROM \"public\".\"User\""
 #guard sql (operation Test.Fixture.schema (.read user "u")) ==
   some "SELECT \"_nyxis_id\", \"admin\" FROM \"public\".\"User\" WHERE \"_nyxis_id\" = $1::text"
--- 一覧の絞り込み: 絞り込みが無ければ全行、等値は JSONB の一致、大小はタグを CASE で見てから本文を比べる。
+-- List filters: with no filters, all rows; equality is a JSONB match; ordering looks at the tag with CASE before
+-- comparing the body.
 #guard sql (selectFiltered Test.Fixture.schema user []) == sql (selectTable Test.Fixture.schema user)
 #guard sql (selectFiltered Test.Fixture.schema post [⟨"title", .eq, str "new"⟩, ⟨"published", .eq, .prim (.bool true)⟩]) ==
   some "SELECT \"_nyxis_id\", \"author\", \"title\", \"body\", \"published\" FROM \"public\".\"Post\" WHERE \"title\" = $1::jsonb AND \"published\" = $2::jsonb"
@@ -46,12 +48,14 @@ private def params (result : Except String Command) := result.toOption.map (·.p
   some #["datetime", "1700000000000", "[\"string\",\"x\"]"]
 #guard params (selectFiltered Test.Fixture.schema post [⟨"published", .le, .prim (.bool false)⟩]) == some #["bool", "false"]
 #guard params (selectFiltered Test.Fixture.schema post [⟨"title", .gt, .prim (.int (-5))⟩]) == some #["int", "-5"]
--- 無い列・集合や実体参照の大小・NUL 入りの文字列は拒む。絞り込みの定数は SQL の文字列に入らない。
+-- Missing columns, ordering on sets or entity references, and strings containing NUL are rejected. Filter constants
+-- never enter the SQL text.
 #guard (selectFiltered Test.Fixture.schema post [⟨"nope", .eq, str "x"⟩]).toOption.isNone
 #guard (selectFiltered Test.Fixture.schema post [⟨"author", .lt, .prim (.entityUID ⟨user, "u"⟩)⟩]).toOption.isNone
 #guard (selectFiltered Test.Fixture.schema post [⟨"title", .lt, .set Cedar.Data.Set.empty⟩]).toOption.isNone
 #guard (selectFiltered Test.Fixture.schema post [⟨"title", .lt, str "a\x00b"⟩]).toOption.isNone
--- 保存形式にできない定数との等値は定数 false の条件(保存された行がその値に等しいことはない)。
+-- Equality with a constant that cannot be put into storage format is the constant condition false (no stored row can
+-- equal that value).
 #guard sql (selectFiltered Test.Fixture.schema post [⟨"title", .eq, str "a\x00b"⟩, ⟨"title", .eq, str "x"⟩]) ==
   some "SELECT \"_nyxis_id\", \"author\", \"title\", \"body\", \"published\" FROM \"public\".\"Post\" WHERE false AND \"title\" = $1::jsonb"
 #guard params (selectFiltered Test.Fixture.schema post [⟨"title", .eq, str "a\x00b"⟩, ⟨"title", .eq, str "x"⟩]) ==
@@ -66,7 +70,7 @@ private def params (result : Except String Command) := result.toOption.map (·.p
   some #["p", "[\"string\",\"text\"]", "[\"string\",\"new\"]"]
 
 -- Request values, even SQL-looking values, never change the query text.
-private def attack := "'; DROP TABLE Post;--日本語\n\\\""
+private def attack := "'; DROP TABLE Post;--\u65E5\u672C\u8A9E\n\\\""
 #guard sql (operation Test.Fixture.schema (.delete post attack)) ==
   sql (operation Test.Fixture.schema (.delete post "p"))
 #guard params (operation Test.Fixture.schema (.delete post attack)) == some #[attack]
@@ -95,12 +99,13 @@ private def schema (name : String) (cols : List String) : Nyxis.Authz.Schema :=
 #guard !(createTable ⟨[(⟨"Post", ["ns"]⟩, [])], [], noTypes, [], [], {}, [], []⟩ ⟨"Post", ["ns"]⟩).isOk
 #guard !(createTable (schema "" []) ⟨"", []⟩).isOk
 #guard !(createTable (schema "Post" [String.singleton '\x00']) post).isOk
-#guard !(createTable (schema "Post" [String.ofList (List.replicate 22 '語')]) post).isOk
-#guard (createTable (schema "Post" [String.ofList (List.replicate 21 '語')]) post).isOk
+#guard !(createTable (schema "Post" [String.ofList (List.replicate 22 '\u8A9E')]) post).isOk
+#guard (createTable (schema "Post" [String.ofList (List.replicate 21 '\u8A9E')]) post).isOk
 #guard !(operation Test.Fixture.schema (.delete post (String.singleton '\x00'))).isOk
 #guard !(operation Test.Fixture.schema (.update post "p" Cedar.Data.Map.empty)).isOk
 #guard !(operation Test.Fixture.schema (.insert post "p" (Cedar.Data.Map.make [("admin", .prim (.bool true))]))).isOk
--- 保存形式に無い値(集合の集合)は SQL にならない。集合・レコード自体は保存形式にある(型の検査は PostgresShape)。
+-- A value outside the storage format (a set of sets) never becomes SQL. Sets and records themselves are in the storage
+-- format (type checking is PostgresShape's job).
 #guard !(operation Test.Fixture.schema (.insert post "p" (Cedar.Data.Map.make
   [("title", .set (Cedar.Data.Set.make [.set Cedar.Data.Set.empty]))]))).isOk
 #guard (operation Test.Fixture.schema (.insert post "p" (Cedar.Data.Map.make [("title", .record Cedar.Data.Map.empty)]))).isOk
@@ -109,7 +114,7 @@ private def schema (name : String) (cols : List String) : Nyxis.Authz.Schema :=
 #guard sql (operation (schema "Empty" []) (.read ⟨"Empty", []⟩ "k")) ==
   some "SELECT \"_nyxis_id\" FROM \"public\".\"Empty\" WHERE \"_nyxis_id\" = $1::text"
 
-/-! ## 一意性と参照整合の DDL -/
+/-! ## DDL for uniqueness and referential integrity -/
 
 private def org : Table := ⟨"Org", []⟩
 private def doc : Table := ⟨"Doc", []⟩
@@ -118,7 +123,8 @@ private def c35 : Nyxis.Authz.Schema :=
     constraints :=
       { uniques := [⟨org, ["name"]⟩, ⟨doc, ["org", "title"]⟩]
       , references := [⟨doc, "org", org, .cascade ⟨⟨"Action", []⟩, "deleteDoc"⟩⟩, ⟨doc, "createdBy", user, .restrict⟩] } }
--- 一意性の組は UNIQUE、参照の列には保存形式の ID を持つ生成列。外部キーは全テーブルの後の ALTER TABLE(削除は RESTRICT)。
+-- A uniqueness tuple becomes UNIQUE, and a reference column gets a generated column holding the storage-format ID.
+-- Foreign keys are ALTER TABLE after all tables (RESTRICT on delete).
 #guard sql (createTable c35 org) ==
   some "CREATE TABLE \"public\".\"Org\" (\"_nyxis_id\" text COLLATE \"C\" PRIMARY KEY, \"name\" jsonb, UNIQUE (\"name\"))"
 #guard sql (createTable c35 doc) ==
@@ -132,7 +138,8 @@ private def c35 : Nyxis.Authz.Schema :=
   , ("ALTER TABLE \"public\".\"Doc\" ADD CONSTRAINT \"Doc_createdBy_fkey\" FOREIGN KEY (\"_nyxis_ref_createdBy\") REFERENCES \"public\".\"User\" (\"_nyxis_id\") ON DELETE RESTRICT", "ALTER TABLE")
   , ("CREATE INDEX \"Doc_createdBy_ref_idx\" ON \"public\".\"Doc\" (\"_nyxis_ref_createdBy\")", "CREATE INDEX") ]
 #guard (foreignKeys Test.Fixture.schema) == .ok []
--- 読み取り・一覧・挿入・更新の SQL は生成列を含まない(列は正本の宣言だけ)
+-- The SQL for read, list, insert and update does not include generated columns (only the columns declared in the source
+-- of truth)
 #guard sql (operation c35 (.read doc "d")) ==
   some "SELECT \"_nyxis_id\", \"org\", \"title\", \"createdBy\" FROM \"public\".\"Doc\" WHERE \"_nyxis_id\" = $1::text"
 #guard sql (operation c35 (.insert doc "d" (Cedar.Data.Map.make [("title", str "t")]))) ==
@@ -140,7 +147,7 @@ private def c35 : Nyxis.Authz.Schema :=
 #guard sql (selectFiltered c35 doc (Reference.filterOf "org" ⟨org, "o1"⟩)) ==
   some "SELECT \"_nyxis_id\", \"org\", \"title\", \"createdBy\" FROM \"public\".\"Doc\" WHERE \"org\" = $1::jsonb"
 #guard params (selectFiltered c35 doc (Reference.filterOf "org" ⟨org, "o1"⟩)) == some #["[\"entity\",[],\"Org\",\"o1\"]"]
--- 無い列・空の組・重複の組・無い参照先は拒む
+-- Missing columns, empty tuples, duplicate tuples and missing reference targets are rejected
 #guard !(createTable { c35 with constraints := { uniques := [⟨org, ["nope"]⟩] } } org).isOk
 #guard !(createTable { c35 with constraints := { uniques := [⟨org, []⟩] } } org).isOk
 #guard !(createTable { c35 with constraints := { uniques := [⟨doc, ["title", "title"]⟩] } } doc).isOk

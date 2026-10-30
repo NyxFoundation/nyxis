@@ -4,21 +4,24 @@ import BulletinBoard.App
 import Nyxis.AppCheck
 
 /-!
-# BulletinBoard — nyxis 上のサンプルアプリ(掲示板)のバックエンド
+# BulletinBoard — backend of the sample application (bulletin board) on nyxis
 
-公開済み投稿は誰でも読め、下書きは作者と管理者だけが読める。認証済みユーザーは投稿を作成でき、
-編集・削除・公開は作者と管理者だけができる。管理者権限の付与・剥奪は管理者だけができる。
-画面は `../frontend/` の公式フロントエンドが担い、このパッケージは HTTP API だけを持つ。
+Published posts can be read by anyone, and drafts only by their author and admins. Authenticated users can create posts,
+and only the author and admins can edit, delete, and publish them. Only admins can grant and revoke admin rights. The
+screens are provided by the official frontend in `../frontend/`; this package has only the HTTP API.
 
-- `BulletinBoard.Approved` — 人間が承認する正本 `schema.cedarschema` と `policies.cedar` の宣言 `BulletinBoard.Approved.sources`。
-- `BulletinBoard.Handlers` — 各エンドポイントのハンドラ(`Nyxis.Handler` で書く)とルーティング `BulletinBoard.router`。
-- `BulletinBoard.App` — 宣言とルーティングを組んだアプリケーション `BulletinBoard.app`(`BulletinBoard.schema` / `policies` は宣言の別名)。
-- 起動処理は監査済みのこのモジュールを読み込む `Main.lean` に置く。
+- `BulletinBoard.Approved` — the declaration `BulletinBoard.Approved.sources` of the human-approved sources
+  `schema.cedarschema` and `policies.cedar`.
+- `BulletinBoard.Handlers` — the handler for each endpoint (written with `Nyxis.Handler`) and the routing
+  `BulletinBoard.router`.
+- `BulletinBoard.App` — the application `BulletinBoard.app` combining the declaration and the routing
+  (`BulletinBoard.schema` / `policies` are aliases of the declaration).
+- Startup lives in `Main.lean`, which imports this audited module.
 
-アプリケーション側のコードは `BulletinBoard/` の Lean ファイルで、型の外へ出る語(`scripts/check-handler-effects.sh` の grep が探す 4 語)を
-含まない。
-末尾の `nyxis_check_app` は、全アプリモジュールの定義と属性をビルド時に監査する。
-新しいアプリモジュールは必ずこのファイルから import し、検査の後には宣言を置かない。
+The application-side code is the Lean files in `BulletinBoard/`, and they do not contain the words that escape the type
+(the 4 words the grep in `scripts/check-handler-effects.sh` looks for). The `nyxis_check_app` at the end audits the
+definitions and attributes of all application modules at build time. Every new application module must be imported from
+this file, and no declarations may follow the check.
 -/
 
 nyxis_check_app

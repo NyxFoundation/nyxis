@@ -1,26 +1,27 @@
 import Nyxis.Runtime
 
-/-! 既存の純粋な意味論における、ハンドラから見える読み取りの由来。
-行の由来そのものは主定理の一部である(`Runtime.authorization_safety` の (3)。`Runtime.step_entries` /
-`calls_entries` を経由する)。このファイルは、Store を使わない応答の再生と、接続コードの証明が使う
-単一行の系を置く。実行の定義はここでは変えない。
-これは HTTP の非干渉ではない: permit/deny やその他の結果タグは認可の材料に依存してよい。
+/-! The provenance of reads visible to handlers, in the existing pure semantics. Row provenance itself is part of the
+main theorem ((3) of `Runtime.authorization_safety`, via `Runtime.step_entries` / `calls_entries`). This file holds the
+replay of responses without a Store, and the single-row corollaries used by the proofs of the connection code. It does
+not change the definition of execution. This is not HTTP non-interference: permit/deny and the other result tags may
+depend on the decision materials.
 -/
 namespace Nyxis.ReadSafety
 open Cedar.Spec (Policies EntityUID)
 open Nyxis Db Authz Nyxis.Runtime
 
-/-- 行を含むDB結果は、同じ直前状態の主キー読み取りだけから生じる(`Store.apply_row`)。
-書き込みに渡した値や既存行が書き込み結果として返ることはない。 -/
+/-- A DB result containing a row arises only from a primary-key read on the same prior state (`Store.apply_row`). Values
+passed to a write, or existing rows, are never returned as a write result. -/
 theorem apply_row (store : Store) (op : Operation) (row : Row)
     (h : (store.apply op).2 = .ok (some row)) :
     ∃ table key, op = .read table key ∧ store.find? table key = some row :=
   Store.apply_row store op row h
 
-/-- 日本語: 任意のスキーマ・ポリシー・主体・現在Store・呼び出しについて、
-ハンドラに行rowを返すなら、その同じ呼び出しが記録した呼び出しの主キーの読み取りが存在し、
-主体は当該要求の主体で、その操作はCedarで認可され、rowは直前Storeの対象行である。
-内部判定用の他の行を直接結果に載せる経路はない(一覧の各組も含めた一般形は `Runtime.step_entries`)。 -/
+/-- For any schema, policies, principal, current Store and call, if a row `row` is returned to the handler, then the
+same call recorded a read of the call's primary key, whose principal is the principal of that request, whose operation
+is authorized by Cedar, and `row` is the target row in the prior Store. There is no path that puts other rows used for
+internal decisions directly into the result (the general form, including each pair of a list, is
+`Runtime.step_entries`). -/
 theorem step_row (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (action : EntityUID) (key : Key) (values row : Row) (query : ListQuery)
     (external : ExternalResult)
@@ -33,22 +34,24 @@ theorem step_row (schema : Schema) (policies : Policies) (principal : Principal)
     query external (key, row) (by simp [h, Outcome.entries])
   ⟨i, hi, hp, ha, hs, hact, hr⟩
 
-/-- 実際のrunHandlerと同じstepと継続を辿り、継続へ渡った結果だけを記録する(`Runtime.calls` の結果の列)。
-StoreやIssuedをハンドラへ公開するAPIではなく、証明用の観測列。 -/
+/-- Follow the same steps and continuations as the actual runHandler, recording only the results passed to the
+continuations (the sequence of results of `Runtime.calls`). This is not an API exposing the Store or Issued to handlers;
+it is an observation sequence for proofs. -/
 def outcomes (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated)
     (store : Store) (exts : Externals) (h : Handler α) : List Outcome :=
   (calls schema policies principal generated store exts h).map Call.outcome
 
-/-- Storeを受け取らないハンドラの再生器。結果列が不足/余分なら失敗する。 -/
+/-- A replayer for handlers that takes no Store. Fails if the result sequence is too short or too long. -/
 def replay : Handler α → List Outcome → Option α
   | .pure a, [] => some a
   | .pure _, _ :: _ => none
   | .call _ _ _ _ _, [] => none
   | .call _ _ _ _ k, o :: rest => replay (k o) rest
 
-/-- 日本語: 実際の実行が返す値は、ハンドラと継続に渡った結果列だけで再現できる。
-再生器はStoreを受け取らず、認可判定用Storeから返り値への別の入力はない。
-結果タグの観測、ハンドラに元からある定数、要求由来の値は制限しない。 -/
+/-- The value returned by the actual execution can be reproduced from the handler and the sequence of results passed to
+its continuations alone. The replayer takes no Store, and there is no other input from the Store used for authorization
+decisions to the return value. Observation of result tags, constants already in the handler, and values derived from the
+request are not restricted. -/
 theorem replay_runHandler (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) (h : Handler α) : ∀ store exts,
     replay h (outcomes schema policies principal generated store exts h) =
@@ -59,9 +62,9 @@ theorem replay_runHandler (schema : Schema) (policies : Policies) (principal : P
     intro store exts
     exact ih _ _ _
 
-/-- 日本語: 任意の適応的・複数呼び出しハンドラの継続に渡った各行には、
-その実行のissued内の認可済みreadがあり、行はその操作の直前状態の対象行と一致する。
-書き込みで状態が変わった後の呼び出しも含む(`Runtime.calls_entries` の読み取りの成功の場合)。 -/
+/-- For any adaptive, multi-call handler, each row passed to its continuations has an authorized read in that
+execution's issued list, and the row matches the target row in the state just before that operation. This includes calls
+after a write has changed the state (the successful-read case of `Runtime.calls_entries`). -/
 theorem outcomes_row_authorized (schema : Schema) (policies : Policies) (principal : Principal)
     (generated : Generated) (h : Handler α) : ∀ store exts row,
     Outcome.ok (some row) ∈ outcomes schema policies principal generated store exts h →
@@ -76,19 +79,21 @@ theorem outcomes_row_authorized (schema : Schema) (policies : Policies) (princip
       (by simp [Call.entries, ho, Outcome.entries])
   exact ⟨i, hi, hp, ha, table, c.key, hop, hr⟩
 
-/-- ルーティング後に継続へ渡る結果列。404なら空(`Runtime.requestCalls` の結果の列)。 -/
+/-- The sequence of results passed to continuations after routing. Empty for 404 (the sequence of results of
+    `Runtime.requestCalls`). -/
 def requestOutcomes (app : App) (store : Store) (r : AuthenticatedRequest) : List Outcome :=
   (requestCalls app store r).map Call.outcome
 
-/-- 同じ要求と同じ結果列から、Store無しでHTTPモデル応答を再生する。 -/
+/-- Replay the HTTP model response without a Store, from the same request and the same result sequence. -/
 def replayRequest (app : App) (r : AuthenticatedRequest) (os : List Outcome) : Option Http.Response :=
   match app.handlerOf r with
   | none => if os.isEmpty then some { status := .notFound, body := "not found" } else none
   | some handler => replay handler os
 
-/-- 日本語: 任意の要求について、純粋HTTPモデルの応答全体(status/body)は
-要求と継続への結果列から再現でき、各行はその要求の認可済みreadに対応する。
-これは実HTTP接続コードの定理ではなく、判定結果を含む無条件の非干渉でもない。 -/
+/-- For any request, the whole response of the pure HTTP model (status/body) can be reproduced from the request and the
+sequence of results passed to the continuations, and each row corresponds to an authorized read of that request. This is
+not a theorem about the real HTTP connection code, nor an unconditional non-interference result that includes the
+decisions. -/
 theorem handleRequest_read_safety (app : App) (store : Store) (r : AuthenticatedRequest) :
     replayRequest app r (requestOutcomes app store r) = some (handleRequest app store r).result ∧
     (∀ row, Outcome.ok (some row) ∈ requestOutcomes app store r →
@@ -101,9 +106,9 @@ theorem handleRequest_read_safety (app : App) (store : Store) (r : Authenticated
     simp only [replayRequest, requestOutcomes, requestCalls, handleRequest, hr]
     exact ⟨replay_runHandler _ _ _ _ _ _ _, outcomes_row_authorized _ _ _ _ _ _ _⟩
 
-/-- 日本語: 同じApp/認証済み要求で継続への結果列が同じなら、
-内部Storeが異なっていてもモデル応答は等しい。結果列の同一性は前提であり、
-認可に使う行を変えたときにpermit/denyまで不変とは主張しない。 -/
+/-- For the same App and authenticated request, if the sequences of results passed to the continuations are equal, the
+model responses are equal even if the internal Stores differ. Equality of the result sequences is a premise; this does
+not claim that permit/deny stays unchanged when the rows used for authorization change. -/
 theorem response_eq_of_outcomes_eq (app : App) (r : AuthenticatedRequest) (s₁ s₂ : Store)
     (h : requestOutcomes app s₁ r = requestOutcomes app s₂ r) :
     (handleRequest app s₁ r).result = (handleRequest app s₂ r).result := by

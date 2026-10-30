@@ -1,14 +1,14 @@
 import Nyxis.Internal.SupabaseJwt
 
-/-! 承認済みの curl による JWKS の HTTPS 取得(A2/A4。コア専用、未証明)。
-リクエストのデータ・shell・コマンドの差し替え・検査用 CA の指定はこの API に入らない。
-PATH・curl/TLS の版・CA 信頼ストアは配置環境の責務。
+/-! HTTPS fetch of the JWKS through the approved curl (A2/A4; core only, unproven). Request data, a shell, command
+substitution, and specifying a CA for testing do not enter this API. PATH, the curl/TLS versions, and the CA trust store
+are the responsibility of the deployment environment.
 -/
 namespace Nyxis.Internal.JwksFetch
 
-/-- 意図して狭くした設定: HTTPS の DNS ホスト、省略可能な数値のポート、そして Supabase の issuer パス
-そのもの。資格情報・クエリ・フラグメント・エスケープ・制御文字・curl の URL 展開は、プロセスを起動する
-前に拒む。 -/
+/-- An intentionally narrow configuration: an HTTPS DNS host, an optional numeric port, and exactly the Supabase issuer
+path. Credentials, query, fragment, escapes, control characters, and curl URL globbing are rejected before the process
+is started. -/
 def urlOfIssuer (issuer : String) : Option String := do
   let some rest := issuer.dropPrefix? "https://" | none
   let parts := rest.toString.splitOn "/"
@@ -33,19 +33,20 @@ def supportedVersion (text : String) : Bool := Id.run do
   let major :: minor :: patch :: _ := version.splitOn "." | return false
   let some major := major.toNat? | return false
   let some minor := minor.toNat? | return false
-  let some _ := patch.toNat? | return false
+  let patchDigits := (patch.takeWhile Char.isDigit).toString
+  let some _ := patchDigits.toNat? | return false
   return major > 8 || (major == 8 && minor >= 4)
 
-/-- 固定の輸送の方針。--disable は最初の引数でなければならない。-L・insecure・ユーザーのヘッダ・
-プロキシの資格情報・伸長・リクエストの引数は無い。 -/
+/-- The fixed transport policy. --disable must be the first argument. There is no -L, insecure, user header, proxy
+credentials, decompression, or request argument. -/
 def arguments (url : String) : Array String := #[
   "--disable", "--silent", "--fail", "--globoff", "--noproxy", "*",
   "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0",
   "--connect-timeout", "3", "--max-time", "5", "--max-filesize", "65536",
   "--write-out", "\n%{http_code}", "--url", url]
 
-/-- curl の状態コードの接尾辞を、本文の任意の改行から切り分ける。以下の UTF-8 の読み取りは、
-不正な符号化をバイトの置き換えではなく拒否で扱う。 -/
+/-- Separate curl's status-code suffix from any newlines in the body. The UTF-8 read below handles invalid encoding by
+rejecting it, not by replacing bytes. -/
 def documentOfOutput (code : UInt32) (output : String) : Option String := do
   if code != 0 || !output.endsWith "\n200" then none else do
     let body := (output.dropEnd 4).toString
@@ -54,8 +55,8 @@ def documentOfOutput (code : UInt32) (output : String) : Option String := do
 private def run (args : Array String) : IO (UInt32 × String) := do
   let child ← IO.Process.spawn {
     cmd := "curl", args, stdin := .null, stdout := .piped, stderr := .null }
-  -- 不正な UTF-8 や読み取りの失敗を含め、子プロセスは必ず回収する。診断は引き継がず返さない。
-  -- 転送量とその時間は curl 自身が制限する。
+  -- Always reap the child process, including on invalid UTF-8 or a read failure. Diagnostics are neither inherited nor
+  -- returned. curl itself limits the transfer size and its duration.
   try
     let output ← child.stdout.readToEnd
     let code ← child.wait
@@ -65,8 +66,8 @@ private def run (args : Array String) : IO (UInt32 × String) := do
     let _ ← child.wait
     return (1, "")
 
-/-- 起動時に 1 度、PATH の curl が 8.4 以降であることを確かめる。満たさなければ起動しない
-(プロセス寿命中に結果は変わらないので、取得ごとには確かめない)。 -/
+/-- At startup, check once that the curl on PATH is 8.4 or later. If not, do not start (the result does not change
+during the process lifetime, so it is not checked on every fetch). -/
 def requireCurl : IO Unit := do
   let supported ← try
       let (code, version) ← run #["--disable", "--version"]
@@ -74,7 +75,8 @@ def requireCurl : IO Unit := do
     catch _ => pure false
   unless supported do throw (IO.userError "curl 8.4 or later is required for JWKS fetching")
 
-/-- `SupabaseJwt.verifyFresh` の取得処理。検証のたびに取得し、失敗しても古い鍵へは戻らない。 -/
+/-- The fetch for `SupabaseJwt.verifyFresh`. It fetches on every verification and never falls back to old keys on
+failure. -/
 def fetch (issuer : String) : IO (Option String) := do
   let some url := urlOfIssuer issuer | return none
   try
@@ -82,14 +84,14 @@ def fetch (issuer : String) : IO (Option String) := do
     return documentOfOutput code output
   catch _ => return none
 
-/-- 信頼するコアの設定だけを使う。トークンが URL に影響することはない。 -/
+/-- Uses only the trusted core configuration. The token never affects the URL. -/
 def verify (issuer : String) : String → IO (Option String) :=
   SupabaseJwt.verifyFresh issuer (fetch issuer)
 
-/-- 日本語: 本番のJWKS検証器によるユーザー主体は、コア設定issuerの今回の
-fetchが返した文書から準備した鍵と、その後の実時計による同じBearer tokenの
-検証subjectに由来する。同じ開始/終了IO状態を保つ。fetch内部のTLS/プロセス、
-鍵準備と暗号/claim検査、時計値の正しさは含まない。 -/
+/-- A user principal from the production JWKS verifier comes from keys prepared from the document returned by this fetch
+for the core-configured issuer, and from the subject obtained by then verifying the same Bearer token against the real
+clock. It keeps the same start/end IO states. The TLS/process internals of fetch, key preparation and the
+cryptographic/claim checks, and the correctness of the clock value are not included. -/
 theorem principalOf_user
     (userType : Cedar.Spec.EntityType) (issuer : String) (headers : Std.Http.Headers)
     (w w' : Void IO.RealWorld) (uid : Cedar.Spec.EntityUID)

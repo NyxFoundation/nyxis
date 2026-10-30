@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>印と状態の部品</title>
+<title>Stamp and state components</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -56,102 +56,102 @@ h1,h2,h3,p{margin:0}
 </head>
 <body>
 <div style="width: 1280px; box-sizing: border-box; padding: 48px 56px 56px; display: flex; flex-direction: column; gap: 40px; background: #F2F1EC">
-  <h1 style="font-size: 34px; font-weight: 900; letter-spacing: .02em; line-height: 1.2">印と状態の部品</h1>
+  <h1 style="font-size: 34px; font-weight: 900; letter-spacing: .02em; line-height: 1.2">Stamp and state components</h1>
   <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 56px">
     <section class="sec">
-      <h2 class="cap">印 — 許可されなかったとき</h2>
+      <h2 class="cap">Stamps — when not permitted</h2>
       <div class="rowwrap" style="gap: 32px; padding: 12px 0">
-        <span class="stamp">見られません</span>
-        <span class="stamp">できません</span>
+        <span class="stamp">Can't view</span>
+        <span class="stamp">Not allowed</span>
       </div>
       <div class="sheet" style="position: relative; display: flex; flex-direction: column; gap: 10px; min-height: 150px; overflow: hidden">
         <div class="sil" style="width: 55%; height: 22px"></div>
         <div class="sil" style="width: 90%"></div>
         <div class="sil" style="width: 70%"></div>
-        <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center"><span class="stamp">見られません</span></div>
+        <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center"><span class="stamp">Can't view</span></div>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">印 — できたとき</h2>
+      <h2 class="cap">Stamps — when it worked</h2>
       <div class="rowwrap" style="gap: 32px; padding: 12px 0">
-        <span class="stamp ok">公開しました</span>
-        <span class="stamp ok sm">保存しました</span>
-        <span class="stamp ok sm">できました</span>
+        <span class="stamp ok">Published</span>
+        <span class="stamp ok sm">Saved</span>
+        <span class="stamp ok sm">Done</span>
       </div>
       <div class="rowwrap">
-        <div class="toast" role="status"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg>消しました</div>
-        <div class="toast" role="status"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg>ログアウトしました</div>
+        <div class="toast" role="status"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg>Deleted</div>
+        <div class="toast" role="status"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m20 6-11 11-5-5"></path></svg>Signed out</div>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">見つかりません</h2>
-      <div class="empty">見つかりません</div>
+      <h2 class="cap">Not found</h2>
+      <div class="empty">Not found</div>
     </section>
     <section class="sec">
-      <h2 class="cap">つながりません</h2>
+      <h2 class="cap">Can't connect</h2>
       <div class="band" role="alert">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 2 20 20"></path><path d="M8.5 16.4a5 5 0 0 1 7 0"></path><path d="M5 12.9a10 10 0 0 1 5.2-2.7"></path><path d="M19 12.9a10 10 0 0 0-3-2"></path><path d="M12 20h.01"></path></svg>
-        つながりません
-        <button class="btn" type="button">もう一度</button>
+        Can't connect
+        <button class="btn" type="button">Try again</button>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">入力をたしかめる</h2>
+      <h2 class="cap">Check your input</h2>
       <div style="display: flex; flex-direction: column; gap: 6px">
-        <label class="mono" for="ex-title" style="font-size: 12px; color: #6E7177; font-weight: 700; letter-spacing: .1em">題名</label>
-        <input class="input big attn" id="ex-title" type="text" value="" placeholder="題名" aria-invalid="true" aria-describedby="ex-msg">
-        <p class="attn-msg" id="ex-msg"><svg class="ic" style="width: 14px; height: 14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4M12 16h.01"></path></svg>題名を入れてください</p>
+        <label class="mono" for="ex-title" style="font-size: 12px; color: #6E7177; font-weight: 700; letter-spacing: .1em">Title</label>
+        <input class="input big attn" id="ex-title" type="text" value="" placeholder="Title" aria-invalid="true" aria-describedby="ex-msg">
+        <p class="attn-msg" id="ex-msg"><svg class="ic" style="width: 14px; height: 14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4M12 16h.01"></path></svg>Enter a title</p>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">すでにあります</h2>
+      <h2 class="cap">Already exists</h2>
       <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 14px">
         <span style="font-weight: 700; letter-spacing: .1em; font-size: 12px; color: #6E7177">ID</span>
         <span class="mono" style="color: #C8311F; text-decoration: line-through">9d1c7e2b-3a4f-4b6c-8e2d-0f1a2b3c4d5e</span>
-        <span style="font-weight: 700; color: #C8311F">このIDはすでにあります</span>
-        <button class="btn line sm" type="button">新しいIDに</button>
+        <span style="font-weight: 700; color: #C8311F">This ID already exists</span>
+        <button class="btn line sm" type="button">New ID</button>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">タグ</h2>
+      <h2 class="cap">Tags</h2>
       <div class="rowwrap">
-        <span class="tag pub">公開中</span>
-        <span class="tag draft">下書き</span>
-        <span class="tag me">あなた</span>
-        <span class="tag admin">管理者</span>
+        <span class="tag pub">Published</span>
+        <span class="tag draft">Draft</span>
+        <span class="tag me">You</span>
+        <span class="tag admin">Admin</span>
       </div>
-      <h2 class="cap">公開するかどうか</h2>
-      <div class="seg" role="group" aria-label="公開するかどうか">
-        <button type="button" class="on" aria-pressed="true">下書き</button>
-        <button type="button" aria-pressed="false">公開する</button>
+      <h2 class="cap">Publish or not</h2>
+      <div class="seg" role="group" aria-label="Publish or not">
+        <button type="button" class="on" aria-pressed="true">Draft</button>
+        <button type="button" aria-pressed="false">Publish</button>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">いま誰か</h2>
+      <h2 class="cap">Who you are now</h2>
       <div class="rowwrap" style="gap: 28px">
-        <span class="who"><span class="avatar guest"></span>ゲスト</span>
-        <span class="who"><span class="avatar">3f</span>ログイン中</span>
-        <span class="who"><span class="avatar admin">6c</span><span class="tag admin">管理者</span></span>
-        <span class="who"><span class="avatar none">3f</span>利用登録まだ</span>
+        <span class="who"><span class="avatar guest"></span>Guest</span>
+        <span class="who"><span class="avatar">3f</span>Signed in</span>
+        <span class="who"><span class="avatar admin">6c</span><span class="tag admin">Admin</span></span>
+        <span class="who"><span class="avatar none">3f</span>Not registered</span>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">ボタン</h2>
+      <h2 class="cap">Buttons</h2>
       <div class="rowwrap" style="gap: 10px">
-        <button class="btn" type="button">保存</button>
-        <button class="btn line" type="button">編集</button>
-        <button class="btn red" type="button">削除</button>
-        <button class="btn red fill" type="button">消す</button>
-        <button class="btn plain" type="button">やめる</button>
+        <button class="btn" type="button">Save</button>
+        <button class="btn line" type="button">Edit</button>
+        <button class="btn red" type="button">Delete</button>
+        <button class="btn red fill" type="button">Delete</button>
+        <button class="btn plain" type="button">Cancel</button>
       </div>
     </section>
     <section class="sec">
-      <h2 class="cap">たしかめる</h2>
+      <h2 class="cap">Confirm</h2>
       <div class="confirm" role="alertdialog">
-        <span>この投稿を消しますか?</span>
+        <span>Delete this post?</span>
         <div style="display: flex; gap: 8px; margin-left: auto">
-          <button class="btn red fill sm" type="button">消す</button>
-          <button class="btn plain sm" type="button">やめる</button>
+          <button class="btn red fill sm" type="button">Delete</button>
+          <button class="btn plain sm" type="button">Cancel</button>
         </div>
       </div>
     </section>

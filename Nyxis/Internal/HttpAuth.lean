@@ -1,16 +1,18 @@
 import Std.Http
 import Nyxis.Authz
 
-/-! 内部の認証の境界。ハンドラの API には無い。subject から主体への変換と Bearer の抽出は以下で
-証明する。HTTP ヘッダの復号と JWT の検証は A2/A4 に残る。
-検証器は、承認済みの JWT 実装が署名・アルゴリズム・issuer・audience・時刻の claim を確かめた後に
-だけ subject を返さなければならない。このモジュールは JOSE を解析せず、リクエストが供給した subject を
-信頼しない。本番の起動処理は JwksFetch.verify を渡す。
+/-! The internal authentication boundary. Not part of the handler API. The conversion from subject to principal and the
+Bearer extraction are proven below. Decoding HTTP headers and verifying the JWT remain in A2/A4. The verifier must
+return a subject only after the approved JWT implementation has checked the signature, algorithm, issuer, audience and
+time claims. This module does not parse JOSE and does not trust a subject supplied by the request. The production
+startup passes JwksFetch.verify.
 -/
 namespace Nyxis.Internal.HttpAuth
 
-/-- 時計は検証のたびに読む(起動時には読まない)。時計と検証器の失敗は、診断を出さずに拒否する。
-時刻の claim の検証そのものは、この接続コードではなく承認済みの JWT 実装の責務。 -/
+/-- The clock is read on every verification (not at startup). Clock and verifier failures are rejected without
+diagnostics. Verifying the time claims itself is the responsibility of the approved JWT implementation, not of this
+connection code.
+-/
 def withClock (clock : IO Std.Time.Timestamp)
     (verify : String → Std.Time.Timestamp → IO (Option String))
     (token : String) : IO (Option String) := do
@@ -19,14 +21,14 @@ def withClock (clock : IO Std.Time.Timestamp)
     verify token now
   catch _ => return none
 
-/-- JWT 検証器のためのコアの実時計アダプタ。この時刻をリクエストが供給することはない。 -/
+/-- The core's real-clock adapter for the JWT verifier. This time is never supplied by the request. -/
 def withCurrentTime (verify : String → Std.Time.Timestamp → IO (Option String)) :
     String → IO (Option String) :=
   withClock Std.Time.Timestamp.now verify
 
-/-- Authorization フィールドはちょうど 1 つ、不透明な Bearer 資格情報もちょうど 1 つ。ヘッダ名と
-認証方式は大文字小文字を区別しない。重複・結合した曖昧な資格情報は検証の前に拒む。
-JOSE の解析は検証器の責務。 -/
+/-- Exactly one Authorization field, and exactly one opaque Bearer credential. The header name and the authentication
+scheme are case-insensitive. Ambiguous credentials (duplicated or combined) are rejected before verification. Parsing
+JOSE is the verifier's responsibility. -/
 def bearer (headers : Std.Http.Headers) : Option String := do
   let values ← headers.getAll? .authorization
   let [value] := values.toList | none
@@ -35,10 +37,10 @@ def bearer (headers : Std.Http.Headers) : Option String := do
   unless token.toList.all (fun c => '!' ≤ c && c ≤ '~' && c != ',') do none
   return token
 
-/-- 日本語: bearerがtokenを返すことと、Authorization検索結果が単一の値で、
-その値を空白で分割し空要素を除いた列が方式と同じtokenの2要素になり、方式が
-大文字小文字を無視したbearer、tokenの各文字が「!」から「~」の範囲かつカンマ以外
-であることは同値である。生HTTPからHeadersへの復号と標準文字列処理の内部は含まない。 -/
+/-- `bearer` returning `token` is equivalent to: the Authorization lookup yields a single value; splitting that value on
+spaces and dropping empty elements gives exactly two elements, the scheme and that same `token`; the scheme is `bearer`
+ignoring case; and every character of `token` is in the range `!` to `~` and is not a comma. Decoding raw HTTP into
+Headers and the internals of standard string processing are not covered. -/
 theorem bearer_eq_some_iff (headers : Std.Http.Headers) (token : String) :
     bearer headers = some token ↔
       ∃ (values : Array Std.Http.Header.Value) (value : Std.Http.Header.Value) (scheme : String),
@@ -74,10 +76,9 @@ theorem bearer_eq_some_iff (headers : Std.Http.Headers) (token : String) :
                 exact ⟨hb, (fun c hm => ⟨⟨(hc c hm).1, (hc c hm).2.1⟩,
                   (hc c hm).2.2⟩), rfl⟩
 
-/-- コア専用の検証器の注入。none とすべての IO 例外は匿名になる。
-ID を供給するのは検証済みの空でない subject だけで、エンティティ型はコアの設定から決まり、
-トークンの claim・ヘッダ・パス・本文・ハンドラの値からは決まらない。
-エラーメッセージ・資格情報・未検証の claim を呼び出し側に返さない。 -/
+/-- Core-only injection of the verifier. `none` and every IO exception become anonymous. Only a verified, non-empty
+subject supplies the ID; the entity type is determined by the core configuration, never by the token's claims, headers,
+path, body or handler values. No error message, credential or unverified claim is returned to the caller. -/
 def principalOf (userType : Cedar.Spec.EntityType)
     (verify : String → IO (Option String)) (headers : Std.Http.Headers) : IO Authz.Principal := do
   let some token := bearer headers | return .anonymous
@@ -88,8 +89,8 @@ def principalOf (userType : Cedar.Spec.EntityType)
     return .user ⟨userType, subject⟩
   catch _ => return .anonymous
 
-/-- subject から主体への変換の、すべての場合分け。検証器の同じ入力・出力・IO 状態を記録する。
-JWT の暗号について何も仮定しない。 -/
+/-- Every case of the conversion from subject to principal. Records the same input, output and IO state of the verifier.
+Assumes nothing about JWT cryptography. -/
 inductive PrincipalResult (userType : Cedar.Spec.EntityType)
     (verify : String → IO (Option String)) (headers : Std.Http.Headers) :
     Void IO.RealWorld → Authz.Principal → Void IO.RealWorld → Prop where
@@ -112,11 +113,12 @@ inductive PrincipalResult (userType : Cedar.Spec.EntityType)
       (hv : verify token w = .error e w') :
       PrincipalResult userType verify headers w .anonymous w'
 
-/-- 日本語: 実principalOfの正常終了はPrincipalResultの5分岐のいずれかである。
-ヘッダからbearerが得られなければIO状態は変わらず匿名。得られた場合はそのtokenで
-検証器を呼び、none・不正subject・検証例外なら匿名、有効subjectならコア設定の型と
-そのsubjectのユーザーになる。終了IO状態は検証器の終了状態と等しい。
-bearerの成功条件はbearer_eq_some_iffで別途証明する。検証器自体の署名・claim検査の正しさは含まない。 -/
+/-- A successful completion of the real principalOf is one of the five cases of PrincipalResult. If no bearer is
+obtained from the headers, the IO state is unchanged and the result is anonymous. If one is obtained, the verifier is
+called with that token: `none`, an invalid subject or a verifier exception gives anonymous, and a valid subject gives
+the user with the core-configured type and that subject. The final IO state equals the verifier's final state. The
+success condition of bearer is proven separately in bearer_eq_some_iff. The correctness of the verifier's own signature
+and claim checks is not covered. -/
 theorem principalOf_success
     (userType : Cedar.Spec.EntityType) (verify : String → IO (Option String))
     (headers : Std.Http.Headers) (w w' : Void IO.RealWorld) (principal : Authz.Principal)
@@ -156,9 +158,9 @@ theorem principalOf_success
           cases h
           exact .verified _ _ _ _ ht hv hs
 
-/-- 日本語: PrincipalResultがユーザーを返す場合、そのIDは同じBearer資格情報の
-検証器が返したsubjectそのもので、型はコア設定に一致する。subjectは空白のみでも
-NUL入りでもなく、型は予約匿名型ではない。 -/
+/-- When a PrincipalResult returns a user, its ID is exactly the subject returned by the verifier for the same Bearer
+credential, and its type matches the core configuration. The subject is neither whitespace-only nor contains NUL, and
+the type is not the reserved anonymous type. -/
 theorem PrincipalResult.user_verified
     {userType : Cedar.Spec.EntityType} {verify : String → IO (Option String)}
     {headers : Std.Http.Headers} {w w' : Void IO.RealWorld} {uid : Cedar.Spec.EntityUID}
@@ -172,10 +174,10 @@ theorem PrincipalResult.user_verified
     simp only [Bool.or_eq_false_iff, beq_eq_false_iff_ne] at hs
     exact ⟨token, subject, ht, hv, rfl, hs.1.1, hs.1.2, hs.2⟩
 
-/-- 日本語: ユーザー主体を返すPrincipalResultでは、同じ検証tokenが単一の
-Authorization値のBearer資格情報であり、tokenの全文字が印字可能ASCIIかつ
-カンマ以外である。その検証結果subjectとコア型だけがユーザーID/型を決める。
-principalOf_successから実IO正常終了にも適用できる。 -/
+/-- In a PrincipalResult that returns a user principal, the verified token is the Bearer credential of a single
+Authorization value, and every character of the token is printable ASCII and not a comma. Only that verification's
+resulting subject and the core type determine the user ID/type. Via principalOf_success this also applies to successful
+completion of the real IO. -/
 theorem PrincipalResult.user_bearer
     {userType : Cedar.Spec.EntityType} {verify : String → IO (Option String)}
     {headers : Std.Http.Headers} {w w' : Void IO.RealWorld} {uid : Cedar.Spec.EntityUID}
@@ -194,7 +196,7 @@ theorem PrincipalResult.user_bearer
     (bearer_eq_some_iff headers token).mp ht
   exact ⟨token, subject, values, value, scheme, hh, hl, hp, hb, hc, hv, hu, hs⟩
 
-/-- 時計アダプタの結果。時計と検証器の IO の列をそのまま保つ。 -/
+/-- The result of the clock adapter. Keeps the IO sequence of the clock and the verifier as-is. -/
 inductive ClockResult (clock : IO Std.Time.Timestamp)
     (verify : String → Std.Time.Timestamp → IO (Option String)) (token : String) :
     Void IO.RealWorld → Option String → Void IO.RealWorld → Prop where
@@ -207,9 +209,10 @@ inductive ClockResult (clock : IO Std.Time.Timestamp)
       (hc : clock w = .ok now wc) (hv : verify token now wc = .error e w') :
       ClockResult clock verify token w none w'
 
-/-- 日本語: withClockの正常終了は、時計の例外によるnone、時計取得直後の同じ
-時刻とtokenでの検証成功、または検証例外によるnoneのいずれかである。
-開始・時計取得後・終了のIO状態を保つ。時計値やJWT検証自体の正しさは含まない。 -/
+/-- A successful completion of withClock is one of: `none` due to a clock exception, a successful verification with the
+same token and the time obtained right after reading the clock, or `none` due to a verifier exception. Keeps the IO
+states at the start, after reading the clock and at the end. The correctness of the clock value or of JWT verification
+itself is not covered. -/
 theorem withClock_success
     (clock : IO Std.Time.Timestamp)
     (verify : String → Std.Time.Timestamp → IO (Option String)) (token : String)
@@ -238,10 +241,10 @@ theorem withClock_success
       cases h
       exact .verified _ _ _ now result hc hv
 
-/-- 日本語: 時計付き主体変換がユーザーを返すなら、同じBearer tokenの検証は
-この呼出しで取得した時計値を使ってsubjectを返した。ユーザーIDはそのsubject、
-型はコア設定に一致する。時計/検証器の例外からユーザーは作られない。
-withCurrentTimeにもclock = Std.Time.Timestamp.nowとして適用できる。 -/
+/-- If the principal conversion with a clock returns a user, verification of the same Bearer token returned the subject
+using the clock value obtained in this call. The user ID is that subject, and the type matches the core configuration.
+No user is created from a clock or verifier exception. This also applies to withCurrentTime, with clock =
+Std.Time.Timestamp.now. -/
 theorem principalOf_clock_user
     (userType : Cedar.Spec.EntityType) (clock : IO Std.Time.Timestamp)
     (verify : String → Std.Time.Timestamp → IO (Option String))

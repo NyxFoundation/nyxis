@@ -1,9 +1,9 @@
 import Nyxis.Internal.PostgresResult
 import Nyxis.Internal.IOTrace
 
-/-! 認可の材料の内部の取得(A4。未証明)。
-この未選別の Store をハンドラに出してはならない。すべての SELECT とその後の認可済みの処理は
-1 つの SERIALIZABLE トランザクションを共有し、結果は checked COMMIT の後にだけ公開する。
+/-! Internal fetching of decision materials (A4; unproved). This unfiltered Store must never be exposed to handlers. All
+SELECTs and the authorized processing after them share one SERIALIZABLE transaction, and results are exposed only after
+a checked COMMIT.
 -/
 namespace Nyxis.Internal.PostgresLoad
 open Nyxis
@@ -11,13 +11,13 @@ open Nyxis.Internal.IOTrace (MapSuccess mapM_success)
 
 private def invalid : IO α := throw (IO.userError "Invalid PostgreSQL snapshot acquisition")
 
-/-- この注入できる実行の境界に到達するのは、コアが生成したコマンドだけ。 -/
+/-- Only core-generated commands reach this injectable execution boundary. -/
 structure Driver where
   select : PostgresSql.Command → IO PostgresResult.Reader
 
-/-- SQL を発行する前にスキーマ全体を事前に検査する。抽出と復元は、空のテーブルを含めて全か無か。
-部分的に取得した Store は返さない。呼び出し側は、その後のモデル/SQL の処理に使うトランザクションの
-中に既にいなければならない。
+/-- Checks the whole schema up front before issuing any SQL. Extraction and restoration are all-or-nothing, including
+empty tables. A partially fetched Store is never returned. The caller must already be inside the transaction used for
+the subsequent model/SQL processing.
 -/
 def collect (schema : Authz.Schema) (driver : Driver) : IO Db.Store := do
   let tables := schema.tables.map Prod.fst
@@ -31,8 +31,8 @@ def collect (schema : Authz.Schema) (driver : Driver) : IO Db.Store := do
   let .ok store := PostgresSnapshot.restore schema results | invalid
   return store
 
-/-- コマンド順の SELECT/抽出の成功の組。隣り合う IO 状態を共有する。
-Lean の返り値について述べるもので、外部の SQL の意味は主張しない。 -/
+/-- The successful SELECT/extraction pairs in command order, sharing adjacent IO states. This is a statement about Lean
+return values and claims nothing about the meaning of the external SQL. -/
 inductive Selects (schema : Authz.Schema) (driver : Driver) :
     List (Db.Table × PostgresSql.Command) → List (Db.Table × PostgresSnapshot.Result) →
       Void IO.RealWorld → Void IO.RealWorld → Prop where
@@ -86,10 +86,10 @@ private theorem compiled_of_map (schema : Authz.Schema) (tables : List Db.Table)
       cases hs
       exact ⟨ih.1, .cons ⟨rfl, hc⟩ ih.2⟩
 
-/-- 日本語: 実collectが正常終了したなら、テーブル名の重複検査と全SELECTの
-事前生成が成功し、同じ順序で各SELECTと結果抽出が成功した結果からrestoreが
-返却Storeを復元した。各段階のIO状態を共有し、部分取得は正常終了しない。
-外部DBの実状態と抽出結果の一致やSQLの意味論は主張しない。 -/
+/-- If the real collect terminates normally, the duplicate table-name check and the up-front generation of all SELECTs
+succeeded, and restore rebuilt the returned Store from the results of each SELECT and result extraction succeeding in
+the same order. The IO states of the stages are shared, and a partial fetch never terminates normally. Nothing is
+claimed about agreement between the external DB's actual state and the extracted results, or about SQL semantics. -/
 theorem collect_success (schema : Authz.Schema) (driver : Driver)
     (w w' : Void IO.RealWorld) (store : Db.Store)
     (h : collect schema driver w = .ok store w') :
@@ -127,13 +127,13 @@ theorem collect_success (schema : Authz.Schema) (driver : Driver)
   · change EST.Out.error _ _ = EST.Out.ok _ _ at h
     cases h
 
-/-- 日本語: 実collectが正常終了したなら、テーブル名は重複せず、全SELECTの
-事前生成と入力順のSELECT/抽出が連続するIO状態で成功する。その抽出結果から
-restoreが成功し、全テーブル・行・属性はValueRow/ValueCellのタグ別JSON復号関係を
-満たす。復号行を結果順に連結したMap.makeが返却Storeそのものである。
-NULL属性は欠落し、非NULL属性はJSON解析成功とDecoded関係を持つ。
-整数値保存はDecoded.int_valueで得られる。JSON解析器内部・Map検索・SQL意味論・
-外部DB実状態やFFIの振る舞いとの一致は含まない。 -/
+/-- If the real collect terminates normally, table names are not duplicated, and the up-front generation of all SELECTs
+and the SELECT/extraction in input order succeed in consecutive IO states. restore succeeds on those extraction results,
+and every table, row and attribute satisfies the per-tag JSON decoding relation ValueRow/ValueCell. Map.make over the
+decoded rows concatenated in result order is exactly the returned Store. NULL attributes are absent, and non-NULL
+attributes have a successful JSON parse and the Decoded relation. Preservation of integer values is obtained from
+Decoded.int_value. The JSON parser internals, Map lookup, SQL semantics, and agreement with the external DB's actual
+state or FFI behavior are not included. -/
 theorem collect_values (schema : Authz.Schema) (driver : Driver)
     (w w' : Void IO.RealWorld) (store : Db.Store)
     (h : collect schema driver w = .ok store w') :
@@ -156,8 +156,8 @@ theorem collect_values (schema : Authz.Schema) (driver : Driver)
     PostgresSnapshot.restore_values schema results store restored
   exact ⟨distinct, commands, results, rows, compiled, selected, restored, related, constructed⟩
 
-/-- SELECT/抽出の成功に、実際の Reader のメタデータとセルの取得の列を加えたもの。
-すべての状態は対応する SELECT および次のテーブルと共有する。 -/
+/-- Successful SELECT/extraction plus the sequence of the actual Reader's metadata and cell fetches. Every state is
+shared with the corresponding SELECT and the next table. -/
 inductive SelectCells (schema : Authz.Schema) (driver : Driver) :
     List (Db.Table × PostgresSql.Command) → List (Db.Table × PostgresSnapshot.Result) →
       Void IO.RealWorld → Void IO.RealWorld → Prop where
@@ -177,9 +177,9 @@ inductive SelectCells (schema : Authz.Schema) (driver : Driver) :
       SelectCells schema driver commands results wn w' →
       SelectCells schema driver ((table, command) :: commands) ((table, result) :: results) w w'
 
-/-- 日本語: SELECT/抽出の成功列の全要素について、実Readerのステータス、
-行列数、投影順のメタデータ、行列順のNULL/値/バイト長取得を取り出す。
-SELECTと次のテーブルの間でIO状態を共有し、返却行列数も保存される。 -/
+/-- For every element of the list of successful SELECT/extractions, extracts the real Reader's status, row and column
+counts, metadata in projection order, and NULL/value/byte-length fetches in row-column order. The IO state is shared
+between a SELECT and the next table, and the returned row and column counts are preserved. -/
 theorem Selects.cells (schema : Authz.Schema) (driver : Driver)
     (commands results w w') (h : Selects schema driver commands results w w') :
     SelectCells schema driver commands results w w' := by
@@ -190,11 +190,12 @@ theorem Selects.cells (schema : Authz.Schema) (driver : Driver)
       cells, height, width⟩ := PostgresResult.extract_cells _ _ _ _ _ _ he
     exact .cons hs he status rows columns nonneg metadata cells height width ih
 
-/-- 日本語: 実collect正常終了から、全SELECT事前生成、各SELECTと実Readerの
-メタデータ・NULL/値/バイト長取得の連続IO状態、および同じ抽出結果の全テーブル・
-行・属性のタグ別JSON復号と返却StoreのMap.make構成を一つの証拠列へ結ぶ。
-NULL属性は欠落し、非NULL属性はJSON解析成功とDecoded関係を持つ。
-JSON解析器内部・Map検索・SQL意味論・外部DB実状態・FFIとの一致は含まない。 -/
+/-- From normal termination of the real collect, ties into a single chain of evidence the up-front generation of all
+SELECTs, the consecutive IO states of each SELECT and the real Reader's metadata and NULL/value/byte-length fetches, and
+the per-tag JSON decoding of every table, row and attribute of the same extraction results together with the Map.make
+construction of the returned Store. NULL attributes are absent, and non-NULL attributes have a successful JSON parse and
+the Decoded relation. The JSON parser internals, Map lookup, SQL semantics, and agreement with the external DB's actual
+state/FFI are not included. -/
 theorem collect_cells_values (schema : Authz.Schema) (driver : Driver)
     (w w' : Void IO.RealWorld) (store : Db.Store)
     (h : collect schema driver w = .ok store w') :
@@ -216,15 +217,15 @@ theorem collect_cells_values (schema : Authz.Schema) (driver : Driver)
   exact ⟨distinct, commands, results, rows, compiled, selected.cells schema driver,
     restored, related, constructed⟩
 
-/-- 固定の lean-pq の接続・テキスト形式の結果・検査済みの SELECT の状態を使う。 -/
+/-- Uses the fixed lean-pq connection, text-format results and the checked SELECT status. -/
 def driver (conn : LeanPq.Handle) : Driver where
   select := fun command => do
     let result ← Postgres.exec conn command.sql command.parameters .tuplesOk
     return PostgresResult.reader result
 
-/-- 新しい接続、checked SERIALIZABLE トランザクション、同じ接続でのスナップショットと継続。
-継続の値は COMMIT が成功した後にだけ返す。失敗は接続を再利用せずに伝える。継続は信頼する
-コアのコードであり、アプリケーションのハンドラではない: モデルが認可した操作だけを実行しなければならない。
+/-- A new connection, a checked SERIALIZABLE transaction, and a snapshot and continuation on the same connection. The
+continuation's value is returned only after COMMIT succeeds. Failures are propagated without reusing the connection. The
+continuation is trusted core code, not an application handler: it must execute only operations the model has authorized.
 -/
 def withSnapshot (conninfo : String) (schema : Authz.Schema)
     (body : LeanPq.Handle → Db.Store → IO α) : IO α :=
@@ -232,10 +233,10 @@ def withSnapshot (conninfo : String) (schema : Authz.Schema)
     let store ← collect schema (driver conn)
     body conn store
 
-/-- 日本語: 実withSnapshotが正常終了したなら、新規接続、idle、BEGINタグと
-inTransaction、同じ接続でのcollect、得られたStoreを渡した継続、健全性、
-COMMITタグとidleが順に成功し、継続の値がそのまま返る。
-IOの実定義についての主張であり、取得行と外部DB実状態の一致は含まない。 -/
+/-- If the real withSnapshot terminates normally, the new connection, idle, the BEGIN tag and inTransaction, collect on
+the same connection, the continuation given the resulting Store, the health check, and the COMMIT tag and idle succeed
+in order, and the continuation's value is returned unchanged. This is a claim about the real IO definitions; agreement
+between the fetched rows and the external DB's actual state is not included. -/
 theorem withSnapshot_success (conninfo : String) (schema : Authz.Schema)
     (body : LeanPq.Handle → Db.Store → IO α)
     (w w' : Void IO.RealWorld) (value : α)

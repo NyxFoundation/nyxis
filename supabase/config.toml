@@ -50,12 +50,14 @@ openai_api_key = "env(OPENAI_API_KEY)"
 [inbucket]
 enabled = true
 port = 55324
-# メール送信の統合テスト(scripts/check-team-docs.py)が使う: ホストで動く team-docs のサンプルが Mailpit の SMTP へ
-# 承認済み curl(smtp://127.0.0.1:55326)で送り、検査が HTTP API(55324)で捕捉したメールを読む。
+# Used by the mail-sending integration test (scripts/check-team-docs.py): the team-docs sample running on the host sends
+# to Mailpit's SMTP via the approved curl (smtp://127.0.0.1:55326), and the check reads the captured mail via the HTTP
+# API (55324).
 smtp_port = 55326
 
 [storage]
-# 添付の署名付き URL の統合テスト(scripts/check-team-docs.py)が使う。バケットは検査が service_role で作って消す。
+# Used by the attachment signed-URL integration test (scripts/check-team-docs.py). The check creates and deletes the
+# bucket with service_role.
 enabled = true
 file_size_limit = "50MiB"
 

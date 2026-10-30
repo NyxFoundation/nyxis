@@ -38,7 +38,8 @@ private def optionalShape := (compile "entity User = {admin?: Bool, age?: Long};
 #guard !(validateRow optionalShape user (row [("age", .prim (.string "-1"))])).isOk
 #guard !(compile "entity User = {admin: Missing};").isOk
 #guard !(compile "type Fields = {admin: Bool}; entity User = Fields;").isOk
--- 実体の親: `in` には親を指す列の宣言 `@parents` が要る。宣言すれば列の保存形式は変わらずに受け入れる
+-- Entity parents: `in` requires the `@parents` declaration of the columns pointing to parents. Once declared, it is
+-- accepted with the column storage format unchanged
 #guard !(compile "entity Parent; entity User in [Parent] = {p: Parent};").isOk
 #guard (compile "entity Parent; @parents(\"p\") entity User in [Parent] = {p: Parent, admin: Bool};").toOption
   == some [(⟨"Parent", []⟩, []), (user, [⟨"p", false, .scalar (.entity ⟨"Parent", []⟩)⟩, ⟨"admin", false, .scalar .bool⟩])]
@@ -49,7 +50,8 @@ private def optionalShape := (compile "entity User = {admin?: Bool, age?: Long};
 #guard !(compile "entity User = {admin: Bool, admin: String};").isOk
 #guard (compile "entity User; entity Anonymous;").toOption == some [(user, [])]
 
--- 拡張型・集合・レコードの属性。入れ子の複合属性、ipaddr、組み込み型と同名のエンティティは拒む。
+-- Extension-type, set and record attributes. Nested composite attributes, ipaddr, and entities with the same name as a
+-- built-in type are rejected.
 private def docSource := "
 entity User = {admin: Bool};
 entity Doc = {
@@ -101,7 +103,8 @@ private def fullDoc : Row := row
    ("meta", .record (Cedar.Data.Map.make
      [("title", .prim (.string "t")), ("pinned", .prim (.bool true)), ("editor", userRef "e"),
       ("since", stamp 1)]))]))).isOk
--- 省略可でない属性の欠落、型違い、集合の要素の型違い、レコードの未知/欠落/型違いの属性を拒む。
+-- Rejects a missing non-optional attribute, a wrong type, a wrong set element type, and unknown/missing/wrongly typed
+-- record attributes.
 #guard !(validateRow docShape doc (row [("owner", userRef "o")])).isOk
 #guard !(validatePatch docShape doc (row [("created", .prim (.int 10))])).isOk
 #guard !(validatePatch docShape doc (row [("created", .ext (.duration ⟨Int64.ofInt 10⟩))])).isOk

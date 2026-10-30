@@ -1,13 +1,14 @@
 import TeamDocs.Handlers
 
 /-!
-# TeamDocs.Jobs — 2 つめの公式サンプルの定期処理
+# TeamDocs.Jobs — periodic jobs of the second official sample
 
-nyxis の定める型 `Nyxis.Runtime.Job`(= `Generated → Handler Unit`。ハンドラと同じく、効果は認可層へのアクション
-呼び出しだけ)で書く。実起動(`TeamDocs.Server` → `Nyxis.Internal.ApprovedServer.serve`)が固定間隔(コア設定
-`NYXIS_JOB_INTERVAL_SECONDS`)に、サービス主体(`Service::"<NYXIS_SERVICE_PRINCIPAL>"`。JWT ではない)で
-HTTP の要求と同じ段階的な経路に流す。何ができるかはポリシー(`policies.cedar` の `principal is Service` の条項)が決める:
-送信済みでない通知の一覧と、宛先の利用者がいま文書を読める通知の送信、送信済みへの更新だけ。
+Written in the nyxis type `Nyxis.Runtime.Job` (= `Generated → Handler Unit`; as with handlers, the only effect is an
+action call into the authorization layer). The real startup (`TeamDocs.Server` → `Nyxis.Internal.ApprovedServer.serve`)
+runs it at a fixed interval (core setting `NYXIS_JOB_INTERVAL_SECONDS`) as the service principal
+(`Service::"<NYXIS_SERVICE_PRINCIPAL>"`; not a JWT) through the same staged path as HTTP requests. What it can do is
+decided by the policy (the `principal is Service` clauses of `policies.cedar`): only listing notifications not yet sent,
+sending notifications whose recipient user can read the document now, and updating them to sent.
 -/
 
 namespace TeamDocs
@@ -16,8 +17,9 @@ open Cedar.Spec
 open Nyxis
 open Nyxis.Authz
 
-/-- 送信済みでない通知を集め、ポリシーが許すものだけを送って送信済みにする(共有時に宛先が読めず送れなかった通知は、
-    後に共有されれば送られる)。拒否された通知はそのまま残る。 -/
+/-- Collects notifications not yet sent, sends only those the policy permits and marks them sent (a notification that
+    could not be sent at share time because the recipient could not read the document is sent once it is shared later).
+    Denied notifications stay as they are. -/
 def notifyPending : Nyxis.Runtime.Job := fun _ => do
   let listed ← Handler.callList (act "listNotifications") { filters := [⟨"sent", .eq, boolCell false⟩] }
   match listed with
@@ -31,7 +33,7 @@ def notifyPending : Nyxis.Runtime.Job := fun _ => do
       | _ => pure ()
   | _ => pure ()
 
-/-- このアプリの定期処理。 -/
+/-- The periodic jobs of this app. -/
 def jobs : List Nyxis.Runtime.Job := [notifyPending]
 
 end TeamDocs

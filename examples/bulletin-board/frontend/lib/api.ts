@@ -1,10 +1,10 @@
-// アプリのデータは nyxis HTTP API だけから取得する。
+// App data is fetched only from the nyxis HTTP API.
 export type Post = { title: string; body: string; author: string; published: boolean };
 export type PostEntry = Post & { id: string };
 export type User = { admin: boolean };
 export type Failure = "denied" | "notFound" | "badRequest" | "conflict" | "offline";
 export class ApiError extends Error {
-  // 400 のときだけ、バックエンドの平文の一文を message に持つ(入力の何が誤りかを画面で示す)。
+  // Only on 400, message holds the backend's plain-text sentence (the screen shows what was wrong with the input).
   constructor(public kind: Failure, message: string = kind) { super(message); }
 }
 export const requestTimeout = 15000;
@@ -61,13 +61,13 @@ export async function deletePost(id: string, signal: AbortSignal, token: string)
   const response = await apiRequest(`/posts/${encodeURIComponent(id)}`, signal, token, { method: "DELETE" });
   if (response.status !== 204) throw new ApiError("offline");
 }
-// 利用者の行。本人と管理者だけが読め、未登録は notFound。
+// The user row. Only the user themselves and admins can read it; an unregistered user is notFound.
 export async function readUser(id: string, signal: AbortSignal, token?: string): Promise<User> {
   const value = await readApi(`/users/${encodeURIComponent(id)}`, signal, token);
   if (!isUser(value)) throw new ApiError("offline");
   return value;
 }
-// 自分自身の行を非管理者として登録する。既にあれば 409 を成功として扱う。
+// Registers your own row as a non-admin. If it already exists, the 409 is treated as success.
 export async function registerUser(id: string, signal: AbortSignal, token: string): Promise<"registered" | "alreadyRegistered"> {
   const response = await apiRequest(`/users/${encodeURIComponent(id)}`, signal, token, { method: "POST", body: JSON.stringify({ admin: false }) }, [409]);
   if (response.status === 201) return "registered";

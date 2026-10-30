@@ -1,3 +1,3 @@
 import BulletinBoardTest.Model
 
-/-! 公式サンプルのモデル検査。コアの Test ライブラリとは独立してビルドする。 -/
+/-! Model checks of the official sample. Built independently of the core Test library. -/

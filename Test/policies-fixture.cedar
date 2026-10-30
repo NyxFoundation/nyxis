@@ -1,6 +1,6 @@
-// Test/Policy.lean の検査用。nyxis_policies がビルド時に埋め込む値(数・負の数・like のパターン・拡張関数・
-// has の連鎖・集合・レコード・if・unless・forbid)が、手書きの抽象構文と一致することを確かめる。
-// サンプルアプリのポリシーではない。
+// For the checks in Test/Policy.lean. Confirms that the values nyxis_policies embeds at build time (numbers, negative
+// numbers, like patterns, extension functions, has chains, sets, records, if, unless, forbid) match the hand-written
+// abstract syntax. Not a policy of any example application.
 @id("fixture-1")
 forbid (principal is User, action in [Action::"a"], resource)
 unless { context.n >= -1 && principal.name like "a*\*" }

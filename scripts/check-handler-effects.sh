@@ -1,29 +1,29 @@
 #!/bin/sh
-# 検査: ハンドラは認可層へのアクション呼び出し以外の効果を持てない。
+# Check: a handler cannot have any effect other than action calls to the authorization layer.
 #
-# (1) サンプルの変種で `lake build` が非 0 で終わること。変種は BulletinBoard/Variant.lean を置き、BulletinBoard.lean から
-#     import する形で作る(`lake build` の既定の対象に含まれる)。変種ごとに違反するハンドラを 1 つだけ含め、
-#     そのハンドラの行でエラーが報告されることを確かめる。
-#       db-apply   — 認可層を通さず、nyxis の DB 層の操作(`Nyxis.Db.Store.apply`)をハンドラの効果として
-#                    実行しようとするハンドラ。
-#       db-issue   — DB 操作(`Nyxis.Db.Operation`)を、ハンドラの唯一の効果の構成子 `Handler.call` に
-#                    渡そうとするハンドラ。
-#       io-handler — IO(標準出力への書き込みとファイルの読み取り)を行うハンドラ。
-#     いずれも `Nyxis.Handler` の型が許さないので型エラーになる: `Handler` は `pure` と `call`(アクション・
-#     主キー・提案する値)だけから成る自由モナドで、IO への持ち上げ(`MonadLift IO Handler`)も、DB 操作や
-#     DB の状態を受け取る構成子も無い。ハンドラが DB 層の純粋な関数を値として計算することはできるが、それは
-#     ハンドラの局所データで、ランタイムの DB(`Nyxis.Runtime` が持つ `Store`)には `Handler.call` 以外の
-#     経路で届かない。
-# (2) サンプルのアプリケーション側のLeanソース(BulletinBoard/内の全.lean と BulletinBoard.lean)に `unsafe` / `implemented_by` / `extern` /
-#     `sorry` が無いこと(grep で 0 件)。
+# (1) `lake build` exits non-zero for variants of the sample. A variant is made by placing BulletinBoard/Variant.lean
+# and importing it from BulletinBoard.lean (so it is included in the default `lake build` target). Each variant contains
+# exactly one violating handler, and the check confirms that the error is reported at that handler's line. db-apply — a
+# handler that tries to run an operation of the nyxis DB layer (`Nyxis.Db.Store.apply`) as a handler effect, bypassing
+# the authorization layer. db-issue — a handler that tries to pass a DB operation (`Nyxis.Db.Operation`) to
+# `Handler.call`, the only effect constructor of a handler. io-handler — a handler that performs IO (writing to standard
+# output and reading a file). All are type errors because the type of `Nyxis.Handler` does not allow them: `Handler` is
+# a free monad consisting only of `pure` and `call` (action, primary key, proposed values), with no lift into IO
+# (`MonadLift IO Handler`) and no constructor that takes a DB operation or DB state. A handler can compute pure
+# functions of the DB layer as values, but those are the handler's local data; they cannot reach the runtime DB (the
+# `Store` held by `Nyxis.Runtime`) by any path other than `Handler.call`.
+# (2) The sample's application-side Lean sources (all .lean files under BulletinBoard/ and BulletinBoard.lean) contain
+# no `unsafe` / `implemented_by` / `extern` / `sorry` (0 grep matches).
 #
-# (3) 型が通るデバッグ出力・panic・属性・初期化・メタプログラムの変種も、BulletinBoard.lean の
-#     nyxis_check_app が拒否する。別の名前空間・private な補助関数も検査する。
-# 検査はビルド時 IO の実行を隔離しない。main の IO、信頼済み依存の内部、検査を外した構成も
-# この検査の保証外。正確な範囲と残る仮定は ASSUMPTIONS.md A7 を参照。
+# (3) Variants with debug output, panic, attributes, initialization or metaprograms that do type-check are also rejected
+# by nyxis_check_app in BulletinBoard.lean. Other namespaces and private helper functions are also checked. The check
+# does not isolate the execution of build-time IO. IO in main, the internals of trusted dependencies, and configurations
+# that drop the check are outside this check's guarantee. For the exact scope and the remaining assumptions, see
+# ASSUMPTIONS.md A7.
 #
-# すべて満たせば exit 0、さもなくば 1。変種の後は正本を戻し、`lake build` が exit 0 に戻ることも確かめる。
-# 正本は一時ディレクトリに退避し、中断しても trap で戻す(一時ディレクトリは残す)。
+# Exit 0 if all of these hold, otherwise 1. After the variants, the original is restored and `lake build` is confirmed
+# to exit 0 again. The original is saved to a temporary directory and restored by a trap even if interrupted (the
+# temporary directory is kept).
 set -u
 cd "$(dirname "$0")/../examples/bulletin-board/backend" || exit 1
 
@@ -44,8 +44,8 @@ echo "backup and logs: $tmp"
 
 status=0
 
-# $1 = 変種の名前、$2 = 変種の Lean ソース(ファイル)、$3 = 違反するハンドラのエラーが報告されるべき行番号、
-# $4 以降 = ビルドログに期待するエラーの語(すべて要る)
+# $1 = variant name, $2 = variant Lean source (file), $3 = line number where the violating handler's error should be
+# reported, $4 onward = error words expected in the build log (all required)
 try_variant() {
   name=$1
   source=$2
@@ -90,13 +90,13 @@ try_variant() {
 cat > "$tmp/db-apply.lean" <<'EOF'
 import BulletinBoard.Handlers
 
-/-! 変種 db-apply: 認可層を通さず DB 層の操作を効果として実行するハンドラ。ビルドできてはならない。 -/
+/-! Variant db-apply: a handler that runs a DB-layer operation as an effect, bypassing the authorization layer. Must not build. -/
 
 namespace BulletinBoard.Variant
 
 open Nyxis Nyxis.Authz Nyxis.Db
 
-/-- DB 層の操作をハンドラの効果として実行しようとする。 -/
+/-- Tries to run a DB-layer operation as a handler effect. -/
 def applyDirectly : Principal → Generated → Http.Request → Handler Http.Response := fun _ _ _ => do
   let (_, outcome) ← Store.apply Cedar.Data.Map.empty (.delete ⟨"Post", []⟩ "pub1")
   pure (BulletinBoard.noContent outcome)
@@ -112,13 +112,13 @@ EOF
 cat > "$tmp/db-issue.lean" <<'EOF'
 import BulletinBoard.Handlers
 
-/-! 変種 db-issue: DB 操作をハンドラの効果の構成子に直接渡すハンドラ。ビルドできてはならない。 -/
+/-! Variant db-issue: a handler that passes a DB operation directly to the handler's effect constructor. Must not build. -/
 
 namespace BulletinBoard.Variant
 
 open Nyxis Nyxis.Authz Nyxis.Db
 
-/-- DB 操作をハンドラの唯一の効果の構成子に渡そうとする。 -/
+/-- Tries to pass a DB operation to the handler's only effect constructor. -/
 def issueDirectly : Principal → Generated → Http.Request → Handler Http.Response := fun _ _ _ =>
   Handler.call (Operation.delete ⟨"Post", []⟩ "pub1") (fun outcome => Handler.pure (BulletinBoard.noContent outcome))
 
@@ -133,13 +133,13 @@ EOF
 cat > "$tmp/io-handler.lean" <<'EOF'
 import BulletinBoard.Handlers
 
-/-! 変種 io-handler: IO を行うハンドラ。ビルドできてはならない。 -/
+/-! Variant io-handler: a handler that performs IO. Must not build. -/
 
 namespace BulletinBoard.Variant
 
 open Nyxis Nyxis.Authz
 
-/-- 標準出力に書き、ファイルを読む。 -/
+/-- Writes to standard output and reads a file. -/
 def leak : Principal → Generated → Http.Request → Handler Http.Response := fun _ _ req => do
   IO.println s!"request: {req.path}"
   let secret ← IO.FS.readFile "/etc/hosts"
@@ -205,6 +205,20 @@ elab "sample_command" : command => pure ()
 EOF
 audit_variant unsafe-decl 'unsafe declaration' <<'EOF'
 unsafe def BulletinBoard.escape (n : Nat) : Nat := n
+EOF
+audit_variant axiom-decl 'depends on axiom BulletinBoard.cheat' <<'EOF'
+axiom BulletinBoard.cheat : False
+EOF
+audit_variant forged-bound 'depends on axiom BulletinBoard.cheat' <<'EOF'
+axiom BulletinBoard.cheat : False
+namespace Unrelated
+def peek (i : Nat) : UInt8 := (ByteArray.mk #[0]).get i BulletinBoard.cheat.elim
+end Unrelated
+def BulletinBoard.leak : Nyxis.Handler Nyxis.Http.Response :=
+  pure { status := .ok, body := toString (Unrelated.peek 4096) }
+EOF
+audit_variant native-decide 'depends on axiom' <<'EOF'
+theorem BulletinBoard.viaNative : 2 + 2 = 4 := by native_decide
 EOF
 audit_variant extern-decl 'extern attribute' <<'EOF'
 @[extern "nyxis_test_unused"] opaque BulletinBoard.escape : Nat → Nat
@@ -305,8 +319,8 @@ else
   status=1
 fi
 
-# (2) アプリケーション側の Lean コード全体(ハンドラ・宣言・起動・検査)に迂回の語が無い。
-# 語単位で照合し(`external` 等には一致しない)、grep の exit は 0 = 見つかった、1 = 無し、他 = 失敗。
+# (2) The whole application-side Lean code (handlers, declarations, startup, checks) contains no bypass words.
+# Matched as whole words (does not match `external` etc.); grep exits 0 = found, 1 = none, other = failure.
 pattern='unsafe|implemented_by|extern|sorry'
 grep -rnwE --include='*.lean' -- "$pattern" BulletinBoard BulletinBoard.lean BulletinBoardTest BulletinBoardTest.lean Main.lean InitDatabase.lean > "$tmp/grep.log" 2>&1
 rc=$?

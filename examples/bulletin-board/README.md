@@ -1,10 +1,10 @@
-# Nyxis 公式サンプル — 掲示板
+# Official Nyxis sample — bulletin board
 
-`backend/` は nyxis を Lake の依存として利用する独立パッケージ、`frontend/` は Next.js App Router の通常の HTTP クライアント。投稿の一覧・詳細・作成・編集・公開切替・削除、Google OAuth のログインとログアウト、利用者の自己登録と管理者権限の付与・剥奪を試せる。アプリのデータは nyxis の HTTP API だけを通じて扱う。フロントエンドは形式証明の対象ではなく、認可はバックエンドが行う。
+`backend/` is an independent package that uses nyxis as a Lake dependency, and `frontend/` is an ordinary HTTP client built with the Next.js App Router. You can try listing, viewing, creating, editing, publishing/unpublishing, and deleting posts, signing in and out with Google OAuth, user self-registration, and granting and revoking admin rights. App data is handled only through the nyxis HTTP API. The frontend is not a target of the formal proofs; authorization is done by the backend.
 
-## ビルド
+## Build
 
-Node.js 22 以上と npm を使う。リポジトリ直下から順番に実行する。バックエンドや Supabase の起動、資格情報は不要。依存と `next/font` の Google Fonts (Zen Kaku Gothic New / DM Mono) の取得にはネット接続が必要。フォントは成果物に含め、実行時は自己ホストする。
+Use Node.js 22 or later and npm. Run these in order from the repository root. Neither starting the backend or Supabase nor any credentials are needed. Fetching the dependencies and the Google Fonts for `next/font` (Zen Kaku Gothic New / DM Mono) needs a network connection. The fonts are included in the build output and self-hosted at run time.
 
 ```sh
 cd examples/bulletin-board/frontend
@@ -13,20 +13,20 @@ NEXT_TELEMETRY_DISABLED=1 npm run build
 npm run typecheck
 ```
 
-依存は `package-lock.json` で固定。`next build --webpack` で `.next/` に出力する。以下の起動準備は別ターミナルで、リポジトリ直下から行う。
+The dependencies are pinned by `package-lock.json`. `next build --webpack` writes to `.next/`. Do the startup preparation below in a separate terminal, from the repository root.
 
-## ローカル Supabase と Google OAuth の設定
+## Local Supabase and Google OAuth setup
 
-macOS の Docker Desktop・Docker CLI・Supabase CLI 2.90.0・Python 3.12 以降・OpenSSL CLI と、このリポジトリの Lean/Lake・pkg-config・libpq 開発環境が必要。ローカルのポート 55321 (Auth)、55322 (DB)、55325 (JWKS TLS 中継)、8080 (sample)、3000 (画面) を使う。Supabase の準備の詳細は [ローカル Supabase の準備](../../docs/local-supabase.md) にある。
+You need Docker Desktop, the Docker CLI, Supabase CLI 2.90.0, Python 3.12 or later, and the OpenSSL CLI on macOS, plus this repository's Lean/Lake, pkg-config, and libpq development environment. Local ports 55321 (Auth), 55322 (DB), 55325 (JWKS TLS relay), 8080 (sample), and 3000 (screens) are used. Details of preparing Supabase are in [Preparing local Supabase](../../docs/local-supabase.md).
 
-人間が用意した Google OAuth クライアントの値を、リポジトリ直下の Git 除外された `.env` に設定する。既存の `.env` があれば他の値を残して追記する。Google のクライアント secret はサーバー専用で、`NEXT_PUBLIC_` 変数には設定しない。
+Set the values of the Google OAuth client a human has prepared in the Git-ignored `.env` at the repository root. If a `.env` already exists, append to it and keep its other values. The Google client secret is server-only; do not set it in any `NEXT_PUBLIC_` variable.
 
 ```dotenv
-SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID=用意したclient_id
-SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET=用意したclient_secret
+SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID=your_client_id
+SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET=your_client_secret
 ```
 
-Google 側の承認済みリダイレクト URI に `http://127.0.0.1:55321/auth/v1/callback` を登録する。テストモードのクライアントなら、ログインする Google アカウントをテストユーザーに追加する。`supabase/config.toml` には Google 有効化、上記2変数の `env()` 参照、明示的な Google callback と、画面の戻り先 `http://127.0.0.1:3000/auth/callback` / `http://localhost:3000/auth/callback` が設定済み。JWT issuer は `https://localhost:55325/auth/v1`(sample は HTTPS の issuer しか受け付けないため、ローカル Auth の公開鍵を起動スクリプトが TLS で中継する)。以下ではホスト表記を `127.0.0.1` に揃える。
+Register `http://127.0.0.1:55321/auth/v1/callback` as an authorized redirect URI on the Google side. For a client in testing mode, add the Google account you will sign in with as a test user. `supabase/config.toml` already enables Google, references the two variables above with `env()`, and sets the explicit Google callback and the screens' return destinations `http://127.0.0.1:3000/auth/callback` / `http://localhost:3000/auth/callback`. The JWT issuer is `https://localhost:55325/auth/v1` (sample accepts only HTTPS issuers, so the startup script relays the local Auth's public keys over TLS). Below, the host is written consistently as `127.0.0.1`.
 
 ```sh
 python3 scripts/local-supabase.py
@@ -34,25 +34,25 @@ lake build
 lake build --dir examples/bulletin-board/backend
 ```
 
-依存を未取得なら `lake build` の前に `python3 scripts/prepare-dependencies.py` を実行する。Auth が起動済みのまま OAuth 設定や `.env` を変更した場合は `supabase stop` 後に `python3 scripts/local-supabase.py` を再実行して反映する。DB の reset は不要。
+If the dependencies have not been fetched yet, run `python3 scripts/prepare-dependencies.py` before `lake build`. If you change the OAuth settings or `.env` while Auth is running, run `supabase stop` and then rerun `python3 scripts/local-supabase.py` to apply them. No DB reset is needed.
 
-## 認証済み操作ができるバックエンドを起動する
+## Start a backend that supports authenticated operations
 
-上の準備後、リポジトリ直下から実行する。
+After the preparation above, run this from the repository root.
 
 ```sh
 python3 scripts/local-supabase.py --exec python3 scripts/run-sample-frontend-backend.py --oauth
 ```
 
-`Ready: http://127.0.0.1:8080` と `OAuth ready` が出たら、この端末を開いたまま次節へ進む。`NYXIS_LOCAL_HTTP_PORT` を指定した場合は API URL も合わせる。
+When `Ready: http://127.0.0.1:8080` and `OAuth ready` appear, keep this terminal open and go on to the next section. If you set `NYXIS_LOCAL_HTTP_PORT`, adjust the API URL to match.
 
-このコマンドはローカル DB URL (55322 番の postgres DB) とローカル Docker context を検査し、一意名の新しい隔離 DB にだけ `initSampleDatabase` でテーブルを作る。既存 DB は初期化しない。公開投稿 `pub1` (題名 `public`、本文 `public body`、作者 `alice`) と下書き `draft1` を用意し、匿名で一覧に `pub1` だけが現れること、公開詳細 200・下書き詳細 403 を起動時に検査する。
+This command checks the local DB URL (the postgres DB on port 55322) and the local Docker context, and creates tables with `initSampleDatabase` only in a new isolated DB with a unique name. It does not initialize existing DBs. It prepares the published post `pub1` (title `public`, body `public body`, author `alice`) and the draft `draft1`, and at startup checks that only `pub1` appears in the anonymous list, that the published detail is 200, and that the draft detail is 403.
 
-ローカル Auth の公開 JWKS だけを `https://localhost:55325/auth/v1/.well-known/jwks.json` で中継する。一時証明書の CA は sample 子プロセスだけに渡し、OS やブラウザの信頼設定は変更しない。バックエンドの JWT の署名・issuer・期限検証を維持する。中継は毎回固定のローカル Auth から公開鍵を取得し、JWT や管理キーを転送しない。
+Only the local Auth's public JWKS is relayed, at `https://localhost:55325/auth/v1/.well-known/jwks.json`. The CA of the temporary certificate is passed only to the sample child process, and the trust settings of the OS and browsers are not changed. The backend's verification of the JWT signature, issuer, and expiry is kept. The relay fetches the public keys from the fixed local Auth every time and never forwards JWTs or admin keys.
 
-## フロントエンドを起動する
+## Start the frontend
 
-別ターミナルのリポジトリ直下で次を実行する。フックがローカル Supabase の公開値を読み、以下の `env -i` で開発プロセスへ渡す変数を限定する。管理キーや DB 接続文字列を手でコピーする必要はない。OAuth callback の認可コードを端末へ残さないため、開発サーバーの出力を破棄する。
+In a separate terminal, run the following from the repository root. The hook reads the local Supabase's public values, and the `env -i` below limits the variables passed to the development process. There is no need to copy admin keys or DB connection strings by hand. The development server's output is discarded so that the authorization code of the OAuth callback is not left in the terminal.
 
 ```sh
 python3 scripts/local-supabase.py --exec sh -c '
@@ -65,48 +65,48 @@ python3 scripts/local-supabase.py --exec sh -c '
 '
 ```
 
-`http://127.0.0.1:3000` を開く。初回のコンパイルには少し時間がかかる。バックエンドの CORS 許可は起動スクリプトが `http://127.0.0.1:3000,http://localhost:3000` に設定する。
+Open `http://127.0.0.1:3000`. The first compilation takes a little while. The startup script sets the backend's CORS allowance to `http://127.0.0.1:3000,http://localhost:3000`.
 
-| 設定 | 内容 |
+| Setting | Contents |
 |---|---|
-| `NEXT_PUBLIC_NYXIS_API_URL` | 公開してよい nyxis API URL。省略時は `http://127.0.0.1:8080` |
-| `NEXT_PUBLIC_SUPABASE_URL` | 公開 Auth URL。ローカルは `http://127.0.0.1:55321` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ローカル Supabase の公開 anon キー。service_role キーは使わない |
-| `NYXIS_DATABASE_URL` | バックエンド専用。フックから受け取り、起動スクリプトが子の中で隔離 DB へ切り替える |
-| `NYXIS_SUPABASE_ISSUER` | バックエンド専用。起動スクリプトが `https://localhost:55325/auth/v1` に設定する |
-| `NYXIS_CORS_ORIGINS` | バックエンド専用。上記の2つの画面 origin を起動スクリプトが設定する |
+| `NEXT_PUBLIC_NYXIS_API_URL` | The nyxis API URL, which may be public. Defaults to `http://127.0.0.1:8080` |
+| `NEXT_PUBLIC_SUPABASE_URL` | The public Auth URL. Locally `http://127.0.0.1:55321` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The public anon key of the local Supabase. The service_role key is not used |
+| `NYXIS_DATABASE_URL` | Backend only. Received from the hook; the startup script switches it to the isolated DB inside the child |
+| `NYXIS_SUPABASE_ISSUER` | Backend only. The startup script sets it to `https://localhost:55325/auth/v1` |
+| `NYXIS_CORS_ORIGINS` | Backend only. The startup script sets the two screen origins above |
 
-`NEXT_PUBLIC_` の値はブラウザへ公開される。Google secret・service_role キー・Supabase のアクセストークン・DB 接続情報を設定しない。公開値はビルド時に埋め込まれるため、接続先を変えたら再ビルドする。ビルド済みの実行はフロントエンドのディレクトリで `NEXT_TELEMETRY_DISABLED=1 npm start`。OAuth を使うビルドでは、上の3つの公開値を `npm run build` にも渡す。
+`NEXT_PUBLIC_` values are exposed to the browser. Do not set the Google secret, the service_role key, Supabase access tokens, or DB connection information in them. The public values are embedded at build time, so rebuild after changing the destinations. To run a build, use `NEXT_TELEMETRY_DISABLED=1 npm start` in the frontend directory. For a build that uses OAuth, also pass the three public values above to `npm run build`.
 
-## 匿名表示とログイン・ログアウトを試す
+## Try the anonymous view, sign-in, and sign-out
 
-1. ログイン前のホームで `public` だけが一覧にあることを確かめ、開いて `public body` と作者 `alice` を見る。`draft1` は一覧に現れず、`http://127.0.0.1:3000/posts/draft1` を直接開くと「見られません」となる。この fixture の ID は UUID ではないため、「IDで開く」欄ではなく直接 URL を使う。
-2. 右上のログインから「Googleでログイン」を押す。同じタブに戻るとコードを交換し、nyxis の `POST /users/{自分}` で `admin=false` の自己登録を行う。201/409 で続行する。接続失敗時はバックエンドと中継が起動しているか確認して再試行する。
-3. メニューの「投稿」から題名と本文を入力し、「下書き」で保存する。遷移先の詳細 URL を控え、本文・下書きタグ・ログイン中の表示を確かめる。投稿の作者は JWT からバックエンドが決める。
-4. 詳細画面でログアウトする。同じ詳細 URL で本文が消え、「見られません」とゲストの表示になることを確かめる。再び Google でログインすると本人の下書きが読める。
+1. On Home before signing in, confirm that only `public` is in the list, and open it to see `public body` and the author `alice`. `draft1` does not appear in the list, and opening `http://127.0.0.1:3000/posts/draft1` directly shows "Can't view". The IDs in this fixture are not UUIDs, so use the URL directly instead of the "Open by ID" field.
+2. Press "Sign in with Google" via sign-in at the top right. When you return to the same tab, the code is exchanged and you self-register with `admin=false` through nyxis's `POST /users/{you}`. It continues on 201/409. If the connection fails, check that the backend and the relay are running and retry.
+3. From "New post" in the menu, enter a title and body and save as "Draft". Note the detail URL you are taken to, and check the body, the Draft tag, and the Signed in display. The backend determines the post's author from the JWT.
+4. Sign out on the detail screen. Confirm that at the same detail URL the body disappears and you see "Can't view" and the Guest display. Signing in with Google again lets you read your own draft.
 
-Auth は PKCE を使う。乱数と SHA-256 はブラウザ標準 Web Crypto に委ねる。JWT/更新トークンは同じタブの `sessionStorage` に保持し、復帰時と期限前に更新する。ログアウト時は私的な表示とローカルセッションを消し、匿名で再取得する。Auth の現在セッションも破棄し、Auth に届かない場合はその旨を表示する。`/login?next=/posts/<投稿ID>` で戻り先を指定でき、外部 URL は受け付けない。
+Auth uses PKCE. Random numbers and SHA-256 are left to the browser's standard Web Crypto. The JWT/refresh token is kept in the same tab's `sessionStorage` and refreshed on resume and before expiry. On sign-out, private content and the local session are cleared and data is fetched again anonymously. The current Auth session is also discarded, and if Auth cannot be reached, the screen says so. `/login?next=/posts/<post ID>` specifies the return destination; external URLs are not accepted.
 
-## 最初の管理者を用意する
+## Prepare the first admin
 
-Google ログインと自己登録が成功したら、右上の人物マークから `/me` (「あなた」) を開き、自分の ID をコピーする。バックエンドを起動した端末に次の1行を入力して Enter を押す。`UUID` はコピーした値に置き換える。
+Once Google sign-in and self-registration succeed, open `/me` ("You") from the person mark at the top right and copy your ID. In the terminal where the backend is running, type the following line and press Enter. Replace `UUID` with the copied value.
 
 ```text
 admin UUID
 ```
 
-`First admin ready in this demo DB` が出たら `/me` を再読込みする。管理者の表示とメニューの「管理」が現れる。登録済みの UUID 形式の利用者だけを対象にし、この端末の初期管理者設定は1回だけ。未登録や形式の誤りは `No change` になる。起動端末からのこの準備は使い捨てのローカル隔離 DB に限り、Auth の利用者・設定や他の DB を変更しない。
+When `First admin ready in this demo DB` appears, reload `/me`. The Admin display and "Admin" in the menu appear. Only a registered user in UUID format is accepted, and this terminal can set the initial admin only once. Unregistered users or malformed input give `No change`. This preparation from the startup terminal is limited to the disposable local isolated DB and does not change Auth's users or settings or any other DB.
 
-以後の管理者の付与・剥奪は画面の `/admin` で利用者 ID を調べて行う。バックエンドが現在の管理者権限を判定する。自分の権限を外す場合は画面内で確認する。ログインしても管理者とは限らず、一般利用者が同じ操作を送ると拒否される。
+From then on, grant and revoke admin rights by looking up a user ID on the `/admin` screen. The backend judges the current admin rights. Removing your own rights is confirmed on screen. Signing in does not make you an admin, and the same operation sent by a regular user is denied.
 
-## 終了と匿名表示だけの起動
+## Shutting down, and starting with the anonymous view only
 
-フロントエンドとバックエンドの各端末で Ctrl-C を押す。バックエンドは sample と JWKS 中継を停止し、自分が作った隔離 DB と一時 TLS 素材だけを削除する。作った投稿・利用者行・初期管理者の設定もこの DB とともに消える。Supabase Auth の Google 利用者は通常のログインで登録され、そのまま残る。Supabase 自体も残る。強制終了や端末異常時は後片付けできない場合がある。
+Press Ctrl-C in the frontend and backend terminals. The backend stops sample and the JWKS relay and deletes only the isolated DB and temporary TLS material it created. The posts, user rows, and initial admin setting you created disappear with this DB. The Google users in Supabase Auth are registered by the normal sign-in and remain. Supabase itself also remains. After a forced kill or a terminal failure, cleanup may not be possible.
 
-匿名表示だけなら、バックエンドの `--oauth` を省略できる。その場合は JWKS 中継と初期管理者入力を有効にせず、終了時に DB 行の不変も検査する。フロントエンドは `cd examples/bulletin-board/frontend` の後、`NEXT_PUBLIC_NYXIS_API_URL=http://127.0.0.1:8080 NEXT_TELEMETRY_DISABLED=1 npm run dev` で起動できる。
+For the anonymous view only, the backend's `--oauth` can be omitted. Then the JWKS relay and the initial-admin input are not enabled, and on exit it also checks that the DB rows are unchanged. The frontend can be started with `NEXT_PUBLIC_NYXIS_API_URL=http://127.0.0.1:8080 NEXT_TELEMETRY_DISABLED=1 npm run dev` after `cd examples/bulletin-board/frontend`.
 
-## デザインと検査
+## Design and checks
 
-`frontend/design/` と `frontend/mockups/` は人間提供の正本。760px の本文幅、紙と罫、朱の印、黒い接続エラー帯を実装した。S1〜S9 に `data-screen`、状態に `data-state` を付ける。認可拒否は「見られません」/「できません」、接続失敗は「つながりません」、利用者行の未発見は「見つかりません」と区別する。
+`frontend/design/` and `frontend/mockups/` are the human-provided source of truth. The 760px content width, sheets and rules, vermilion stamps, and the black connection-error band are implemented. S1-S9 carry `data-screen`, and states carry `data-state`. Authorization denial ("Can't view" / "Not allowed"), connection failure ("Can't connect"), and a missing user row ("Not found") are kept distinct.
 
-認証プロトコルの単体検査はフロントエンドのディレクトリで `node --test tests/auth.test.cjs`。実 OAuth/実 DB/画面観測の代わりにはしない。
+The unit check of the authentication protocol is `node --test tests/auth.test.cjs` in the frontend directory. It is not a substitute for real OAuth, a real DB, or observing the screens.

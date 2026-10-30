@@ -1,7 +1,7 @@
 import LeanPq.Extern
 
-/-! lean-pq の FFI の失敗を、SQL・パラメータ・接続文字列・サーバの診断を含まない固定文言の IO 例外にする。
-接続層の各モジュールはこの 1 つの変換を自分の文言で使う。 -/
+/-! Turn a lean-pq FFI failure into an IO exception with a fixed message that contains no SQL, parameters, connection
+string or server diagnostics. Each module of the connection layer uses this single conversion with its own message. -/
 namespace Nyxis.Internal
 
 def native (failure : String) (action : EIO LeanPq.Error α) : IO α := do

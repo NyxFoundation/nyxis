@@ -1,24 +1,29 @@
 import Nyxis.Internal.PostgresResult
 
-/-! 判定材料の点検索(A4。定理の外)。判定材料の限定(`Nyxis.Materials`)の接続層。
+/-! Point lookups of decision materials (A4; outside the theorems). The connection layer for limiting decision materials
+(`Nyxis.Materials`).
 
-1 回のアクション呼び出しの判定に必要な実体だけを、主キーの点検索(`PostgresSql.operation` の読み取りの SELECT)で
-DB から取得し、部分的な取得 `Nyxis.Materials.Known`(取得した行と、引いたが無かった実体)を組み立てる。
-一覧の効果では対象テーブルの行のうちハンドラの問い合わせの絞り込みに合う行(`PostgresSql.selectFiltered`。
-絞り込みは DB 側の WHERE 句)を取得する。どちらも SQL はコアが生成したものだけで、要求由来の値(主キー・絞り込みの
-定数)はパラメータとして分離する。
+Fetches from the DB, by primary-key point lookups (the read SELECT of `PostgresSql.operation`), only the entities needed
+for the decision of one action call, and assembles the partial fetch `Nyxis.Materials.Known` (the fetched rows, and the
+entities that were looked up but absent). For a list effect, it fetches the rows of the target table that match the
+handler's query filters (`PostgresSql.selectFiltered`; the filtering is a WHERE clause on the DB side). In both cases
+the only SQL is core-generated, and request-derived values (primary keys and filter constants) are kept separate as
+parameters.
 
-取得の範囲は認可層と同じ規則で決める: 要求(主体・アクション・対象・文脈)に現れる実体から、正本のポリシーの
-level(`Nyxis.Materials.levelOf`)の段数で到達できる実体(cedar-lean の slicing が辿る集合
-`Entities.sliceAtLevel.sliceAtLevel`)を、取得した行の属性を見ながら繰り返し点検索する(`closeOp`)。
-テーブルでない型(予約型 `Anonymous`・アクション)は行を持たないので「無い」と記録する。所属行を宣言した型の実体は、行の有無に加えてその所属行(所属する側の列がその実体である行)を WHERE 句つきの SELECT ですべて取得し、
-`Known.fetched` に記録する(行の実体の祖先が所属行から決まるため)。
+The scope of fetching is determined by the same rule as the authorization layer: starting from the entities that appear
+in the request (principal, action, resource, context), the entities reachable within the number of steps given by the
+level of the approved policies (`Nyxis.Materials.levelOf`) (the set traversed by cedar-lean's slicing,
+`Entities.sliceAtLevel.sliceAtLevel`) are looked up repeatedly, following the attributes of the fetched rows
+(`closeOp`). Types that are not tables (the reserved type `Anonymous`, actions) have no rows, so they are recorded as
+"absent". For an entity of a type that declares membership rows, in addition to whether its row exists, all of its
+membership rows (rows whose member-side column is that entity) are fetched with a SELECT with a WHERE clause and
+recorded in `Known.fetched` (because the ancestors of a row's entity are determined by its membership rows).
 
-ここで組んだ `Known` が判定材料を覆っているかは、呼び出し側(`PostgresRun.runStaged`)が実行可能な検査
-`Nyxis.Authz.coversStep` で確かめてから判定する(通らなければ要求全体を閉じる)。取得が DB の現在の行と
-整合すること(`Known.Consistent`、一覧では対象テーブルの行のうち絞り込みに合う行の全部)は、点検索(一覧では
-WHERE 句つきの SELECT)の結果が DB の現在の行であるという信頼(`ASSUMPTIONS.md` A4)に当たる。この未選別の
-`Known` をハンドラに出してはならない。
+Whether the `Known` assembled here covers the decision materials is checked by the caller (`PostgresRun.runStaged`) with
+the executable check `Nyxis.Authz.coversStep` before deciding (if it fails, the whole request is closed). That the fetch
+is consistent with the DB's current rows (`Known.Consistent`; for a list, all rows of the target table that match the
+filters) corresponds to the trust that the results of the point lookups (for a list, the SELECT with a WHERE clause) are
+the DB's current rows (`ASSUMPTIONS.md` A4). This unfiltered `Known` must never be exposed to handlers.
 -/
 namespace Nyxis.Internal.PostgresMaterials
 open Nyxis Nyxis.Db Nyxis.Authz Cedar.Spec
@@ -26,19 +31,20 @@ open Nyxis.Materials (Known)
 
 private def invalid : IO α := throw (IO.userError "Invalid PostgreSQL materials acquisition")
 
-/-- 点検索の SELECT を発行する境界。到達するのはコアが生成したコマンドだけ。 -/
+/-- The boundary that issues point-lookup SELECTs. Only core-generated commands reach it. -/
 abbrev Select := PostgresSql.Command → IO PostgresResult.Reader
 
-/-- 正本のテーブル(行を持つエンティティ型)か。 -/
+/-- Whether this is a table of the approved sources (an entity type that has rows). -/
 def isTable (schema : Authz.Schema) (ty : EntityType) : Bool :=
   schema.tables.any (·.1 == ty)
 
-/-- 取得していない部分的な取得。 -/
+/-- The partial fetch that has fetched nothing. -/
 def Known.empty : Known := ⟨Cedar.Data.Map.empty, [], []⟩
 
-/-- テーブルの現在の行のうち絞り込みに合う行を取得して加え、その絞り込みをすべて取得したと記録する(一覧の対象
-    テーブル・制約の判定が見る行・所属行。絞り込みが無ければ全行)。既に記録していれば何もしない。既に取得した行と
-    重なれば取得した行が優先するが、同じトランザクションの中では同じ行。 -/
+/-- Fetches and adds the table's current rows that match the filters, and records that everything for those filters has
+    been fetched (the target table of a list, the rows seen by constraint decisions, membership rows; all rows if there
+    are no filters). Does nothing if already recorded. If it overlaps rows already fetched, the newly fetched rows take
+    precedence, but within the same transaction they are the same rows. -/
 def loadTable (schema : Authz.Schema) (select : Select) (k : Known) (table : Table) (filters : List Filter) :
     IO Known := do
   if k.fetched.contains (table, filters) then return k
@@ -47,13 +53,14 @@ def loadTable (schema : Authz.Schema) (select : Select) (k : Known) (table : Tab
   let .ok rows := PostgresSnapshot.tableRows schema table result | invalid
   return { k with rows := Cedar.Data.Map.make (rows ++ k.rows.toList), fetched := (table, filters) :: k.fetched }
 
-/-- 実体 `uid` の所属行(型の各宣言について、所属する側の列が `uid` である行)を WHERE 句つきの SELECT で
-    すべて取得する。宣言が無い型では何もしない。 -/
+/-- Fetches, with a SELECT with a WHERE clause, all membership rows of the entity `uid` (for each declaration of the
+    type, the rows whose member-side column is `uid`). Does nothing for a type with no declaration. -/
 def loadMemberships (schema : Authz.Schema) (select : Select) (k : Known) (uid : EntityUID) : IO Known :=
   ((schema.memberships.lookup uid.ty).getD []).foldlM (fun k m => loadTable schema select k m.table (m.filterOf uid)) k
 
-/-- 1 つの実体の行の有無を点検索で決め、その所属行を取得する。既に分かっていれば何もしない。テーブルでない型は
-    行を持たないので「無い」と記録する。主キーの SELECT は不在なら 0 行、あれば要求した主キーの 1 行だけを受け入れる。 -/
+/-- Determines by point lookup whether one entity's row exists, and fetches its membership rows. Does nothing if already
+    known. A type that is not a table has no rows, so it is recorded as "absent". The primary-key SELECT accepts only 0
+    rows if absent, or exactly 1 row with the requested primary key if present. -/
 def lookup (schema : Authz.Schema) (select : Select) (k : Known) (uid : EntityUID) : IO Known := do
   if k.knows schema.types schema.memberships uid then return k
   if !isTable schema uid.ty then return { k with absent := uid :: k.absent }
@@ -69,8 +76,8 @@ def lookup (schema : Authz.Schema) (select : Select) (k : Known) (uid : EntityUI
     | _ => invalid
   loadMemberships schema select k uid
 
-/-- 要求から `level` 段で到達できる実体のうち、まだ答えの無いもの(`coversOp` の閉包の検査が見る集合: 行の有無と
-    所属行)。 -/
+/-- The entities reachable from the request within `level` steps that are not answered yet (the set seen by the closure
+    check of `coversOp`: whether the row exists, and membership rows). -/
 def missing (schema : Authz.Schema) (k : Known) (principal : Principal) (generated : Generated)
     (action : EntityUID) (op : Operation) (level : Nat) : List EntityUID :=
   let es := judgementEntities schema principal k.rows op
@@ -78,8 +85,9 @@ def missing (schema : Authz.Schema) (k : Known) (principal : Principal) (generat
   (Entities.sliceAtLevel.sliceAtLevel es req.sliceEUIDs level).toList.filter fun u =>
     !k.knows schema.types schema.memberships u
 
-/-- 到達できる実体を、段数の分だけ繰り返し点検索する。各回で取得した行の属性が指す実体が次の回の対象になる。
-    `fuel` は繰り返しの上限(level + 1 回で閉じる。閉じたかは呼び出し側が `coversOp` で検査する)。 -/
+/-- Repeatedly looks up the reachable entities, once per step. The entities pointed to by the attributes of the rows
+    fetched in one round become the targets of the next round. `fuel` is the bound on repetitions (it closes within
+    level + 1 rounds; whether it closed is checked by the caller with `coversOp`). -/
 def closeOp (schema : Authz.Schema) (select : Select) (principal : Principal) (generated : Generated)
     (action : EntityUID) (op : Operation) (level : Nat) : Nat → Known → IO Known
   | 0, k => return k
@@ -90,13 +98,13 @@ def closeOp (schema : Authz.Schema) (select : Select) (principal : Principal) (g
       let k ← uids.foldlM (lookup schema select) k
       closeOp schema select principal generated action op level fuel k
 
-/-! ## 制約の判定材料 -/
+/-! ## Decision materials for constraints -/
 
-/-- 一意性の組と同じ値の行(置く行が分かってから。`Authz.uniqueFilters`)。 -/
+/-- Rows with the same values for a uniqueness tuple (once the row to be written is known; `Authz.uniqueFilters`). -/
 def loadUnique (schema : Authz.Schema) (select : Select) (k : Known) (op : Operation) : IO Known :=
   (Authz.uniqueFilters schema k.rows op).foldlM (fun k tf => loadTable schema select k tf.1 tf.2) k
 
-/-- 置く行が参照する実体の行の有無(`Authz.referencedUIDs`)。 -/
+/-- Whether the rows of the entities referenced by the row to be written exist (`Authz.referencedUIDs`). -/
 def loadReferences (schema : Authz.Schema) (select : Select) (k : Known) (op : Operation) : IO Known :=
   match op.newRow k.rows with
   | none => pure k
@@ -105,9 +113,10 @@ def loadReferences (schema : Authz.Schema) (select : Select) (k : Known) (op : O
       | some uid => lookup schema select k uid
       | none => pure k) k
 
-/-- 削除で消える行を参照する行を、連鎖の段ごとに取得する: 消える各行について、その行のテーブルを参照する宣言の列で
-    それを参照する行(`restrict` も `cascade` も)。`cascade` で取得した行が次の段の消える行になる。`fuel` は段数の上限
-    (`Authz.cascadeFuel`)。 -/
+/-- Fetches, per cascade step, the rows referencing the rows removed by a delete: for each removed row, the rows that
+    reference it through the column of a declaration referencing that row's table (both `restrict` and `cascade`). Rows
+    fetched through `cascade` become the removed rows of the next step. `fuel` is the bound on the number of steps
+    (`Authz.cascadeFuel`). -/
 def loadCascade (schema : Authz.Schema) (select : Select) : Nat → Known → List (Table × Key) → IO Known
   | 0, k, _ => pure k
   | fuel + 1, k, frontier => do
@@ -120,7 +129,8 @@ def loadCascade (schema : Authz.Schema) (select : Select) : Nat → Known → Li
           next := next ++ (Authz.referencing k.rows r ⟨t, key⟩).map fun kv => (r.table, kv.1)
     if next.isEmpty then pure k else loadCascade schema select fuel k next
 
-/-- 制約の判定が見る行: 一意性の組と同じ値の行、参照先の行、削除で消える行を参照する行(連鎖の段ごと)。 -/
+/-- The rows seen by constraint decisions: rows with the same values for a uniqueness tuple, referenced rows, and rows
+    referencing the rows removed by a delete (per cascade step). -/
 def loadIntegrity (schema : Authz.Schema) (select : Select) (k : Known) (op : Operation) : IO Known := do
   let k ← loadUnique schema select k op
   let k ← loadReferences schema select k op
@@ -128,11 +138,13 @@ def loadIntegrity (schema : Authz.Schema) (select : Select) (k : Known) (op : Op
   | .delete t key => loadCascade schema select (Authz.cascadeFuel schema) k [(t, key)]
   | _ => pure k
 
-/-- 1 回のアクション呼び出しの判定材料を点検索で組む。効果の無いアクションは何も取得しない(認可層が拒否する)。
-    一覧では対象テーブルの行のうち問い合わせの絞り込みに合う行と主体の行を取得し、取得した行のうち絞り込みに合う
-    各行の読み取りについて閉包を取る。それ以外では主体の行と対象の行(無ければ「無い」と記録。挿入では提案される
-    行が判定の実体になる)を取得し、制約の判定が見る行を取得し、閉包を取り、連鎖で消える各行の削除についても
-    閉包を取る(消した後の状態での検査は呼び出し側の `coversStep`)。 -/
+/-- Assembles the decision materials for one action call by point lookups. An action with no effect fetches nothing (the
+    authorization layer denies it). For a list, fetches the rows of the target table that match the query filters and
+    the principal's row, and takes the closure for the read of each fetched row that matches the filters. Otherwise,
+    fetches the principal's row and the target's row (recorded as "absent" if missing; for an insert, the proposed row
+    is the decision's entity), fetches the rows seen by constraint decisions, takes the closure, and also takes the
+    closure for the delete of each row removed by a cascade (the check on the state after removal is the caller's
+    `coversStep`). -/
 def load (schema : Authz.Schema) (policies : Policies) (select : Select) (principal : Principal)
     (generated : Generated) (action : EntityUID) (key : Key) (values : Row) (query : ListQuery) : IO Known := do
   let level := (Nyxis.Materials.levelOf policies schema.types).getD 0

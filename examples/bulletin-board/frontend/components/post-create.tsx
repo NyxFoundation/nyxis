@@ -43,25 +43,25 @@ export function PostCreate() {
   }
   const state = !ready ? "loading" : !session ? "anonymous" : busy ? "submitting" : failure?.kind || (invalid ? "invalid" : "editing");
   return <main className="wrap main" data-screen="S3" data-state={`PostCreate.${state}`}>
-    <h1>投稿</h1>
-    {!ready ? <div className="skeleton" role="status" aria-label="読み込み中"><i /><i /><i /></div> : !session ? <><p>投稿するにはログインが必要です</p><Link className="btn line" href="/login?next=%2Fposts%2Fnew">Googleでログイン</Link></> :
+    <h1>New post</h1>
+    {!ready ? <div className="skeleton" role="status" aria-label="Loading"><i /><i /><i /></div> : !session ? <><p>Sign in to post</p><Link className="btn line" href="/login?next=%2Fposts%2Fnew">Sign in with Google</Link></> :
       <form className="sheet compose" onSubmit={submit} noValidate>
-        {failure?.kind === "denied" && <div role="alert"><strong className="stamp">できません</strong><p>ログインしなおしてください</p><Link href="/login?next=%2Fposts%2Fnew">ログインへ</Link></div>}
-        {failure?.kind === "offline" && <div className="offline" role="alert"><span>つながりません</span><button type="submit" disabled={busy}>もう一度</button></div>}
-        {failure?.kind === "notFound" && <p className="empty" role="alert">見つかりません</p>}
-        {failure?.kind === "badRequest" && <p className="invalid" role="alert">入力をたしかめてください{failure.message !== "badRequest" && <>: {failure.message}</>}</p>}
-        <label className="sr-only" htmlFor="post-title">題名</label>
-        <input id="post-title" className={`compose-title ${invalid && !title.trim() || failure?.kind === "badRequest" ? "invalid" : ""}`} placeholder="題名" value={title} onChange={e => setTitle(e.target.value)} disabled={busy} aria-invalid={invalid && !title.trim()} aria-describedby={invalid && !title.trim() ? "title-error" : undefined} />
-        {invalid && !title.trim() && <p id="title-error" className="invalid" role="alert">題名を入れてください</p>}
-        <label className="sr-only" htmlFor="post-body">本文</label>
-        <textarea id="post-body" className={invalid && !body.trim() ? "invalid" : ""} placeholder="本文" value={body} onChange={e => setBody(e.target.value)} disabled={busy} aria-invalid={invalid && !body.trim()} aria-describedby={invalid && !body.trim() ? "body-error" : undefined} />
-        {invalid && !body.trim() && <p id="body-error" className="invalid" role="alert">本文を入れてください</p>}
+        {failure?.kind === "denied" && <div role="alert"><strong className="stamp">Not allowed</strong><p>Please sign in again</p><Link href="/login?next=%2Fposts%2Fnew">Go to sign-in</Link></div>}
+        {failure?.kind === "offline" && <div className="offline" role="alert"><span>Can't connect</span><button type="submit" disabled={busy}>Try again</button></div>}
+        {failure?.kind === "notFound" && <p className="empty" role="alert">Not found</p>}
+        {failure?.kind === "badRequest" && <p className="invalid" role="alert">Check your input{failure.message !== "badRequest" && <>: {failure.message}</>}</p>}
+        <label className="sr-only" htmlFor="post-title">Title</label>
+        <input id="post-title" className={`compose-title ${invalid && !title.trim() || failure?.kind === "badRequest" ? "invalid" : ""}`} placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} disabled={busy} aria-invalid={invalid && !title.trim()} aria-describedby={invalid && !title.trim() ? "title-error" : undefined} />
+        {invalid && !title.trim() && <p id="title-error" className="invalid" role="alert">Enter a title</p>}
+        <label className="sr-only" htmlFor="post-body">Body</label>
+        <textarea id="post-body" className={invalid && !body.trim() ? "invalid" : ""} placeholder="Body" value={body} onChange={e => setBody(e.target.value)} disabled={busy} aria-invalid={invalid && !body.trim()} aria-describedby={invalid && !body.trim() ? "body-error" : undefined} />
+        {invalid && !body.trim() && <p id="body-error" className="invalid" role="alert">Enter the body</p>}
         <div className="compose-actions">
-          <div className="toggle" role="group" aria-label="公開の設定"><button type="button" aria-pressed={!published} className={`btn ${published ? "line" : ""}`} onClick={() => setPublished(false)} disabled={busy}>下書き</button><button type="button" aria-pressed={published} className={`btn ${published ? "" : "line"}`} onClick={() => setPublished(true)} disabled={busy}>公開する</button></div>
-          <Link href="/">やめる</Link><button className="btn" type="submit" disabled={busy || !id}>{busy ? "保存中" : "保存"}</button>
+          <div className="toggle" role="group" aria-label="Visibility"><button type="button" aria-pressed={!published} className={`btn ${published ? "line" : ""}`} onClick={() => setPublished(false)} disabled={busy}>Draft</button><button type="button" aria-pressed={published} className={`btn ${published ? "" : "line"}`} onClick={() => setPublished(true)} disabled={busy}>Publish</button></div>
+          <Link href="/">Cancel</Link><button className="btn" type="submit" disabled={busy || !id}>{busy ? "Saving" : "Save"}</button>
         </div>
-        <div className="compose-id"><span className="mono">ID</span><span className="mono" style={failure?.kind === "conflict" ? { textDecoration: "line-through" } : undefined}>{id}</span><button type="button" className="text-button" disabled={busy} onClick={() => { setId(crypto.randomUUID()); setFailure(null); }}>新しいIDに</button></div>
-        {failure?.kind === "conflict" && <p role="alert">このIDはすでにあります</p>}
+        <div className="compose-id"><span className="mono">ID</span><span className="mono" style={failure?.kind === "conflict" ? { textDecoration: "line-through" } : undefined}>{id}</span><button type="button" className="text-button" disabled={busy} onClick={() => { setId(crypto.randomUUID()); setFailure(null); }}>New ID</button></div>
+        {failure?.kind === "conflict" && <p role="alert">This ID already exists</p>}
       </form>}
   </main>;
 }

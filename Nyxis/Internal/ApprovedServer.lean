@@ -4,13 +4,15 @@ import Nyxis.Internal.JwksFetch
 import Nyxis.Internal.Jobs
 import Nyxis.Internal.Outbox
 
-/-! 実起動(A4/A6/A7。定理の外)。アプリケーションの監査の後に起動処理からだけ import する。
-認可の入力は宣言からだけ組み、任意の App や検証器を受け取る引数は無い。宣言した正本の人間による承認と、
-起動処理がその宣言を選ぶことは A6/A7 に残る。 -/
+/-! Real startup (A4/A6/A7; outside the theorems). Import this only from the startup code, after the application audit.
+The authorization inputs are built only from the declaration, and there is no argument accepting an arbitrary App or
+verifier. Human approval of the declared sources, and the startup code's choice of that declaration, remain under A6/A7.
+-/
 namespace Nyxis.Internal.ApprovedServer
 
-/-- 配置の設定。宣言した Cedar 正本、正本から構成した PostgreSQL の形状(宣言との一致の証明つき)、
-JWT の主体に与えるエンティティ型(予約型 `Anonymous` でも予約型 `Service`(サービス主体)でもないことの証明つき)。 -/
+/-- Deployment configuration: the declared Cedar sources, the PostgreSQL shape built from the sources (with a proof that
+it matches the declaration), and the entity type given to JWT principals (with a proof that it is neither the reserved
+type `Anonymous` nor the reserved type `Service` (service principal)). -/
 structure Deployment where
   sources : Approved
   shape : PostgresShape.Shape
@@ -21,11 +23,13 @@ structure Deployment where
 
 variable (deployment : Deployment)
 
-/-- 起動。JWKS の取得(と外部効果の発行・送信)に使う curl の版を 1 度だけ確かめ、定期処理(`jobs`。設定
-    `service` のサービス主体で固定間隔に同じ段階的な経路に流す)と、アウトボックスの内部ループ(正本が `async` の
-    呼び出しを宣言しているときだけ。設定 `outbox` の間隔・再試行で `_nyxis_outbox` の `pending` の行を送る)を別のスレッドで
-    始めてから、宣言から組んだ App だけを載せる。外部効果の設定(`external`)はコア設定で、無い種類の効果は 503 になる
-    (`async` の宣言があるのに送り先の設定が無ければ起動を拒む)。 -/
+/-- Start the server. Checks once the version of curl used for fetching the JWKS (and for issuing/sending external
+    effects), starts on separate threads the scheduled jobs (`jobs`; run through the same staged path at a fixed
+    interval as the service principal of the `service` configuration) and the outbox's internal loop (only when the
+    sources declare `async` calls; sends the `pending` rows of `_nyxis_outbox` with the interval and retries of the
+    `outbox` configuration), and then mounts only the App built from the declaration. The external-effect configuration
+    (`external`) is core configuration, and a kind of effect that is not configured returns 503 (if `async` is declared
+    but the destination is not configured, startup is refused). -/
 def serve (port : UInt16) (conninfo issuer : String) (router : Http.Router) (cors : Cors.Config := {})
     (external : ExternalSend.Config := {}) (jobs : List Runtime.Job := []) (service : Option Jobs.Config := none)
     (outbox : Outbox.Config := {}) : IO Unit := do
@@ -35,11 +39,13 @@ def serve (port : UInt16) (conninfo issuer : String) (router : Http.Router) (cor
   PostgresHttp.serveVerifiedApp port conninfo (deployment.sources.app router jobs) deployment.shape
     deployment.userType (JwksFetch.verify issuer) cors external
 
-/-- 日本語: 実serveは、curlの版の確認と定期処理の起動、アウトボックスの内部ループの起動(宣言した正本と設定の送り先の鍵・
-設定outboxで)に続けて、宣言したCedar正本・検査済みshape・設定の外部効果・
-設定userType・設定issuerの本番JWKS検証器を用いるhandleVerifiedをCORSで包んだハンドラを登録する。
-OPTIONSは固定応答、その他は同じhandleVerifiedへ委譲する。定期処理も同じ宣言のApp(同じ正本・ルータ・定期処理)に流れる。
-サーバの登録/輸送の外界動作と内部ループの外界動作はこの定義的等式には含まない。 -/
+/-- The real serve, after checking the curl version, starting the scheduled jobs, and starting the outbox's internal
+loop (with the declared sources, the destination keys of the configuration, and the configured outbox), registers a
+handler that wraps in CORS the handleVerified that uses the declared Cedar sources, the checked shape, the configured
+external effects, the configured userType, and the production JWKS verifier for the configured issuer. OPTIONS gets a
+fixed response; everything else is delegated to the same handleVerified. Scheduled jobs also flow to the same declared
+App (same sources, router, and scheduled jobs). The outside-world behavior of server registration/transport and of the
+internal loop is not part of this definitional equality. -/
 theorem serve_handler (port : UInt16) (conninfo issuer : String) (router : Http.Router) (cors : Cors.Config)
     (external : ExternalSend.Config) (jobs : List Runtime.Job) (service : Option Jobs.Config) (outbox : Outbox.Config) :
     serve deployment port conninfo issuer router cors external jobs service outbox = (do
@@ -52,34 +58,36 @@ theorem serve_handler (port : UInt16) (conninfo issuer : String) (router : Http.
 
 open Std.Async PostgresHttp
 
-/-- 日本語: 実起動のCORS内側のハンドラが非health要求に応答し、標準readAllが
-本文を即時成功として返すなら、同じ要求の認証/DB処理(段階的な実行)と応答構築が
-連続IO状態で実行される。backend成功時に発行した操作の各SQLは、ルータが渡したAppではなく
-宣言から構成したdeployment.sources.schema/policiesについて、同じ主体がその段で取得した
-材料について認可済みの操作から生成され、形状検査を通る。
-ユーザー主体は同じヘッダのtokenについて、今回のJWKS取得→解析/鍵準備→実時計→
-固定ES256・設定issuer・audience authenticated・猶予0のライブラリ検証に成功した
-claims.subjectに設定userTypeを付けたものに一致し、設定userTypeは予約型Anonymousでも
-予約型Service(サービス主体)でもない — HTTPの要求の主体がサービス主体になることはない。
-各IO状態は認証の開始/終了へ連続する。
-認証の終了状態からサーバー生成値(現在時刻と一意ID。Generated.fresh)を決め、要求はその主体と生成値を持ち、
-定期処理の起動ではない(`job := none`: ルーティングでハンドラを選ぶ)。
-生成の終了状態から新規接続、BEGIN、ルーティングした要求の段階的な実行の記録
-(各呼び出しの点検索・取得した行の形状検査・閉包の検査・取得した行だけでの判定・
-発行の事前検査・計画順のSQL実行/結果照合・記録した外部効果の発行/送信)、健全性検査、COMMIT/idleをbackend終了状態へ
-連続させる。応答はStoreを受け取らない再生器で要求と各段の結果列だけから再現でき、
-結果列の各行は同じ主体について宣言した正本で認可済みの読み取りがその段で取得した行で
-指す行である(信頼なし。認可判定用に取得した行が応答へ渡る別の入力は無い)。
-各段の取得がその時点の全体の状態と整合する(ChainRequest。A4の信頼)なら、
-応答は同じ初期状態での宣言のAppによるhandleRequestの応答そのもので、SQLに対応する操作の列
-(主体・アクション・操作)と外部効果の記録の列はその発行列・記録列と一致する。返却HTTPのFull/Any構造も保存する。
-backend成功のもう1つの形は、外部API呼び出しの応答が宣言した型に合わなかった失敗だけを写した固定の502で、
-そのときは同じ本体のトランザクションがその例外で失敗している。
-backend失敗時は固定503のみを構築する。任意App/検証器への差替え引数は持たない。
-即時本文成功とHTTP応答成功は前提。readAll内部/task継続、JWT/TLS/時計内部、
-外部DB実状態(点検索の結果が現在の行であること)、SQLの意味論、Full消費/輸送、
-CORSによるヘッダ追加後の応答構造はここでは証明しない。
-全HTTP要求の非漏洩や、定理の文が理想の命題を忠実に表すことは主張しない。 -/
+/-- If the handler inside the CORS layer of the real server answers a non-health request and the standard readAll
+returns the body as an immediate success, then that request's authentication/DB processing (staged execution) and the
+response construction run in continuous IO states. On backend success, each SQL statement of the issued operations is
+generated from an operation authorized, for the same principal, on the materials fetched at that stage, under the
+deployment.sources.schema/policies built from the declaration (not an App passed in by the router), and passes the shape
+check. The user principal equals the configured userType attached to claims.subject obtained, for the token in the same
+header, by a successful run of this request's JWKS fetch → parse/key preparation → real clock → library verification
+with fixed ES256, the configured issuer, audience authenticated, and leeway 0; the configured userType is neither the
+reserved type Anonymous nor the reserved type Service (service principal) — the principal of an HTTP request is never a
+service principal. Each IO state continues into the start/end of authentication. The server-generated values (current
+time and unique ID; Generated.fresh) are determined from the end state of authentication; the request carries that
+principal and those generated values, and is not a scheduled-job trigger (`job := none`: the handler is chosen by
+routing). From the end state of generation, a new connection, BEGIN, the record of the staged execution of the routed
+request (per call: the point lookup, the shape check of the fetched rows, the closure check, the decision using only the
+fetched rows, the pre-check of issuing, SQL execution/result matching in plan order, issuing/sending the recorded
+external effects), the health check, and COMMIT/idle continue to the backend end state. The response can be reproduced
+by a replayer that does not receive the Store, from only the request and each stage's result list, and each row in the
+result lists is the row that a read authorized for the same principal under the declared sources points to among the
+rows fetched at that stage (no trust needed; there is no other input through which rows fetched for authorization
+decisions reach the response). If each stage's fetch is consistent with the whole state at that time (ChainRequest;
+trusted under A4), the response is exactly the response of handleRequest by the declared App on the same initial state,
+and the list of operations corresponding to the SQL (principal, action, operation) and the list of external-effect
+records match its issued list and recorded list. The Full/Any structure of the returned HTTP response is also preserved.
+The other form of backend success is a fixed 502 that reflects only a failure where an external API call's response did
+not match the declared type; in that case the transaction of the same body has failed with that exception. On backend
+failure only a fixed 503 is constructed. There is no argument for substituting an arbitrary App/verifier. Immediate body
+success and HTTP response success are premises. readAll internals/task continuation, JWT/TLS/clock internals, the actual
+external DB state (that point-lookup results are the current rows), SQL semantics, Full consumption/transport, and the
+response structure after CORS adds headers are not proven here. Non-leakage across all HTTP requests, and that the
+statement of the theorem faithfully expresses the intended proposition, are not claimed. -/
 theorem readAll_response
     (conninfo issuer : String) (router : Http.Router) (jobs : List Runtime.Job) (external : ExternalSend.Config)
     (req : Std.Http.Request Std.Http.Body.Stream)

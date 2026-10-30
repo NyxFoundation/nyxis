@@ -1,12 +1,13 @@
 #!/bin/sh
-# Store版HTTPの配線検査(実 DB の統合テストの前段。主体は匿名のみ、実DBではない)。
+# Wiring check for the Store-backed HTTP server (a preliminary stage before the real-DB integration tests; the principal
+# is always anonymous, and no real DB is used).
 #
-# `lake build` の後、検査用の初期状態(BulletinBoardTest.Fixture.store)で serveFixture を起動し、
-# curlで各エンドポイントの状態コードと本文を照合する。確かめるのは、メソッド・パス・
-# 本文がモデル(Nyxis.Runtime.handleRequest)に届き、ハンドラのレスポンスがそのまま HTTP で返ること、匿名の
-# 主体で許可される読み取りだけが成功し、それ以外が拒否されること、状態が拒否で変わらないこと。
-# 使い方: sh scripts/check-http.sh(環境変数 NYXIS_CHECK_PORT で待ち受けポートを変えられる。既定 18111)。
-# 成功なら exit 0。
+# After `lake build`, start serveFixture with the test initial state (BulletinBoardTest.Fixture.store) and compare each
+# endpoint's status code and body using curl. It confirms that the method, path and body reach the model
+# (Nyxis.Runtime.handleRequest), that the handler's response is returned over HTTP as-is, that only the reads allowed
+# for the anonymous principal succeed and everything else is denied, and that denials do not change the state. Usage: sh
+# scripts/check-http.sh (the environment variable NYXIS_CHECK_PORT changes the listening port; default 18111). Exits 0
+# on success.
 set -u
 cd "$(dirname "$0")/../examples/bulletin-board/backend" || exit 2
 
@@ -32,7 +33,7 @@ trap cleanup EXIT
 trap 'cleanup; exit 1' INT TERM
 
 start_server() {
-  # $1 = 実行ファイル。ポートが既に使われていれば(他のサーバの応答を検査しないよう)失敗する。
+  # $1 = executable. Fails if the port is already in use (so as not to check another server's responses).
   if curl -s -o /dev/null "$BASE/health" 2>/dev/null; then
     echo "FAIL: port $PORT is already in use (set NYXIS_CHECK_PORT)"
     exit 1
@@ -46,7 +47,7 @@ start_server() {
   fi
 }
 
-# expect <期待する状態コード> <メソッド> <パス> [本文] [本文に含まれるべき文字列]
+# expect <expected status code> <method> <path> [body] [string the response body must contain]
 expect() {
   want="$1"; method="$2"; path="$3"; data="${4:-}"; needle="${5:-}"
   if [ -n "$data" ]; then
@@ -81,13 +82,14 @@ start_server .lake/build/bin/serveFixture
 expect 200 GET /health "" ok
 expect 404 GET /nope
 expect 404 PUT /posts/pub1 '{"title":"x"}'
-# 匿名は公開済み投稿だけ読め、本文は行の JSON。
+# Anonymous can read only published posts, and the body is the row's JSON.
 expect 200 GET /posts/pub1 "" '"title":"public"'
 expect 200 GET /posts/pub1 "" '"author":"alice"'
 expect 200 'GET' '/posts/pub1?x=1' "" '"published":true'
 expect 403 GET /posts/draft1
 expect 403 GET /posts/ghost
-# 匿名は作成・編集・公開・削除・権限付与のどれもできない。本文が読めなければ 400 でアクションは呼ばれない。
+# Anonymous cannot create, edit, publish, delete or grant permissions. If the body cannot be parsed, 400 is returned and
+# no action is called.
 expect 400 POST /posts/new1 'not json'
 expect 400 POST /posts/new1 '{"title":"only"}'
 expect 403 POST /posts/new1 '{"title":"t","body":"b"}'
@@ -99,7 +101,7 @@ expect 403 POST /posts/pub1/unpublish
 expect 403 DELETE /posts/pub1
 expect 403 PUT /users/bob/admin '{"admin":true}'
 expect 400 PUT /users/bob/admin '{"admin":"yes"}'
-# 拒否された操作で状態は変わっていない。
+# Denied operations did not change the state.
 expect 200 GET /posts/pub1 "" '"title":"public"'
 expect 403 GET /posts/draft1
 stop_server

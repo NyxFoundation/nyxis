@@ -20,21 +20,24 @@ def app (router : Http.Router) : Runtime.App := sources.app router
 theorem app_schema (router : Http.Router) : (app router).schema = schema := rfl
 theorem app_policies (router : Http.Router) : (app router).policies = policies := rfl
 
-/-- 日本語の読み下し: 任意の型付きルータ・初期Store・認証済み要求列について、
-固定正本から組んだAppが発行する操作は要求の主体とサーバー生成値(nyxis が要求ごとに決めた現在時刻と一意 ID)
-に一致し、その正本の認可範囲内にある。
-状態遷移はその操作列と整合する。ハンドラに渡った(主キー, 行)の組(読み取りの成功では呼び出しの主キーと
-その行、一覧では返した各組)は、同じ要求が発行しその正本で認可されたその主キーの読み取りが、直前の状態で
-指す行である。一覧の件数と返す行は、判定時の状態の対象テーブルの行のうち問い合わせの絞り込みに合い、その正本で
-その主体に permit された行(候補)だけから決まる(件数は候補の数、返す行は候補を並べ替えてページを切ったもの。
-`Runtime.ListResult`)。各操作を判定したアクションは、ハンドラの呼び出しのものか、その正本が宣言した連鎖の削除の
-アクション(その宣言のテーブルの行の削除。`Authz.ActionOrigin`)である。記録された外部効果(添付の署名付き URL の
-発行。メール送信。外部 API 呼び出し。この正本は宣言していないので記録は生じない)は要求の主体と生成値に
-ついて、その正本が効果を宣言したアクションで対象の行について permit され、内容は nyxis が決めたもの
-(`Authz.ExternalAuthorized`)で、ハンドラに渡った署名付き URL にはその呼び出しの記録がある。記録された呼び出しの内容は
-その正本の宣言と対象の行と提案値だけから決まり(`Authz.CallRecorded`)、ハンドラに渡った外部 API の応答にはその呼び出しの
-記録がある。このアプリは定期処理を宣言しない(`jobs = []`)。認可前の内部取得や生HTTP応答全体、URL や応答の中身は
-この結論に含まない。
+/-- Plain-language reading: for any typed router, initial Store and sequence of authenticated requests, every operation
+issued by the App built from the fixed approved source matches the request's principal and server-generated values (the
+current time and unique ID nyxis determined per request), and lies within that source's authorization scope. The state
+transitions are coherent with that sequence of operations. Every (primary key, row) pair passed to a handler (for a
+successful read, the call's primary key and its row; for a list, each returned pair) is the row that a read of that
+primary key, issued by the same request and authorized by that source, points to in the immediately preceding state. A
+list's count and returned rows are determined only by the rows of the target table in the state at decision time that
+match the query's filter and are permitted to that principal by that source (the candidates) (the count is the number of
+candidates; the returned rows are the candidates ordered and paged; `Runtime.ListResult`). The action that judged each
+operation is either that of the handler's call or a cascading-delete action declared by that source (deletion of rows of
+the declared table; `Authz.ActionOrigin`). Every recorded external effect (issuing a signed URL for an attachment;
+sending mail; an external API call; this source declares none, so no record arises) is, for the request's principal and
+generated values, permitted on the target row by an action for which that source declares the effect, its content is
+what nyxis determined (`Authz.ExternalAuthorized`), and every signed URL passed to a handler has a record of that call.
+The content of every recorded call is determined only by that source's declaration, the target row and the proposed
+values (`Authz.CallRecorded`), and every external API response passed to a handler has a record of that call. This
+application declares no periodic jobs (`jobs = []`). Internal fetches before authorization, the whole raw HTTP response,
+and the contents of URLs or responses are not part of this conclusion.
 -/
 theorem authorization_safety (router : Http.Router) (store : Db.Store)
     (requests : List Runtime.AuthenticatedRequest) :

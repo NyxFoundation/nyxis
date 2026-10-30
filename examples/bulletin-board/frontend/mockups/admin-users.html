@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>管理</title>
+<title>Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&amp;family=DM+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -39,34 +39,34 @@ h1,h2,h3,p{margin:0}
 <body>
 <div style="display: flex; flex-direction: column; min-height: 100vh; background: #F2F1EC">
 <header class="wrap" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; padding-top: 20px">
-  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis 掲示板</a>
-  <nav class="nav" aria-label="メニュー">
-    <a href="post-list-admin.html">ホーム</a>
-    <a href="post-create.html">投稿</a>
-    <a class="on" href="admin-users.html">管理</a>
+  <a class="wordmark" href="post-list-anonymous.html"><i></i>Nyxis Board</a>
+  <nav class="nav" aria-label="Menu">
+    <a href="post-list-admin.html">Home</a>
+    <a href="post-create.html">New post</a>
+    <a class="on" href="admin-users.html">Admin</a>
   </nav>
   <div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
-    <a class="who" href="me.html" aria-label="いまは管理者 6c0fe2a1 としてログイン中です"><span class="avatar admin">6c</span><span class="tag admin">管理者</span></a>
-    <button class="btn plain sm" type="button">ログアウト</button>
+    <a class="who" href="me.html" aria-label="Signed in as admin 6c0fe2a1"><span class="avatar admin">6c</span><span class="tag admin">Admin</span></a>
+    <button class="btn plain sm" type="button">Sign out</button>
   </div>
 </header>
 <div class="wrap"><div style="border-top: 3px solid #17181A; margin-top: 8px"></div></div>
 <main class="wrap" style="flex: 1; display: flex; flex-direction: column; gap: 28px; padding-top: 36px; padding-bottom: 56px">
-  <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">管理</h1>
+  <h1 style="font-size: 34px; font-weight: 900; line-height: 1.2; letter-spacing: .02em">Admin</h1>
   <form style="display: flex; align-items: flex-end; gap: 12px; max-width: 560px">
     <div style="flex: 1; display: flex; flex-direction: column; gap: 4px">
       <label for="lookup-id" style="font-size: 12px; font-weight: 700; letter-spacing: .1em; color: #6E7177">ID</label>
       <input class="input mono" id="lookup-id" type="text" value="b7d104af-2e6c-4f19-8d3a-5c7e9b1a2f40">
     </div>
-    <button class="btn line" type="button">調べる</button>
+    <button class="btn line" type="button">Look up</button>
   </form>
   <section class="sheet" style="display: flex; flex-wrap: wrap; align-items: center; gap: 20px 24px; position: relative">
     <span class="avatar big admin">b7</span>
     <div style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 300px; min-width: 0">
-      <div style="display: flex; align-items: center; gap: 12px"><span class="tag admin">管理者</span><span class="stamp" role="status">できました</span></div>
+      <div style="display: flex; align-items: center; gap: 12px"><span class="tag admin">Admin</span><span class="stamp" role="status">Done</span></div>
       <span class="mono" style="word-break: break-all; color: #4A4D52">b7d104af-2e6c-4f19-8d3a-5c7e9b1a2f40</span>
     </div>
-    <button class="btn red" type="button">管理者を外す</button>
+    <button class="btn red" type="button">Remove admin</button>
   </section>
 </main>
 </div>

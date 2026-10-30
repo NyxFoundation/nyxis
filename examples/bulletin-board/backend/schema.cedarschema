@@ -1,25 +1,22 @@
-// サンプルアプリ(掲示板)の Cedar スキーマ。
+// Cedar schema of the sample application (bulletin board).
 //
-// nyxis ではこの文書がテーブル定義を兼ねる:
-//   - エンティティ型 = テーブル、属性 = 列、エンティティ ID = 主キー(写像のコードは無い)。
-//   - 各アクションには `@effect("…")` で効果(permit されたとき DB で起きる操作)を 1 つ添える。
-//       @effect("read <Table>")                    行の読み取り
-//       @effect("list <Table>")                    許可された行の一覧
-//       @effect("insert <Table>")                  行の挿入(提案される値が対象になる)
-//       @effect("update <Table>(<col>, <col>, …)")  列挙した列だけの更新
-//       @effect("delete <Table>")                  行の削除
-//     nyxis は、効果の無いアクション、スキーマに無いテーブル・列を参照する効果をビルド時に拒む。
-//   - `Anonymous` は nyxis が予約する主体の型で、JWT が無い・検証に失敗したリクエストの主体
-//     `Anonymous::"anonymous"` を表す。テーブルには対応しない。
+// In nyxis this document doubles as the table definitions: - entity type = table, attribute = column, entity ID =
+// primary key (there is no mapping code). - Each action carries exactly one effect via `@effect("…")` (the DB operation
+// that happens when it is permitted). @effect("read <Table>") read a row @effect("list <Table>") list the permitted
+// rows @effect("insert <Table>") insert a row (the proposed values are the target) @effect("update <Table>(<col>,
+// <col>, …)") update only the listed columns @effect("delete <Table>") delete a row nyxis rejects, at build time,
+// actions without an effect and effects that reference tables or columns not in the schema.
+// - `Anonymous` is a principal type reserved by nyxis; it represents `Anonymous::"anonymous"`, the principal of a
+// request with no JWT or with a JWT that failed verification. It does not correspond to a table.
 //
-// 開発者はこの文書と policies.cedar を読んで承認する。
+// The developer reads and approves this document and policies.cedar.
 
-// 利用者。Supabase Auth のユーザー ID がエンティティ ID(主キー)になる。
+// A user. The Supabase Auth user ID is the entity ID (primary key).
 entity User = {
   "admin": Bool
 };
 
-// 投稿。
+// A post.
 entity Post = {
   "author": User,
   "title": String,
@@ -27,59 +24,59 @@ entity Post = {
   "published": Bool
 };
 
-// 匿名の主体(nyxis が予約。テーブルではない)。
+// The anonymous principal (reserved by nyxis; not a table).
 entity Anonymous;
 
-// 投稿を読む。公開済みは誰でも、下書きは作者と管理者だけ(policies.cedar)。
+// Read a post. Published posts by anyone, drafts only by their author and admins (policies.cedar).
 @effect("read Post")
 action "readPost" appliesTo {
   principal: [User, Anonymous],
   resource: [Post]
 };
 
-// 投稿の一覧。各行に readPost と同じポリシー条件を適用する。
+// List posts. The same policy conditions as readPost apply to each row.
 @effect("list Post")
 action "listPosts" appliesTo {
   principal: [User, Anonymous],
   resource: [Post]
 };
 
-// 投稿を作成する。提案される行(author・title・body・published)が対象になる。
+// Create a post. The proposed row (author, title, body, published) is the target.
 @effect("insert Post")
 action "createPost" appliesTo {
   principal: [User],
   resource: [Post]
 };
 
-// 投稿の題名と本文を編集する。
+// Edit a post's title and body.
 @effect("update Post(title, body)")
 action "editPost" appliesTo {
   principal: [User],
   resource: [Post]
 };
 
-// 投稿を公開する(または下書きに戻す)。
+// Publish a post (or return it to draft).
 @effect("update Post(published)")
 action "publishPost" appliesTo {
   principal: [User],
   resource: [Post]
 };
 
-// 投稿を削除する。
+// Delete a post.
 @effect("delete Post")
 action "deletePost" appliesTo {
   principal: [User],
   resource: [Post]
 };
 
-// 管理者権限を付与・剥奪する(利用者の admin 列を書き換える)。
+// Grant or revoke admin rights (rewrites the user's admin column).
 @effect("update User(admin)")
 action "setAdmin" appliesTo {
   principal: [User],
   resource: [User]
 };
 
-// 利用者を登録する(自分自身の User 行を admin=false で作る)。提案される値は context.values。
+// Register a user (creates your own User row with admin=false). The proposed values are context.values.
 @effect("insert User")
 action "registerUser" appliesTo {
   principal: [User],
@@ -87,7 +84,7 @@ action "registerUser" appliesTo {
   context: { "values": { "admin": Bool } }
 };
 
-// 利用者を読む。本人と管理者だけ(policies.cedar)。
+// Read a user. Only the user themselves and admins (policies.cedar).
 @effect("read User")
 action "readUser" appliesTo {
   principal: [User],

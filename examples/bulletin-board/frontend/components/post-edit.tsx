@@ -15,10 +15,10 @@ export function PostEdit({ id }: { id: string }) {
   const identityPending = result.status === "ready" && !!session && identity === "loading";
   const state = result.status === "ready" ? !session ? "anonymous" : identityPending ? "loading" : `editing.${admin ? "admin" : result.data.author === session.userId ? "author" : "nonAuthor"}` : result.status === "denied" ? "loadDenied" : result.status;
   return <main className="wrap main" data-screen="S4" data-state={`PostEdit.${actionState || state}`}>
-    <h1>編集</h1>
-    {result.status !== "ready" ? <ResponseState status={result.status} retry={retry} /> : !session ? <><p>編集にはログインが必要です</p><Link className="btn line" href={`/login?next=${encodeURIComponent(`/posts/${id}/edit`)}`}>Googleでログイン</Link></> : identityPending ? <ResponseState status="loading" retry={retry} /> :
+    <h1>Edit</h1>
+    {result.status !== "ready" ? <ResponseState status={result.status} retry={retry} /> : !session ? <><p>Sign in to edit</p><Link className="btn line" href={`/login?next=${encodeURIComponent(`/posts/${id}/edit`)}`}>Sign in with Google</Link></> : identityPending ? <ResponseState status="loading" retry={retry} /> :
       <EditForm key={id} id={id} post={result.data} token={session.accessToken} onStateChange={setActionState} />}
-    <Link href={`/posts/${encodeURIComponent(id)}`}>投稿にもどる</Link>
+    <Link href={`/posts/${encodeURIComponent(id)}`}>Back to post</Link>
   </main>;
 }
 
@@ -79,7 +79,7 @@ function EditForm({ id, post, token, onStateChange }: { id: string; post: Post; 
       await setPostPublished(id, nextPublished, withTimeout(controller.signal), token);
       if (!controller.signal.aborted) {
         setPublished(nextPublished);
-        setNotice(nextPublished ? "公開しました" : "下書きにしました");
+        setNotice(nextPublished ? "Published" : "Moved to draft");
       }
     } catch (error) {
       if (!controller.signal.aborted) setPublishFailure(error instanceof ApiError ? error.kind : "offline");
@@ -91,28 +91,28 @@ function EditForm({ id, post, token, onStateChange }: { id: string; post: Post; 
     }
   }
   return <><form className="sheet compose" onSubmit={submit} noValidate>
-    {failure?.kind === "denied" && <div role="alert"><strong className="stamp" data-screen="P2" data-state="Stamp.denied.act">できません</strong></div>}
-    {failure?.kind === "offline" && <div className="offline" role="alert"><span>つながりません</span><button type="submit" disabled={busy}>もう一度</button></div>}
-    {failure?.kind === "notFound" && <p className="empty" role="alert">見つかりません</p>}
-    {failure?.kind === "conflict" && <p role="alert">すでに変わっています <Link href={`/posts/${encodeURIComponent(id)}`}>読み直す</Link></p>}
-    {failure?.kind === "badRequest" && <p className="invalid" role="alert">入力をたしかめてください{failure.message !== "badRequest" && <>: {failure.message}</>}</p>}
-    <label className="sr-only" htmlFor="edit-title">題名</label>
+    {failure?.kind === "denied" && <div role="alert"><strong className="stamp" data-screen="P2" data-state="Stamp.denied.act">Not allowed</strong></div>}
+    {failure?.kind === "offline" && <div className="offline" role="alert"><span>Can't connect</span><button type="submit" disabled={busy}>Try again</button></div>}
+    {failure?.kind === "notFound" && <p className="empty" role="alert">Not found</p>}
+    {failure?.kind === "conflict" && <p role="alert">Already changed <Link href={`/posts/${encodeURIComponent(id)}`}>Reload</Link></p>}
+    {failure?.kind === "badRequest" && <p className="invalid" role="alert">Check your input{failure.message !== "badRequest" && <>: {failure.message}</>}</p>}
+    <label className="sr-only" htmlFor="edit-title">Title</label>
     <input id="edit-title" className={`compose-title ${invalid && !title.trim() || failure?.kind === "badRequest" ? "invalid" : ""}`} value={title} onChange={e => setTitle(e.target.value)} disabled={busy} aria-invalid={invalid && !title.trim()} aria-describedby={invalid && !title.trim() ? "edit-title-error" : undefined} />
-    {invalid && !title.trim() && <p id="edit-title-error" className="invalid" role="alert">題名を入れてください</p>}
-    <label className="sr-only" htmlFor="edit-body">本文</label>
+    {invalid && !title.trim() && <p id="edit-title-error" className="invalid" role="alert">Enter a title</p>}
+    <label className="sr-only" htmlFor="edit-body">Body</label>
     <textarea id="edit-body" className={invalid && !body.trim() ? "invalid" : ""} value={body} onChange={e => setBody(e.target.value)} disabled={busy} aria-invalid={invalid && !body.trim()} aria-describedby={invalid && !body.trim() ? "edit-body-error" : undefined} />
-    {invalid && !body.trim() && <p id="edit-body-error" className="invalid" role="alert">本文を入れてください</p>}
-    <div className="compose-actions"><Link href={`/posts/${encodeURIComponent(id)}`}>やめる</Link><button className="btn" type="submit" disabled={busy}>{activity === "save" ? "保存中" : "保存"}</button></div>
+    {invalid && !body.trim() && <p id="edit-body-error" className="invalid" role="alert">Enter the body</p>}
+    <div className="compose-actions"><Link href={`/posts/${encodeURIComponent(id)}`}>Cancel</Link><button className="btn" type="submit" disabled={busy}>{activity === "save" ? "Saving" : "Save"}</button></div>
   </form>
     <div className="publication-actions" aria-busy={busy}>
-      <strong>いまは</strong><span className={`tag ${published ? "pub" : "draft"}`}>{published ? "公開中" : "下書き"}</span>
-      <button className="btn line" type="button" disabled={busy} onClick={togglePublished}>{activity === "publish" ? "変更中" : published ? "下書きにもどす" : "公開する"}</button>
-      {notice && <p className="success-notice" role="status" data-screen={notice === "公開しました" ? "P2" : undefined} data-state={notice === "公開しました" ? "Stamp.ok.published" : undefined}>{notice}</p>}
-      {publishFailure === "denied" && <div role="alert"><strong className="stamp" data-screen="P2" data-state="Stamp.denied.act">できません</strong></div>}
-      {publishFailure === "offline" && <div className="offline" role="alert"><span>つながりません</span><button type="button" disabled={busy} onClick={togglePublished}>もう一度</button></div>}
-      {publishFailure === "notFound" && <p className="empty" role="alert">見つかりません</p>}
-      {publishFailure === "conflict" && <p role="alert">すでに変わっています <Link href={`/posts/${encodeURIComponent(id)}`}>読み直す</Link></p>}
-      {publishFailure === "badRequest" && <p className="invalid" role="alert">入力をたしかめてください</p>}
+      <strong>Now</strong><span className={`tag ${published ? "pub" : "draft"}`}>{published ? "Published" : "Draft"}</span>
+      <button className="btn line" type="button" disabled={busy} onClick={togglePublished}>{activity === "publish" ? "Changing" : published ? "Back to draft" : "Publish"}</button>
+      {notice && <p className="success-notice" role="status" data-screen={notice === "Published" ? "P2" : undefined} data-state={notice === "Published" ? "Stamp.ok.published" : undefined}>{notice}</p>}
+      {publishFailure === "denied" && <div role="alert"><strong className="stamp" data-screen="P2" data-state="Stamp.denied.act">Not allowed</strong></div>}
+      {publishFailure === "offline" && <div className="offline" role="alert"><span>Can't connect</span><button type="button" disabled={busy} onClick={togglePublished}>Try again</button></div>}
+      {publishFailure === "notFound" && <p className="empty" role="alert">Not found</p>}
+      {publishFailure === "conflict" && <p role="alert">Already changed <Link href={`/posts/${encodeURIComponent(id)}`}>Reload</Link></p>}
+      {publishFailure === "badRequest" && <p className="invalid" role="alert">Check your input</p>}
     </div>
   </>;
 }

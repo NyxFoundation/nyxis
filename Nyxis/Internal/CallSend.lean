@@ -2,30 +2,36 @@ import Lean.Data.Json
 import Nyxis.Internal.CurlStdin
 import Nyxis.Authz
 
-/-! 承認済みの curl による外部 API 呼び出し(HTTPS。Assumption 1・2。コア専用、未証明)。
+/-! External API calls through the approved curl (HTTPS; Assumptions 1 and 2; core only, unproven).
 
-認可層(`Nyxis.Authz.externalStep`)が permit した外部効果の記録(`Authz.Payload.call`: 送り先の名前・メソッド・解決済みの
-URL・本文・実行時機。URL は正本の `@external` の宣言と対象の行から、本文は対象の行の宣言された列と判定を通った提案値から
-nyxis が決めたもの)についてだけ、接続層(`PostgresRun.runStaged`)が `sync` の呼び出しをここで送る。要求の URL・ヘッダ・
-本文・ハンドラの値は使わない。認証ヘッダは送り先ごとにコア設定(`NYXIS_EXT_<名前>` の環境変数。正本には名前だけ)から
-起動時に組み(`Config.load`)、記録・応答・例外には載せない。
+The connection layer (`PostgresRun.runStaged`) sends `sync` calls here only for external-effect records that the
+authorization layer (`Nyxis.Authz.externalStep`) permitted (`Authz.Payload.call`: destination name, method, resolved
+URL, body, and timing; nyxis determines the URL from the `@external` declaration in the sources and the target row, and
+the body from the declared columns of the target row and the proposed values that passed the decision). The request's
+URL, headers, body, and handler values are not used. The authentication header for each destination is assembled at
+startup (`Config.load`) from the core configuration (the `NYXIS_EXT_<name>` environment variable; the sources contain
+only the name), and is never put into records, responses, or exceptions.
 
-輸送は JWKS の取得・Storage の発行と同じ方針: HTTPS のみ、リダイレクト非追従、接続・全転送の上限と応答本文の上限は
-コア設定(`NYXIS_CALL_CONNECT_TIMEOUT` / `NYXIS_CALL_MAX_TIME` / `NYXIS_CALL_MAX_RESPONSE_BYTES`。`sync` の `<秒>s` は
-全転送の上限をそれより短くだけ上書きする)、`--disable` が先頭、`--noproxy *`、`--globoff`。輸送の失敗(接続・TLS・期限・
-本文上限超過)は例外で、要求全体が 503 になりトランザクションは取り消される。2xx の応答は本文を JSON として読み、正本で
-宣言したレコード型に寛容に復号する(`decode`: 宣言したキーの欠落と型違いだけを拒み、余分なキーは捨てる。JSON でない・
-復号できなければ固定の例外 `invalidResponse` — トランザクションは取り消され、接続層の入口 `PostgresRun.handleStaged` が
-この例外だけを固定の 502(`PostgresRun.gatewayResponse`)に写す)。2xx 以外の応答は状態コードと生の本文を
-`ExternalResult.calledError` としてハンドラに渡す(トランザクションは続く)。`async` の呼び出しはここでは送らない
-(接続層が要求のトランザクションでアウトボックスに書き、内部ループ `Nyxis.Internal.Outbox` が同じ輸送の方針
-(`arguments` / `configTextJson`)で後から送る)。 -/
+Transport follows the same policy as the JWKS fetch and Storage signing: HTTPS only, no redirect following, connection
+and total-transfer limits and the response-body limit taken from the core configuration (`NYXIS_CALL_CONNECT_TIMEOUT` /
+`NYXIS_CALL_MAX_TIME` / `NYXIS_CALL_MAX_RESPONSE_BYTES`; a `sync` `<seconds>s` can only override the total-transfer
+limit with a shorter one), `--disable` first, `--noproxy *`, `--globoff`. A transport failure (connection, TLS, timeout,
+body limit exceeded) is an exception: the whole request becomes 503 and the transaction is rolled back. A 2xx response's
+body is read as JSON and leniently decoded into the record type declared in the sources (`decode`: only missing declared
+keys and type mismatches are rejected, and extra keys are dropped; if it is not JSON or cannot be decoded, the fixed
+exception `invalidResponse` is raised — the transaction is rolled back, and the connection layer's entry point
+`PostgresRun.handleStaged` maps only this exception to a fixed 502 (`PostgresRun.gatewayResponse`)). A non-2xx response
+passes the status code and the raw body to the handler as `ExternalResult.calledError` (the transaction continues).
+`async` calls are not sent here (the connection layer writes them to the outbox in the request's transaction, and the
+internal loop `Nyxis.Internal.Outbox` sends them later with the same transport policy (`arguments` / `configTextJson`)).
+-/
 namespace Nyxis.Internal.CallSend
 
 open Cedar.Spec
 open Nyxis.Db
 
-/-- 列の値を JSON に写す。実体参照は ID、日時はエポックミリ秒、decimal は文字列、集合は配列、レコードはオブジェクト。 -/
+/-- Map a column value to JSON: entity references become the ID, datetimes epoch milliseconds, decimals strings, sets
+    arrays, records objects. -/
 partial def jsonOf : Value → Lean.Json
   | .prim (.string s) => .str s
   | .prim (.bool b) => .bool b
@@ -38,26 +44,27 @@ partial def jsonOf : Value → Lean.Json
   | .set s => .arr (s.toList.map jsonOf).toArray
   | .record r => Lean.Json.mkObj (r.toList.map fun kv => (kv.1, jsonOf kv.2))
 
-/-- 本文の JSON(列の名前と値)。 -/
+/-- The body JSON (column names and values). -/
 def body (fields : List (Column × Cell)) : String :=
   (Lean.Json.mkObj (fields.map fun kv => (kv.1, jsonOf kv.2))).compress
 
-/-! ## 応答の寛容な復号 -/
+/-! ## Lenient decoding of responses -/
 
-/-- JSON の数を整数として読む(整数を表すものだけ)。 -/
+/-- Read a JSON number as an integer (only numbers that denote integers). -/
 def intOf (n : Lean.JsonNumber) : Option Int :=
   if n.exponent == 0 then some n.mantissa
   else
     let scale : Int := (10 : Int) ^ n.exponent
     if n.mantissa % scale == 0 then some (n.mantissa / scale) else none
 
-/-- Int64 の範囲の整数。 -/
+/-- An integer in the Int64 range. -/
 def int64? (i : Int) : Option Int64 :=
   if i < -(2 : Int) ^ 63 || i ≥ (2 : Int) ^ 63 then none else some (Int64.ofInt i)
 
-/-- 応答の JSON を正本で宣言した型に寛容に復号する(`docs/external-calls.md` D9): レコードでは宣言したキーの欠落(省略不可の
-    もの)と型違いだけを拒み、余分なキーは捨てる。実体参照は ID の文字列、日時・期間はエポックミリ秒の数、decimal は
-    文字列、集合は配列。`ipaddr` は対応しない。 -/
+/-- Leniently decode the response JSON into the type declared in the sources (`docs/external-calls.md` D9): for records,
+    only missing declared keys (non-optional ones) and type mismatches are rejected, and extra keys are dropped. Entity
+    references are ID strings, datetimes and durations are epoch-millisecond numbers, decimals are strings, sets are
+    arrays. `ipaddr` is not supported. -/
 partial def decode : Cedar.Validation.CedarType → Lean.Json → Option Value
   | .bool _, .bool b => some (.prim (.bool b))
   | .int, .num n => do
@@ -86,17 +93,19 @@ partial def decode : Cedar.Validation.CedarType → Lean.Json → Option Value
   | .ext .decimal, .str s => (Ext.Decimal.parse s).map fun d => .ext (.decimal d)
   | _, _ => none
 
-/-! ## コア設定と送信 -/
+/-! ## Core configuration and sending -/
 
-/-- 外部 API 呼び出しのコア設定。送り先ごとの認証ヘッダの行(`auth: none` の送り先は `none`)、接続と全転送の上限(秒)、
-    応答本文の上限(バイト)。 -/
+/-- Core configuration for external API calls: the authentication header line for each destination (`none` for a
+    destination with `auth: none`), the connection and total-transfer limits (seconds), and the response-body limit
+    (bytes). -/
 structure Config where
   auth : List (String × Option String)
   connectTimeout : Nat := 3
   maxTime : Nat := 10
   maxResponseBytes : Nat := 65536
 
-/-- 環境変数の秘密(印字可能な ASCII、空でない)。無ければ例外(起動を拒む)。値は返すだけで表示しない。 -/
+/-- A secret from an environment variable (printable ASCII, non-empty). Throws if absent (startup is refused). The value
+    is only returned, never displayed. -/
 def secret (env : String) : IO String := do
   let some raw ← IO.getEnv env | throw (IO.userError s!"{env} is required for an @external destination")
   let v := raw.trimAscii.toString
@@ -104,7 +113,7 @@ def secret (env : String) : IO String := do
     throw (IO.userError s!"{env} is invalid")
   pure v
 
-/-- 正の整数の環境変数(無ければ既定)。 -/
+/-- A positive-integer environment variable (default if absent). -/
 def natEnv (env : String) (default : Nat) : IO Nat := do
   match ← IO.getEnv env with
   | none => pure default
@@ -113,8 +122,9 @@ def natEnv (env : String) (default : Nat) : IO Nat := do
     | some n => if n > 0 then pure n else throw (IO.userError s!"{env} is invalid")
     | none => throw (IO.userError s!"{env} is invalid")
 
-/-- 正本の送り先の宣言(`Authz.Schema.destinations`)とコア設定から、送り先ごとの認証ヘッダと上限を組む。宣言した環境変数が
-    無ければ例外(起動を拒む)。 -/
+/-- Assemble the authentication header and limits for each destination from the sources' destination declarations
+    (`Authz.Schema.destinations`) and the core configuration. Throws if a declared environment variable is absent
+    (startup is refused). -/
 def Config.load (destinations : List (String × Destination)) : IO Config := do
   let mut auth : List (String × Option String) := []
   for (name, decl) in destinations do
@@ -132,8 +142,9 @@ def Config.load (destinations : List (String × Destination)) : IO Config := do
   let maxResponseBytes ← natEnv "NYXIS_CALL_MAX_RESPONSE_BYTES" 65536
   return { auth, connectTimeout, maxTime, maxResponseBytes }
 
-/-- curl に標準入力で渡す設定(`--config -`)。認証ヘッダと本文(JSON の文字列)はここにだけ置く(引数には出さない)。
-    アウトボックスの内部ループ(`Nyxis.Internal.Outbox`)は保存した本文の JSON をそのまま渡す。 -/
+/-- The configuration passed to curl on standard input (`--config -`). The authentication header and the body (a JSON
+    string) are placed only here (never in arguments). The outbox's internal loop (`Nyxis.Internal.Outbox`) passes the
+    stored body JSON as is. -/
 def configTextJson (url : String) (method : CallMethod) (json? : Option String) (auth : Option String) : String :=
   let lines := ["url = " ++ CurlStdin.quote url, "request = " ++ CurlStdin.quote method.name] ++
     (match json? with
@@ -144,12 +155,13 @@ def configTextJson (url : String) (method : CallMethod) (json? : Option String) 
       | none => [])
   String.intercalate "\n" lines ++ "\n"
 
-/-- 同じ設定を、記録の本文(列の名前と値)から組む。 -/
+/-- The same configuration, built from the record's body (column names and values). -/
 def configText (url : String) (method : CallMethod) (body? : Option (List (Column × Cell))) (auth : Option String) :
     String :=
   configTextJson url method (body?.map body) auth
 
-/-- 固定の輸送の方針(`StorageSign.arguments` と同じ形)。状態コードを本文の末尾で読む。 -/
+/-- The fixed transport policy (same shape as `StorageSign.arguments`). The status code is read at the end of the body.
+    -/
 def arguments (connectTimeout maxTime maxResponseBytes : Nat) : Array String := #[
   "--disable", "--silent", "--globoff", "--noproxy", "*",
   "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0",
@@ -157,25 +169,26 @@ def arguments (connectTimeout maxTime maxResponseBytes : Nat) : Array String := 
   "--max-filesize", toString maxResponseBytes,
   "--write-out", "\n%{http_code}", "--config", "-"]
 
-/-- curl の出力(本文 + 改行 + 状態コード)を本文と状態コードに分ける。 -/
+/-- Split curl's output (body + newline + status code) into the body and the status code. -/
 def splitOutput (output : String) : Option (Nat × String) :=
   match (output.splitOn "\n").reverse with
   | code :: rest => (code.toNat?).map fun status => (status, "\n".intercalate rest.reverse)
   | [] => none
 
-/-- 2xx の応答が宣言した型に合わない(JSON でない・宣言したキーの欠落・型違い)ときの固定の例外。診断は含まない。
-    接続層の入口(`PostgresRun.handleStaged`)はこの例外だけを固定の 502 に写し、他の例外は 503 のまま。 -/
+/-- The fixed exception for when a 2xx response does not match the declared type (not JSON, a missing declared key, a
+    type mismatch). It contains no diagnostics. The connection layer's entry point (`PostgresRun.handleStaged`) maps
+    only this exception to a fixed 502; other exceptions stay 503. -/
 def invalidResponseMessage : String := "external api response does not match the declared type"
 
 def invalidResponse : IO.Error := IO.userError invalidResponseMessage
 
-/-- `invalidResponse` かどうか(例外の値だけで決まる)。 -/
+/-- Whether it is `invalidResponse` (determined only by the exception value). -/
 def isInvalidResponse : IO.Error → Bool
   | .userError msg => msg == invalidResponseMessage
   | _ => false
 
-/-- `sync` の呼び出しを送る。輸送の失敗は例外、復号の失敗は `invalidResponse`。2xx は宣言した型に復号した値、それ以外は
-    状態コードと本文。 -/
+/-- Send a `sync` call. A transport failure is an exception, a decoding failure is `invalidResponse`. For 2xx, the value
+    decoded into the declared type; otherwise the status code and body. -/
 def call (config : Config) (destination : String) (method : CallMethod) (url : String)
     (body? : Option (List (Column × Cell))) (timeout : Option Nat) (response : Cedar.Validation.CedarType) :
     IO Authz.ExternalResult := do

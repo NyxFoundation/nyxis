@@ -73,7 +73,8 @@ def main : IO Unit := do
   let after ← Std.Time.Timestamp.now
   unless before ≤ (← observed.get) && (← observed.get) ≤ after do
     throw (IO.userError "Verifier did not receive current wall clock")
-  -- サーバー生成値: 実時計のミリ秒が datetime になり、ID は版 4 の UUID で呼び出しごとに異なる
+  -- Server-generated values: the wall-clock milliseconds become the datetime, and the ID is a version-4 UUID that
+  -- differs per call
   let g1 ← Generated.fresh
   let g2 ← Generated.fresh
   let afterGen ← Std.Time.Timestamp.now

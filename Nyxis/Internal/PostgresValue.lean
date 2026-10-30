@@ -1,15 +1,16 @@
 import Nyxis.Db
 import Lean.Data.Json
 
-/-! アプリケーションの Cedar の値のための内部の JSONB セル形式。SQL の実行でも認可でもない。
-スカラー(プリミティブ `Bool` / `Long` / `String` / 実体参照と、拡張値 `decimal` / `datetime` / `duration`)、
-スカラーの集合、スカラーを属性に持つレコードを保存する。集合やレコードの入れ子(集合の集合、集合を持つ
-レコード)と `ipaddr` は拒む。型のタグが文字列と実体参照、整数と拡張値を区別して保つ。
-PostgreSQL の JSONB は NUL を保存できないので拒む。エラーに入力を含めない。
+/-! The internal JSONB cell format for application Cedar values. This is neither SQL execution nor authorization. Stores
+scalars (the primitives `Bool` / `Long` / `String` / entity references, and the extension values `decimal` / `datetime`
+/ `duration`), sets of scalars, and records with scalar attributes. Nested sets and records (sets of sets, records
+containing sets) and `ipaddr` are rejected. The type tag keeps strings distinct from entity references, and integers
+distinct from extension values. PostgreSQL JSONB cannot store NUL, so it is rejected. Errors never include the input.
 
-形式(JSON 配列): `["bool", b]` / `["int", "十進"]` / `["string", s]` / `["entity", [名前空間…], 型名, ID]` /
-`["decimal", "内部表現の十進"]` / `["datetime", "エポックからのミリ秒"]` / `["duration", "ミリ秒"]` /
-`["set", [スカラー…]]` / `["record", [[属性名, スカラー]…]]`。整数系はすべて符号つき 64 ビットの正規十進表記。
+Format (JSON array): `["bool", b]` / `["int", "decimal digits"]` / `["string", s]` /
+`["entity", [namespace…], type name, ID]` / `["decimal", "decimal digits of the internal representation"]` /
+`["datetime", "milliseconds since the epoch"]` / `["duration", "milliseconds"]` / `["set", [scalar…]]` /
+`["record", [[attribute name, scalar]…]]`. All integer kinds use canonical signed 64-bit decimal notation.
 -/
 namespace Nyxis.Internal.PostgresValue
 open Cedar.Spec Lean
@@ -19,10 +20,11 @@ private def invalid : Except String α := .error "Unsupported or invalid Postgre
 private def text (s : String) : Except String Json :=
   if s.contains '\x00' then invalid else .ok (.str s)
 
-/-- 符号つき 64 ビット整数の正規十進表記。 -/
+/-- Canonical decimal notation of a signed 64-bit integer. -/
 private def int64Text (i : Int64) : Json := .str (toString i.toInt)
 
-/-- スカラー値(プリミティブと拡張値)のタグつき配列の要素。集合・レコード・`ipaddr` は拒む。 -/
+/-- The elements of the tagged array for a scalar value (primitives and extension values). Sets, records and `ipaddr`
+are rejected. -/
 def scalarFields (value : Value) : Except String (Array Json) :=
   match value with
   | .prim (.bool b) => pure #[.str "bool", .bool b]
@@ -36,11 +38,11 @@ def scalarFields (value : Value) : Except String (Array Json) :=
   | .ext (.duration du) => pure #[.str "duration", int64Text du.val]
   | _ => invalid
 
-/-- スカラー値の JSON(集合の要素・レコードの属性値)。 -/
+/-- The JSON of a scalar value (a set element or a record attribute value). -/
 def scalar (value : Value) : Except String Json := do
   return .arr (← scalarFields value)
 
-/-- セル全体のタグつき配列の要素。集合とレコードの要素はスカラーに限る。 -/
+/-- The elements of the tagged array for a whole cell. Elements of sets and records are limited to scalars. -/
 def fields (value : Value) : Except String (Array Json) :=
   match value with
   | .set s => do pure #[.str "set", .arr (← s.toList.toArray.mapM scalar)]
@@ -57,7 +59,7 @@ private def string (j : Json) : Except String String := do
   | .str s => if s.contains '\x00' then invalid else pure s
   | _ => invalid
 
-/-- 正規十進表記の文字列から符号つき 64 ビット整数へ。 -/
+/-- From a string in canonical decimal notation to a signed 64-bit integer. -/
 private def int64 (j : Json) : Except String Int64 :=
   match j with
   | .str digits =>
@@ -69,7 +71,7 @@ private def int64 (j : Json) : Except String Int64 :=
     | none => invalid
   | _ => invalid
 
-/-- スカラーのタグつき配列を復号する。 -/
+/-- Decodes the tagged array of a scalar. -/
 def decodeScalar (json : Json) : Except String Value :=
   match json with
   | .arr fields =>
@@ -86,7 +88,7 @@ def decodeScalar (json : Json) : Except String Value :=
     | _ => invalid
   | _ => invalid
 
-/-- レコードの属性 `[属性名, スカラー]`。 -/
+/-- A record attribute `[attribute name, scalar]`. -/
 private def pair (j : Json) : Except String (Attr × Value) :=
   match j with
   | .arr fields =>
@@ -110,7 +112,7 @@ def decode (stored : String) : Except String Value := do
     | _ => decodeScalar (.arr fields)
   | _ => invalid
 
-/-- 符号つき 64 ビットの範囲内の正規十進表記。 -/
+/-- Canonical decimal notation within the signed 64-bit range. -/
 inductive DecodedInt64 : Json → Int64 → Prop where
   | mk (digits : String) (i : Int)
       (parsed : digits.toInt? = some i)
@@ -118,9 +120,9 @@ inductive DecodedInt64 : Json → Int64 → Prop where
       (canonical : toString i = digits) :
       DecodedInt64 (.str digits) (Int64.ofInt i)
 
-/-- 解析したスカラーの JSON は対応するタグをちょうど 1 つ持ち、その値を保つ。
-整数・拡張値の十進表記は正規で符号つき 64 ビットの範囲内、文字列の各部分は NUL を含まない。
-この関係は外部の SQL の保存について何も仮定しない。 -/
+/-- The parsed JSON of a scalar has exactly one corresponding tag and preserves its value. The decimal notation of
+integers and extension values is canonical and within the signed 64-bit range, and each string part contains no NUL.
+This relation assumes nothing about external SQL storage. -/
 inductive DecodedScalar : Json → Value → Prop where
   | bool (b : Bool) (fields : Array Json)
       (shape : fields.toList = [.str "bool", .bool b]) :
@@ -149,13 +151,14 @@ inductive DecodedScalar : Json → Value → Prop where
       (shape : fields.toList = [.str "duration", j]) (value : DecodedInt64 j ms) :
       DecodedScalar (.arr fields) (.ext (.duration ⟨ms⟩))
 
-/-- レコードの属性の JSON `[属性名, スカラー]` と、復号した (属性名, 値) の関係。 -/
+/-- The relation between the JSON of a record attribute `[attribute name, scalar]` and the decoded (attribute name,
+value). -/
 def DecodedPair (j : Json) (kv : Attr × Value) : Prop :=
   ∃ fields vj, j = .arr fields ∧ fields.toList = [.str kv.1, vj] ∧
     kv.1.contains '\x00' = false ∧ DecodedScalar vj kv.2
 
-/-- 解析した JSON は、スカラーか、スカラーの列から `Set.make` で構成した集合か、
-重複しない属性名とスカラーの列から `Map.make` で構成したレコードである。 -/
+/-- The parsed JSON is either a scalar, a set constructed with `Set.make` from a list of scalars, or a record
+constructed with `Map.make` from a list of distinct attribute names and scalars. -/
 inductive Decoded : Json → Value → Prop where
   | scalar (json : Json) (value : Value) (h : DecodedScalar json value) : Decoded json value
   | set (elems : Array Json) (values : List Value) (fields : Array Json)
@@ -215,8 +218,9 @@ private theorem int64_success (j : Json) (v : Int64) (h : int64 j = .ok v) : Dec
     · cases h
   · cases h
 
-/-- 日本語: 実decodeScalarが成功すると、対応するタグのスカラー値を返す。整数と拡張値は
-Int64範囲内の正規十進表記で、文字列・entityの名前空間各要素/型名/IDはNULを含まない。 -/
+/-- When the real decodeScalar succeeds, it returns the scalar value of the corresponding tag. Integers and extension
+values are in canonical decimal notation within the Int64 range, and strings and each entity namespace element/type
+name/ID contain no NUL. -/
 theorem decodeScalar_success (json : Json) (value : Value) (h : decodeScalar json = .ok value) :
     DecodedScalar json value := by
   unfold decodeScalar at h
@@ -304,10 +308,11 @@ private theorem pair_success (j : Json) (kv : Attr × Value) (h : pair j = .ok k
     · cases h
   · cases h
 
-/-- 日本語: 実decodeが成功するとJSON解析も成功し、スカラーならタグ別の値、集合なら
-スカラー列からのSet.make、レコードなら重複しない属性名とスカラー列からのMap.makeを返す。
-整数・拡張値はInt64範囲内の正規十進表記で、文字列・entityの各部と属性名はNULを含まない。
-JSON解析器内部や外部DB実状態の意味論は含まない。 -/
+/-- When the real decode succeeds, JSON parsing also succeeds, and it returns the per-tag value for a scalar, Set.make
+over a list of scalars for a set, and Map.make over distinct attribute names and a list of scalars for a record.
+Integers and extension values are in canonical decimal notation within the Int64 range, and strings, each part of an
+entity, and attribute names contain no NUL. The JSON parser internals and the semantics of the external DB's actual
+state are not included. -/
 theorem decode_success (stored : String) (value : Value) (h : decode stored = .ok value) :
     ∃ json, Json.parse stored = .ok json ∧ Decoded json value := by
   unfold decode at h
@@ -340,8 +345,8 @@ theorem decode_success (stored : String) (value : Value) (h : decode stored = .o
       · exact .scalar _ _ (decodeScalar_success _ _ h)
     · cases h
 
-/-- 日本語: intタグの復号関係にあるCedar整数を数学的整数へ戻すと、
-入力の正規十進表記が表す整数と一致する。範囲検査によりInt64変換で値は変わらない。 -/
+/-- Converting a Cedar integer in the int-tag decoding relation back to a mathematical integer gives the integer denoted
+by the input's canonical decimal notation. Thanks to the range check, the Int64 conversion does not change the value. -/
 theorem Decoded.int_value (json : Json) (value : Int64)
     (h : Decoded json (.prim (.int value))) :
     ∃ fields digits, json = .arr fields ∧
@@ -359,9 +364,9 @@ theorem Decoded.int_value (json : Json) (value : Int64)
         exact ⟨fields, digits, rfl, shape, by rw [preserved]; exact parsed,
           by rw [preserved]; exact canonical⟩
 
-/-- 日本語: 実decodeがCedar整数を返したなら、JSON解析はintタグと正規十進文字列を
-返し、その文字列の数学的整数は返却Cedar整数のtoIntと等しい。
-JSON解析器の内部や外部DBとの一致は主張しない。 -/
+/-- If the real decode returns a Cedar integer, JSON parsing returns the int tag and a canonical decimal string, and the
+mathematical integer of that string equals toInt of the returned Cedar integer. Nothing is claimed about the JSON parser
+internals or agreement with the external DB. -/
 theorem decode_int_success (stored : String) (value : Int64)
     (h : decode stored = .ok (.prim (.int value))) :
     ∃ fields digits, Json.parse stored = .ok (.arr fields) ∧

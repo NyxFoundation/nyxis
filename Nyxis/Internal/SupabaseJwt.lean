@@ -1,20 +1,20 @@
 import JoseLibcrypto
 import Nyxis.Internal.HttpAuth
 
-/-! コア専用の JWT 接続コード(A2/A4)。呼び出し側は issuer と JWKS を信頼する設定・輸送から渡し、
-リクエストからは渡さない。解析・鍵の準備・署名・claim の検証は承認済みのライブラリの責務。
-ネットワークの輸送は信頼するコアのコードが供給する。このモジュールを Nyxis の公開 API や
-AppCheck の信頼するモジュールの集合に import してはならない。
+/-! Core-only JWT connection code (A2/A4). Callers pass the issuer and the JWKS from trusted configuration and
+transport, never from the request. Parsing, key preparation, and signature and claim verification are the approved
+library's responsibility. Network transport is supplied by trusted core code. This module must not be imported into
+Nyxis's public API or into the set of modules AppCheck trusts.
 -/
 namespace Nyxis.Internal.SupabaseJwt
 
-/-- 準備した公開鍵と設定した issuer。トークンが方針を選ぶことはない。 -/
+/-- Prepared public keys and the configured issuer. The token never chooses the policy. -/
 structure Verifier where
   private keys : Jose.KeySet Jose.Backend.libcrypto
   private issuer : String
 
-/-- 信頼する JWKS 文書から 1 度準備する。不正・空・使えない鍵の集合と設定の誤りは、
-ライブラリの診断や秘密を返さずに拒む。 -/
+/-- Prepare once from a trusted JWKS document. Malformed, empty, or unusable key sets and configuration errors are
+rejected without returning the library's diagnostics or secrets. -/
 def prepare (issuer jwksText : String) : IO (Option Verifier) := do
   if issuer.trimAscii.isEmpty || issuer.contains '\x00' then return none
   try
@@ -24,11 +24,10 @@ def prepare (issuer jwksText : String) : IO (Option Verifier) := do
     return some ⟨keys, issuer⟩
   catch _ => return none
 
-/-- 日本語: prepareがverifierを返すなら、設定issuerはそのまま保存され、
-同じ入力文書の承認済みJwks.parseが成功し、ES256鍵候補が空でなく、
-そのJWKSに対するKeySet.ofJwksが返した鍵そのものを保存している。
-鍵準備の開始・終了IO状態も一致する。ライブラリ内部の解析・暗号処理の
-正しさや取得文書の輸送は含まない。 -/
+/-- If prepare returns a verifier, the configured issuer is stored as is, the approved Jwks.parse of the same input
+document succeeds, the ES256 key candidates are non-empty, and it stores exactly the keys returned by KeySet.ofJwks for
+that JWKS. The start/end IO states of key preparation also match. The correctness of the library's internal parsing and
+cryptography and the transport of the fetched document are not included. -/
 theorem prepare_success (issuer document : String) (verifier : Verifier)
     (w w' : Void IO.RealWorld)
     (h : prepare issuer document w = .ok (some verifier) w') :
@@ -63,8 +62,8 @@ theorem prepare_success (issuer document : String) (verifier : Verifier)
             simp only [Bool.or_eq_false_iff] at hi
             exact ⟨hi.1, hi.2, rfl, jwks, rfl, he, hk⟩
 
-/-- 決定的な検査のための、時刻を明示する継ぎ目。以下の配置用のアダプタはリクエストごとに時計を読む。
-ES256・issuer・audience・猶予 0 はここで固定する。 -/
+/-- A seam that makes the time explicit, for deterministic checks. The deployment adapters below read the clock on every
+request. ES256, the issuer, the audience, and leeway 0 are fixed here. -/
 def Verifier.verifyAt (verifier : Verifier) (token : String)
     (now : Std.Time.Timestamp) : IO (Option String) := do
   try
@@ -78,11 +77,10 @@ def Verifier.verifyAt (verifier : Verifier) (token : String)
     return some subject
   catch _ => return none
 
-/-- 日本語: verifyAtがsubjectを返すなら、同じ鍵・token・時刻について、
-承認済みlibcryptoバックエンドのJwt.verifyがES256のみ、設定issuer、
-audience authenticated、猶予0の固定方針で成功し、そのclaimsのsubjectを
-変更せず返した。空白のみ/NUL入りsubjectは拒否されている。
-ライブラリ内部の暗号・claim検査の正しさや時計値の正しさは含まない。 -/
+/-- If verifyAt returns a subject, then for the same keys, token, and time, Jwt.verify of the approved libcrypto backend
+succeeded under the fixed policy of ES256 only, the configured issuer, audience authenticated, and leeway 0, and the
+subject of those claims was returned unchanged. Whitespace-only and NUL-containing subjects are rejected. The
+correctness of the library's internal cryptographic/claim checks and of the clock value is not included. -/
 theorem Verifier.verifyAt_subject
     (verifier : Verifier) (token subject : String) (now : Std.Time.Timestamp)
     (w w' : Void IO.RealWorld)
@@ -118,15 +116,15 @@ theorem Verifier.verifyAt_subject
           simp only [Bool.or_eq_false_iff] at hb
           exact ⟨claims, rfl, hs, hb⟩
 
-/-- 実時計で検証する(起動時に時刻を保持しない)。本番経路は `verifyFresh` が取得ごとに同じ時計を使う。
-検査が準備済みの鍵で実時計の経路を確かめるために残す。 -/
+/-- Verify against the real clock (no time is held from startup). In the production path, `verifyFresh` uses the same
+clock on every fetch. Kept so that checks can exercise the real-clock path with prepared keys. -/
 def Verifier.verify (verifier : Verifier) : String → IO (Option String) :=
   HttpAuth.withCurrentTime verifier.verifyAt
 
-/-- 検証のたびに新しい文書を取得する。失敗や削除の後に古い鍵の集合を保持しない。
-取得のクロージャはコアの設定であり、トークン・ヘッダ・issuer・URL をリクエストから受け取らない。
-その輸送は TLS・状態コード・サイズを検証し、期限を課さなければならない。それらの輸送の責務は
-この継ぎ目では実装しない。時計の取得は鍵の取得・準備の後に行う。 -/
+/-- Fetch a new document on every verification. No old key set is kept after a failure or removal. The fetch closure is
+core configuration and does not take the token, headers, issuer, or URL from the request. Its transport must verify TLS,
+the status code, and the size, and impose a deadline. Those transport responsibilities are not implemented in this seam.
+The clock is read after the keys are fetched and prepared. -/
 def verifyFreshWithClock (issuer : String) (fetch : IO (Option String))
     (clock : IO Std.Time.Timestamp) (token : String) : IO (Option String) := do
   if issuer.trimAscii.isEmpty || issuer.contains '\x00' then return none
@@ -136,16 +134,16 @@ def verifyFreshWithClock (issuer : String) (fetch : IO (Option String))
     return ← HttpAuth.withClock clock verifier.verifyAt token
   catch _ => return none
 
-/-- 実時計を使う更新つきのアダプタ。共有キャッシュも古い鍵への後退も無い。 -/
+/-- The refreshing adapter that uses the real clock. There is no shared cache and no fallback to old keys. -/
 def verifyFresh (issuer : String) (fetch : IO (Option String)) : String → IO (Option String) :=
   verifyFreshWithClock issuer fetch Std.Time.Timestamp.now
 
-/-- 日本語: 更新付き検証がsubjectを返すなら、この呼出しで取得した文書から
-同じissuerの鍵を準備し、その後に時計を取得し、同じtokenと取得時刻でその鍵の
-verifyAtが同じsubjectを返した。開始・取得後・準備後・時計後・終了のIO状態を
-連続させる。取得/準備/時計/検証の失敗からsubjectは作られず、古い鍵への経路もない。
-取得文書のHTTPS輸送、prepare内部の鍵処理、verifyAt内部の暗号/claim検査と
-時計値の正しさは含まない。 -/
+/-- If the refreshing verification returns a subject, then keys for the same issuer were prepared from the document
+fetched in this call, the clock was read after that, and verifyAt with those keys returned the same subject for the same
+token and the time read. The IO states of start, after fetch, after prepare, after clock, and end are continuous. No
+subject is produced from a fetch/prepare/clock/verify failure, and there is no path to old keys. The HTTPS transport of
+the fetched document, the key handling inside prepare, the cryptographic/claim checks inside verifyAt, and the
+correctness of the clock value are not included. -/
 theorem verifyFresh_subject
     (issuer : String) (fetch : IO (Option String)) (clock : IO Std.Time.Timestamp)
     (token subject : String) (w w' : Void IO.RealWorld)
@@ -196,10 +194,10 @@ theorem verifyFresh_subject
                 exact ⟨hi.1, hi.2, document, verifier, wf, wp, wc, now,
                   rfl, hp, hc, hverified⟩
 
-/-- 日本語: 更新付き検証を使う実主体変換がユーザーを返すなら、そのIDは
-同じBearer tokenについて今回取得・準備した鍵と、その後の時計値で検証した
-subjectそのものである。ユーザー型はコア設定であり、不正subject/予約匿名型は
-拒否済み。JWT暗号/claim検査と輸送の正しさは別の責務である。 -/
+/-- If the real principal conversion using the refreshing verification returns a user, its ID is exactly the subject
+verified for the same Bearer token with keys fetched and prepared this time and with the clock value read afterwards.
+The user type is core configuration, and invalid subjects and the reserved anonymous type are already rejected. The
+correctness of the JWT cryptographic/claim checks and of the transport is a separate responsibility. -/
 theorem principalOf_fresh_user
     (userType : Cedar.Spec.EntityType) (issuer : String) (fetch : IO (Option String))
     (clock : IO Std.Time.Timestamp) (headers : Std.Http.Headers)
@@ -221,11 +219,11 @@ theorem principalOf_fresh_user
   exact ⟨token, subject, document, verifier, wf, wp, wc, now,
     ht, hi, hn, hf, hp, hc, hv, hu, hs⟩
 
-/-- 日本語: 更新付き検証によるユーザーIDは、この呼出しで取得した文書から
-同じissuerで準備した鍵について、取得後の時計値と同じBearer tokenを固定方針で
-承認済みJwt.verifyへ渡し、成功したclaimsのsubjectそのものである。
-取得・準備・時計・ライブラリ検証のIO状態は連続する。
-輸送/鍵準備内部/ライブラリ内部/時計値の正しさは含まない。 -/
+/-- A user ID from the refreshing verification is exactly the subject of the claims obtained when, for keys prepared
+with the same issuer from the document fetched in this call, the clock value read after the fetch and the same Bearer
+token were passed under the fixed policy to the approved Jwt.verify, which succeeded. The IO states of fetch, prepare,
+clock, and library verification are continuous. The correctness of the transport, the key-preparation internals, the
+library internals, and the clock value is not included. -/
 theorem principalOf_fresh_claims
     (userType : Cedar.Spec.EntityType) (issuer : String) (fetch : IO (Option String))
     (clock : IO Std.Time.Timestamp) (headers : Std.Http.Headers)
@@ -252,10 +250,11 @@ theorem principalOf_fresh_claims
   exact ⟨token, subject, document, verifier, wf, wp, wc, now, claims,
     ht, hi, hn, hf, hp, hc, hv, hsub, hu, hs⟩
 
-/-- 日本語: 更新付き主体変換のユーザーIDは、今回取得した文書を解析して
-準備した鍵と、設定issuerそのものを使う固定検証方針で成功したclaims.subjectに
-一致する。取得→鍵準備→時計→JWT検証のIO状態は連続し、ES256候補は空でない。
-承認済みライブラリ内部、時計値、HTTPS輸送の正しさは含まない。 -/
+/-- The user ID of the refreshing principal conversion matches claims.subject from a successful verification with keys
+prepared by parsing the document fetched this time and with the fixed verification policy that uses exactly the
+configured issuer. The IO states of fetch → key preparation → clock → JWT verification are continuous, and the ES256
+candidates are non-empty. The correctness of the approved library's internals, the clock value, and the HTTPS transport
+is not included. -/
 theorem principalOf_fresh_prepared_claims
     (userType : Cedar.Spec.EntityType) (issuer : String) (fetch : IO (Option String))
     (clock : IO Std.Time.Timestamp) (headers : Std.Http.Headers)

@@ -2,8 +2,9 @@ import BulletinBoard.Approved
 import Nyxis.Internal.ApprovedServer
 import Nyxis.Internal.PostgresShapeBuild
 
-/-! 実起動の配線。宣言 `Approved.sources`・正本から構成した PostgreSQL の形状・利用者のエンティティ型を
-`Deployment` に固定し、ルータだけを受け取る。監査(`BulletinBoard.lean` 末尾)の後に起動処理からだけ import する。 -/
+/-! Wiring for the real startup. Fixes the declaration `Approved.sources`, the PostgreSQL shape built from the sources,
+and the user entity type in the `Deployment`, and accepts only the router. Imported only from the startup code, after
+the audit (at the end of `BulletinBoard.lean`). -/
 open Nyxis Nyxis.Internal
 
 namespace BulletinBoard.Server

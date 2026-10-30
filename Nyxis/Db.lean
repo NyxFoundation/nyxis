@@ -2,27 +2,29 @@ import Cedar.Spec
 import Cedar.Validation
 
 /-!
-# Nyxis.Db — DB 層
+# Nyxis.Db — the DB layer
 
-Lean バックエンドが PostgreSQL に対して発行する DB 操作と、アクションに添えられる
-「効果」の宣言、そして DB の状態の純粋モデル(`Store`)を定める。
+Defines the DB operations the Lean backend issues to PostgreSQL, the declarations of "effects" attached to actions, and
+a pure model of the DB state (`Store`).
 
-- テーブルは Cedar のエンティティ型、列は属性、主キーはエンティティ ID に 1 対 1 で対応する。
-  写像のコードは持たず、Cedar の型をそのまま使う。
-- 効果は 1 アクションに 1 つ。種類(読み取り・一覧・挿入・更新・削除、および宣言された外部効果 — 添付の署名付き
-  URL の発行 `upload` / `download`、メール送信 `mail`、外部 API 呼び出し `call`)と対象のテーブル、
-  更新では列、メールでは宛先の列と件名・本文の列、外部 API 呼び出しでは送り先・メソッド・パス(または URL の列)・
-  本文の列・実行時機を定める。
-  一覧は、対象テーブルの各行についてそのアクションの判定を行い、permit された行だけを返す。DB 操作としては
-  permit された行ごとの読み取りを発行する(`Nyxis.Authz.step`)。外部効果は DB 操作を発行せず、
-  対象の行について permit されたときだけ外部効果(Supabase Storage への署名付き URL の発行、その行の宣言された列の
-  値を宛先・内容とするメールの送信、正本で宣言した送り先への HTTP の呼び出し)を記録する
-  (`Nyxis.Authz.External`)。オブジェクトのパスは nyxis が決め(`objectPath`)、宛先・内容・送り先・本文は正本の
-  宣言と行の宣言された列(呼び出しでは `context.values` の提案値も)から決まり、ハンドラは名指しできない。
-- DB 操作は認可層(`Nyxis.Authz`)が permit のときだけ発行する。ハンドラはこの層に触れない。
-- `Store` は PostgreSQL の内容を抽象した純粋モデルで、認可安全性の定理(`Nyxis.Runtime`)はこの上で述べる。
-  DB が nyxis の発行する操作以外で変わらないこと(DB へは nyxis 専用ロール以外から到達できないこと)と、
-  操作を PostgreSQL に伝えるランタイムが正しいことは、証明の外側で信頼する(`ASSUMPTIONS.md`)。
+- Tables correspond one-to-one to Cedar entity types, columns to attributes, and primary keys to entity IDs. There is no
+  mapping code; Cedar's types are used as they are.
+- Each action has exactly one effect. It fixes the kind (read, list, insert, update, delete, and the declared external
+  effects — issuing signed URLs for attachments `upload` / `download`, sending mail `mail`, and external API calls
+  `call`) and the target table; for updates the columns, for mail the recipient column and the subject and body columns,
+  and for external API calls the destination, method, path (or URL column), body columns, and execution timing. A list
+  runs that action's decision for each row of the target table and returns only the permitted rows. As DB operations, it
+  issues one read per permitted row (`Nyxis.Authz.step`). External effects issue no DB operations; only when permitted
+  for the target row do they record the external effect (issuing a signed URL to Supabase Storage, sending mail whose
+  recipient and content are the values of that row's declared columns, or an HTTP call to a destination declared in the
+  approved schema) (`Nyxis.Authz.External`). nyxis decides the object path (`objectPath`); the recipient, content,
+  destination, and body are determined by the approved schema's declaration and the row's declared columns (for calls,
+  also the proposed values in `context.values`), and the handler cannot name them.
+- DB operations are issued by the authorization layer (`Nyxis.Authz`) only on permit. Handlers do not touch this layer.
+- `Store` is a pure model abstracting the contents of PostgreSQL, and the authorization safety theorem (`Nyxis.Runtime`)
+  is stated over it. That the DB changes only through operations nyxis issues (that the DB is reachable only by the
+  dedicated nyxis role) and that the runtime conveying operations to PostgreSQL is correct are trusted outside the proof
+  (`ASSUMPTIONS.md`).
 -/
 
 namespace Nyxis
@@ -31,33 +33,35 @@ open Cedar.Spec
 
 namespace Db
 
-/-- テーブル名。Cedar のエンティティ型に 1 対 1 で対応する。 -/
+/-- A table name. Corresponds one-to-one to a Cedar entity type. -/
 abbrev Table := EntityType
 
-/-- 列名。Cedar の属性に 1 対 1 で対応する。 -/
+/-- A column name. Corresponds one-to-one to a Cedar attribute. -/
 abbrev Column := Attr
 
-/-- 行の主キー。Cedar のエンティティ ID に 1 対 1 で対応する。 -/
+/-- A row's primary key. Corresponds one-to-one to a Cedar entity ID. -/
 abbrev Key := String
 
-/-- 列の値。Cedar の値をそのまま使う。 -/
+/-- A column value. Cedar values are used as they are. -/
 abbrev Cell := Value
 
-/-- 行の内容。列名から値への写像。 -/
+/-- A row's contents. A map from column names to values. -/
 abbrev Row := Cedar.Data.Map Column Cell
 
-/-- 行に変更を重ねる。変更にある列は新しい値、無い列は元の値。 -/
+/-- Overlays changes on a row. Columns in the changes get the new value; other columns keep the original value. -/
 def Row.patch (row changes : Row) : Row :=
   Cedar.Data.Map.make (changes.toList ++ row.toList.filter (fun kv => !changes.contains kv.1))
 
-/-! ## 外部 API 呼び出しの宣言
+/-! ## Declaring external API calls
 
-正本は名前付きの送り先(`@external` を添えた予約の仲間 `entity Stripe;`。テーブルではない)を宣言し、効果
-`@effect("call <送り先> <メソッド> <パス | url: 列> T(列, …) (sync [<秒>s] -> <レコード型> | async)")` で呼び出しを
-宣言する。送り先はベース URL(`base`。無ければ対象行の String 列の値を `url: 列` で送り先にする — 旧 Webhook の形)と
-認証方式(環境変数名だけが正本に載り、値はコア設定)を持つ。ハンドラは URL もヘッダも組めない。 -/
+The approved schema declares named destinations (reserved companions with `@external` attached, such as
+`entity Stripe;`; not tables) and declares calls with the effect
+`@effect("call <destination> <method> <path | url: column> T(column, …) (sync [<seconds>s] -> <record type> | async)")`.
+A destination has a base URL (`base`; without one, the value of a String column of the target row becomes the
+destination via `url: column` — the former Webhook form) and an authentication method (only the environment variable
+name appears in the approved schema; the value is a core setting). Handlers can assemble neither URLs nor headers. -/
 
-/-- 呼び出しの HTTP メソッド。 -/
+/-- A call's HTTP method. -/
 inductive CallMethod where
   | get
   | post
@@ -66,7 +70,7 @@ inductive CallMethod where
   | delete
   deriving Repr, DecidableEq
 
-/-- HTTP 上の名前。 -/
+/-- The name in HTTP. -/
 def CallMethod.name : CallMethod → String
   | .get => "GET"
   | .post => "POST"
@@ -74,56 +78,61 @@ def CallMethod.name : CallMethod → String
   | .patch => "PATCH"
   | .delete => "DELETE"
 
-/-- 本文を送るメソッドか(`GET` / `DELETE` では本文を送らない)。 -/
+/-- Whether the method sends a body (`GET` / `DELETE` send none). -/
 def CallMethod.hasBody : CallMethod → Bool
   | .get | .delete => false
   | .post | .put | .patch => true
 
-/-- 送り先の認証方式。環境変数名だけが正本に載り、値はコア設定(`NYXIS_EXT_<名前>`)で渡す。 -/
+/-- A destination's authentication method. Only the environment variable name appears in the approved schema; the value
+    is passed as a core setting (`NYXIS_EXT_<name>`). -/
 inductive DestinationAuth where
-  /-- 認証ヘッダを付けない。 -/
+  /-- No authentication header. -/
   | none
-  /-- `Authorization: Bearer <環境変数の値>`。 -/
+  /-- `Authorization: Bearer <value of the environment variable>`. -/
   | bearer (env : String)
-  /-- 任意の 1 ヘッダ `<name>: <環境変数の値>`。 -/
+  /-- One arbitrary header `<name>: <value of the environment variable>`. -/
   | header (name env : String)
   deriving Repr, DecidableEq
 
-/-- 名前付きの送り先(`@external`)。`base` は `https://` で始まる固定のベース URL(末尾の `/` は無い)。`base` の無い
-    送り先は `url: 列` の呼び出しでだけ使える。 -/
+/-- A named destination (`@external`). `base` is a fixed base URL starting with `https://` (with no trailing `/`). A
+    destination without `base` can only be used by `url: column` calls. -/
 structure Destination where
   base : Option String
   auth : DestinationAuth
   deriving Repr, DecidableEq
 
-/-- 呼び出しの送り先の決め方。 -/
+/-- How a call's destination is determined. -/
 inductive CallTarget where
-  /-- 送り先のベース URL に続ける固定のパス。`{key}` だけを対象行の主キーで埋める。 -/
+  /-- A fixed path appended to the destination's base URL. Only `{key}` is filled with the target row's primary key. -/
   | path (path : String)
-  /-- 対象行の String 列の値(`https://` で始まるもの)を URL にする(`url: 列`)。送り先に `base` は無い。 -/
+  /-- Uses the value of a String column of the target row (one starting with `https://`) as the URL (`url: column`). The
+      destination has no `base`. -/
   | column (url : Column)
   deriving Repr, DecidableEq
 
-/-- 実行時機。`sync` は要求のトランザクション内で同期に送り、応答を正本で宣言したレコード型に復号してハンドラへ渡す
-    (`timeout` は全転送の上限(秒)の上書き)。`async` は応答なしでアウトボックス(`_nyxis_outbox`)に書いて
-    COMMIT の後に nyxis の内部ループが送る。 -/
+/-- Execution timing. `sync` sends synchronously within the request's transaction and decodes the response into the
+    record type declared in the approved schema before passing it to the handler (`timeout` overrides the limit on the
+    whole transfer, in seconds). `async` writes to the outbox (`_nyxis_outbox`) with no response, and nyxis's internal
+    loop sends it after the COMMIT. -/
 inductive CallMode where
   | sync (timeout : Option Nat) (response : Cedar.Validation.CedarType)
   | async
   deriving Repr, DecidableEq
 
-/-- アクションの効果の種類。更新では変更してよい列を定める。
-    一覧(`list`)は、対象テーブルの各行についてそのアクションの判定を行い、permit された行だけを返す。
-    `upload` / `download` は対象の行への添付の署名付きアップロード / ダウンロード URL の発行で、DB を変えない
-    宣言された外部効果。オブジェクトのパスは `objectPath`(`テーブル/<主キー>/<生成 ID>`、ダウンロードでは正本が
-    `@attachment("列")` で名指しした列の値)で nyxis が決める。
-    `mail` は対象の行の宣言された列の値を宛先(`recipient`。メールアドレスの String 列)と内容(`content`: 先頭が
-    件名、残りが本文の段落。String 列)とするメールの送信。
-    `call` は正本で宣言した送り先 `destination` への HTTP の呼び出し: メソッド、送り先の決め方(ベース URL に続ける
-    固定のパス、または対象行の URL の列)、本文に載せる対象行の列 `columns`、`context.values` の提案値も本文に混ぜて
-    判定の文脈に置くか(`proposes`。正本のアクションの `context` が `values` を宣言したとき)、実行時機 `mode`。
-    どれも DB を変えない宣言された外部効果で、宛先・内容・送り先・本文はすべて正本の宣言と行の列(と判定を通った提案値)
-    から決まり、ハンドラは選べない。 -/
+/-- The kind of an action's effect. For updates it fixes the columns that may be changed. A list (`list`) runs that
+    action's decision for each row of the target table and returns only the permitted rows. `upload` / `download` issue
+    a signed upload / download URL for an attachment of the target row; they are declared external effects that do not
+    change the DB. nyxis decides the object path with `objectPath` (`table/<primary key>/<generated ID>`; for downloads,
+    the value of the column the approved schema names with `@attachment("column")`). `mail` sends mail whose recipient
+    (`recipient`; a String column holding an email address) and content (`content`: the first is the subject and the
+    rest are body paragraphs; String columns) are the values of the target row's declared columns. `call` is an HTTP
+    call to the destination `destination` declared in the approved schema: the method, how the destination is determined
+    (a fixed path appended to the base URL, or the target row's URL column), the target row's columns `columns` put in
+    the body, whether the proposed values in `context.values` are also mixed into the body and placed in the decision
+    context (`proposes`; when the action's `context` in the approved schema declares `values`), and the execution timing
+    `mode`. All of these are declared external effects that do not change the DB; the recipient, content, destination,
+    and body are all determined by the approved schema's declaration and the row's columns (and the proposed values that
+    passed the decision), and the handler cannot choose them. -/
 inductive EffectKind where
   | read
   | list
@@ -137,42 +146,44 @@ inductive EffectKind where
       (mode : CallMode)
   deriving Repr, DecidableEq
 
-/-- 宣言された外部効果の種類か。 -/
+/-- Whether the kind is a declared external effect. -/
 def EffectKind.isExternal : EffectKind → Bool
   | .upload | .download | .mail _ _ | .call .. => true
   | .read | .list | .insert | .update _ | .delete => false
 
-/-- アクションに添えられる効果の宣言。1 アクションに 1 つ。 -/
+/-- The effect declaration attached to an action. Exactly one per action. -/
 structure Effect where
   kind : EffectKind
   table : Table
   deriving Repr, DecidableEq
 
-/-- DB 操作。Lean バックエンドが PostgreSQL に対して発行する読み取り・挿入・更新・削除。
-    一覧は、permit された行ごとの読み取りとして発行される(一覧だけの操作は無い)。 -/
+/-- A DB operation: the reads, inserts, updates, and deletes the Lean backend issues to PostgreSQL. A list is issued as
+    one read per permitted row (there is no list-only operation). -/
 inductive Operation where
   | read (table : Table) (key : Key)
   | insert (table : Table) (key : Key) (row : Row)
   | update (table : Table) (key : Key) (changes : Row)
   | delete (table : Table) (key : Key)
 
-/-- 操作の対象(テーブルと主キー)。Cedar の対象のエンティティ UID になる。 -/
+/-- The operation's target (table and primary key). Becomes Cedar's target entity UID. -/
 def Operation.target : Operation → EntityUID
   | .read t k | .insert t k _ | .update t k _ | .delete t k => ⟨t, k⟩
 
-/-- 操作が提案する値。挿入では行全体、更新では変更する列、読み取りと削除では無し。 -/
+/-- The values the operation proposes: the whole row for inserts, the changed columns for updates, none for reads and
+    deletes. -/
 def Operation.proposed : Operation → Option Row
   | .insert _ _ row => some row
   | .update _ _ changes => some changes
   | .read _ _ | .delete _ _ => none
 
-/-- 効果の宣言から、主キー `key` と提案する値 `values` に対する DB 操作を組み立てる。
-    操作の種類とテーブルは効果が決め、ハンドラは選べない。一覧の効果は `Nyxis.Authz.step` が先に行ごとに
-    扱う(各行の主キーについて、その行の読み取り)ので、ここの `.list` の分岐には到達しない。関数を全域に
-    するために置いてある。
-    外部効果では、この操作は判定材料(主体・対象の行・文脈)を組むためにだけ使い、DB 操作としては
-    発行されない(`Nyxis.Authz.externalStep`): 対象の行の読み取りと同じ判定材料で、`context.values` の提案値を取る
-    呼び出し(`call` の `proposes`)では提案値を文脈に置くために更新の形(対象の行と提案値)で組む。 -/
+/-- Builds, from the effect declaration, the DB operation for primary key `key` and proposed values `values`. The effect
+    fixes the operation's kind and table; the handler cannot choose them. List effects are handled per row beforehand by
+    `Nyxis.Authz.step` (for each row's primary key, a read of that row), so the `.list` branch here is never reached. It
+    exists to make the function total. For external effects, this operation is used only to build the decision materials
+    (principal, target row, context) and is not issued as a DB operation (`Nyxis.Authz.externalStep`): the decision
+    materials are the same as for a read of the target row, and for calls that take the proposed values in
+    `context.values` (`proposes` of `call`) it is built in the update form (target row and proposed values) so that the
+    proposed values are placed in the context. -/
 def Operation.ofEffect (e : Effect) (key : Key) (values : Row) : Operation :=
   match e.kind with
   | .read => .read e.table key
@@ -185,8 +196,9 @@ def Operation.ofEffect (e : Effect) (key : Key) (values : Row) : Operation :=
   | .mail _ _ => .read e.table key
   | .call _ _ _ _ proposes _ => if proposes then .update e.table key values else .read e.table key
 
-/-- DB 操作が効果の宣言の範囲内にあるか。種類とテーブルが一致し、更新では変更する列が宣言された列に収まる。
-    一覧の効果の範囲内にあるのは、そのテーブルの行の読み取りだけ。 -/
+/-- Whether the DB operation is within the scope of the effect declaration: the kind and table match, and for updates
+    the changed columns fall within the declared columns. Within the scope of a list effect are only reads of that
+    table's rows. -/
 def Operation.withinEffect (op : Operation) (e : Effect) : Bool :=
   match op, e.kind with
   | .read t _, .read => t == e.table
@@ -197,45 +209,50 @@ def Operation.withinEffect (op : Operation) (e : Effect) : Bool :=
   | .delete t _, .delete => t == e.table
   | _, _ => false
 
-/-! ## 添付のオブジェクトのパス
+/-! ## Attachment object paths
 
-署名付き URL の発行の対象になる Supabase Storage のオブジェクトのパスは、nyxis が `テーブル/<主キー>/<オブジェクトの名>`
-の形で決める。オブジェクトの名は、アップロードでは要求のサーバー生成値の一意 ID、ダウンロードでは正本が
-`@attachment("列")` で名指しした String 列の現在の値。主キーと名はいずれも英数字・`-`・`_` だけ(1〜128 文字。
-パスの区切りや `..` を含まない)でなければならず、そうでなければパスは決まらない(ハンドラには `Outcome.notFound`)。
-ハンドラはパスもバケットも名指しできない。 -/
+The path of the Supabase Storage object targeted by a signed URL is decided by nyxis in the form
+`table/<primary key>/<object name>`. The object name is, for uploads, the unique ID of the request's server-generated
+values, and for downloads, the current value of the String column that the approved schema names with
+`@attachment("column")`. Both the primary key and the name must consist only of alphanumerics, `-`, and `_` (1-128
+characters; no path separators or `..`); otherwise no path is determined (the handler gets `Outcome.notFound`). Handlers
+can name neither the path nor the bucket. -/
 
-/-- オブジェクトのパスの要素として使える文字列か(ASCII の英数字・`-`・`_`、1〜128 文字)。 -/
+/-- Whether the string can be used as an element of an object path (ASCII alphanumerics, `-`, `_`; 1-128 characters). -/
 def isObjectToken (s : String) : Bool :=
   s.length > 0 && s.length ≤ 128 &&
     s.toList.all fun c => c.toNat < 128 && (c.isAlphanum || c == '-' || c == '_')
 
-/-- オブジェクトのパス `テーブル/<主キー>/<名>`。主キーか名が要素として使えなければ `none`。 -/
+/-- The object path `table/<primary key>/<name>`. `none` if the primary key or name cannot be used as an element. -/
 def objectPath (table : Table) (key : Key) (token : String) : Option String :=
   if isObjectToken key && isObjectToken token then some (table.id ++ "/" ++ key ++ "/" ++ token) else none
 
-/-! ## 外部 API 呼び出しの URL
+/-! ## External API call URLs
 
-送り先の URL は、ベース URL(正本の `@external` の `base`)に正本が書いた固定のパスを続けたもの、または対象行の
-String 列の値(`url: 列`)である。パスの `{key}` だけを対象行の主キーで埋め、主キーはパスの要素として使える文字列
-(`isObjectToken`)でなければならない。`url: 列` の値は `https://` で始まる印字可能な ASCII でなければならない。
-どちらも決まらなければ呼び出しの内容は決まらない(ハンドラには `Outcome.notFound`)。 -/
+The destination URL is either the base URL (`base` of `@external` in the approved schema) followed by the fixed path
+written in the approved schema, or the value of a String column of the target row (`url: column`). Only `{key}` in the
+path is filled with the target row's primary key, and the primary key must be a string usable as a path element
+(`isObjectToken`). The value of a `url: column` must be printable ASCII starting with `https://`. If neither is
+determined, the call's content is not determined (the handler gets `Outcome.notFound`). -/
 
-/-- 送り先の URL として使える文字列か: `https://` で始まり、印字可能な ASCII で、`"`・`\`・`#`・空白を含まない
-    (〜2048 文字)。 -/
+/-- Whether the string can be used as a destination URL: it starts with `https://`, is printable ASCII, and contains
+    none of `"`, `\`, `#`, or whitespace (up to 2048 characters). -/
 def isHttpsUrl (url : String) : Bool :=
   url.startsWith "https://" && url.length > 8 && url.length ≤ 2048 &&
     url.toList.all fun c => 33 ≤ c.toNat && c.toNat ≤ 126 && c != '"' && c != '\\' && c != '#'
 
-/-- パスの `{key}` を主キーで埋める。`{key}` があれば主キーはパスの要素として使える文字列でなければならない
-    (そうでなければ `none`)。他の埋め込みは無い(正本の検査が `{key}` 以外のプレースホルダを拒む)。 -/
+/-- Fills `{key}` in the path with the primary key. If `{key}` is present, the primary key must be a string usable as a
+    path element (otherwise `none`). There is no other substitution (the approved schema check rejects placeholders
+    other than `{key}`). -/
 def fillPath (path : String) (key : Key) : Option String :=
   match path.splitOn "{key}" with
   | [_] => some path
   | parts => if isObjectToken key then some (key.intercalate parts) else none
 
-/-- 呼び出しの URL: 固定のパスなら送り先のベース URL に埋めたパスを続け、`url: 列` なら対象行のその列の値
-    (`isHttpsUrl` に限る)。送り先の形と宣言の形が合わなければ `none`(正本の検査が拒むので正本からは生じない)。 -/
+/-- The call's URL: for a fixed path, the destination's base URL followed by the filled path; for `url: column`, the
+    value of that column of the target row (only if `isHttpsUrl`). `none` if the destination's form and the
+    declaration's form do not match (the approved schema check rejects this, so it never arises from the approved
+    schema). -/
 def callUrl (destination : Destination) (target : CallTarget) (key : Key) (row : Row) : Option String :=
   match target, destination.base with
   | .path p, some base => (fillPath p key).map (base ++ ·)
@@ -245,13 +262,14 @@ def callUrl (destination : Destination) (target : CallTarget) (key : Key) (row :
     | _ => none
   | .path _, none | .column _, some _ => none
 
-/-! ## 一覧の問い合わせ
+/-! ## List queries
 
-ハンドラは一覧に、列の値と定数の比較による絞り込み(等値・大小)、並べ替え、ページ(位置と上限)を指定できる。
-絞り込みは判定の前に(実 DB では SELECT の WHERE 句で)行い、並べ替えとページは permit された行に対して行う。
-件数(`Outcome.list` の `total`)は、絞り込みに合い permit された行の数で、ページを切る前のもの。 -/
+For a list, a handler can specify filters comparing column values with constants (equality, ordering), sorting, and a
+page (position and limit). Filtering happens before the decision (in the real DB, in the SELECT's WHERE clause); sorting
+and paging apply to the permitted rows. The count (`total` of `Outcome.list`) is the number of rows that match the
+filters and are permitted, before paging. -/
 
-/-- 絞り込みの比較。 -/
+/-- A filter comparison. -/
 inductive Comparison where
   | eq
   | lt
@@ -260,33 +278,33 @@ inductive Comparison where
   | ge
   deriving Repr, DecidableEq
 
-/-- 比較が順序を受け入れるか(`lt` は `.lt` だけ、`le` は `.lt` と `.eq`、…)。 -/
+/-- Whether the comparison accepts the ordering (`lt` only `.lt`, `le` `.lt` and `.eq`, …). -/
 def Comparison.accepts : Comparison → Ordering → Bool
   | .eq, .eq | .lt, .lt | .le, .lt | .le, .eq | .gt, .gt | .ge, .gt | .ge, .eq => true
   | _, _ => false
 
-/-- 一覧の絞り込み: 列 `column` の値と定数 `value` の比較。 -/
+/-- A list filter: a comparison of the value of column `column` with constant `value`. -/
 structure Filter where
   column : Column
   comparison : Comparison
   value : Cell
   deriving Repr, DecidableEq
 
-/-- 並べ替えの向き。 -/
+/-- The sort direction. -/
 inductive Direction where
   | asc
   | desc
   deriving Repr, DecidableEq
 
-/-- 並べ替えの 1 段: 列と向き。 -/
+/-- One sort key: a column and a direction. -/
 structure OrderBy where
   column : Column
   direction : Direction := .asc
   deriving Repr
 
-/-- ハンドラが一覧に指定する問い合わせ。絞り込みはすべての条件を満たす行(AND)、並べ替えは先頭の段から順に
-    (同じなら次の段、すべて同じなら主キーの順)、ページは並べ替えた permit 済みの行列の `offset` 番目から
-    `limit` 件(`none` なら最後まで)。 -/
+/-- The query a handler specifies for a list. Filters select rows that satisfy all conditions (AND); sorting proceeds
+    from the first key (the next key on ties, primary key order if all are equal); the page is `limit` rows (to the end
+    if `none`) starting at position `offset` of the sorted sequence of permitted rows. -/
 structure ListQuery where
   filters : List Filter := []
   orderBy : List OrderBy := []
@@ -294,8 +312,9 @@ structure ListQuery where
   limit : Option Nat := none
   deriving Repr
 
-/-- スカラーの値の順序。同じ種類の整数・文字列・真偽値・日時・期間・decimal だけを比べ、種類が違う値と集合・
-    レコードは比べられない(`none`)。文字列はコードポイントの順(実 DB の "C" 照合と同じ)。 -/
+/-- The ordering of scalar values. Only integers, strings, booleans, datetimes, durations, and decimals of the same kind
+    are compared; values of different kinds, sets, and records cannot be compared (`none`). Strings are in code point
+    order (the same as the "C" collation in the real DB). -/
 def Cell.compare? : Cell → Cell → Option Ordering
   | .prim (.int a), .prim (.int b) => some (compareOfLessAndEq a b)
   | .prim (.string a), .prim (.string b) => some (compareOfLessAndEq a b)
@@ -305,8 +324,8 @@ def Cell.compare? : Cell → Cell → Option Ordering
   | .ext (.decimal a), .ext (.decimal b) => some (compareOfLessAndEq a b)
   | _, _ => none
 
-/-- 行が絞り込みに合うか。列が無ければ合わない。等値は値そのものの一致、大小は `Cell.compare?` の順序
-    (比べられなければ合わない)。 -/
+/-- Whether the row matches the filter. It does not match if the column is missing. Equality is equality of the values
+    themselves; ordering uses the order of `Cell.compare?` (no match if they cannot be compared). -/
 def Filter.matches (f : Filter) (row : Row) : Bool :=
   match row.find? f.column with
   | none => false
@@ -318,11 +337,12 @@ def Filter.matches (f : Filter) (row : Row) : Bool :=
       | some o => c.accepts o
       | none => false
 
-/-- 行がすべての絞り込みに合うか。 -/
+/-- Whether the row matches all filters. -/
 def ListQuery.matches (q : ListQuery) (row : Row) : Bool :=
   q.filters.all (·.matches row)
 
-/-- 1 段の並べ替えで 2 行を比べる。列の無い行は先に来る。比べられない値は同じとみなす。 -/
+/-- Compares two rows by one sort key. Rows missing the column come first. Values that cannot be compared are treated as
+    equal. -/
 def OrderBy.compare (o : OrderBy) (a b : Row) : Ordering :=
   let r := match a.find? o.column, b.find? o.column with
     | some x, some y => (Cell.compare? x y).getD .eq
@@ -333,7 +353,7 @@ def OrderBy.compare (o : OrderBy) (a b : Row) : Ordering :=
   | .asc => r
   | .desc => r.swap
 
-/-- 並べ替えの順序(`a` が `b` より前か同じ)。すべての段で同じなら主キーの順。 -/
+/-- The sort order (`a` comes before `b` or ties with it). Primary key order if equal on every key. -/
 def ListQuery.le (q : ListQuery) (a b : Key × Row) : Bool :=
   go q.orderBy
 where
@@ -345,43 +365,49 @@ where
       | .gt => false
       | .eq => go rest
 
-/-- permit 済みの行列から返す行を選ぶ: 並べ替えて(`List.mergeSort`。安定)、`offset` 番目から `limit` 件。 -/
+/-- Selects the rows to return from the sequence of permitted rows: sorts them (`List.mergeSort`; stable) and takes
+    `limit` rows starting at position `offset`. -/
 def ListQuery.select (q : ListQuery) (rows : List (Key × Row)) : List (Key × Row) :=
   let sorted := rows.mergeSort q.le
   (sorted.drop q.offset).take (q.limit.getD sorted.length)
 
-/-- 返す行はすべて、選ぶ前の行列にある(並べ替えとページは行を増やさない)。 -/
+/-- Every returned row is in the sequence before selection (sorting and paging do not add rows). -/
 theorem ListQuery.mem_select (q : ListQuery) (rows : List (Key × Row)) (kv : Key × Row)
     (h : kv ∈ q.select rows) : kv ∈ rows :=
   List.mem_mergeSort.mp (List.mem_of_mem_drop (List.mem_of_mem_take h))
 
-/-- 行がすべての絞り込みに合うか(`ListQuery.matches` と同じ規則。絞り込みの列だけで決まる)。 -/
+/-- Whether the row matches all filters (the same rule as `ListQuery.matches`; determined only by the filter columns).
+    -/
 def Filter.matchesAll (filters : List Filter) (row : Row) : Bool :=
   filters.all (·.matches row)
 
-/-! ## 一意性と参照整合の宣言
+/-! ## Uniqueness and referential integrity declarations
 
-正本が宣言する DB の制約。`@unique("列, …")` は列の組の一意性(組のどれかの列が無い行は比べない。PostgreSQL の
-`UNIQUE` の NULL と同じ)、`@references("列 restrict, 列 cascade アクション, …")` は実体参照の列の参照整合
-(参照先の行が無い挿入・更新は競合。参照される行の削除は、`restrict` なら参照する行があれば競合、`cascade` なら
-参照する行も消える — その各行はそのテーブルの削除効果を持つ宣言済みアクションで判定され、1 行でも permit され
-なければ要求全体が拒否される)。nyxis は同じ制約を DB にも設定し(`PostgresSql.createTable`)、判定はモデル
-(`Nyxis.Authz.step`)が先に行う(違反は `Outcome.conflict`)。DB 側の制約は判定が外れたときの裏付けで、
-そのときは要求全体が閉じる。 -/
+DB constraints declared by the approved schema. `@unique("column, …")` is uniqueness of a column tuple (rows missing any
+of the tuple's columns are not compared; the same as NULL under PostgreSQL's `UNIQUE`), and
+`@references("column restrict, column cascade action, …")` is referential integrity of entity reference columns (an
+insert or update whose referenced row does not exist is a conflict; deleting a referenced row is a conflict under
+`restrict` if referencing rows exist, and under `cascade` also deletes the referencing rows — each of them is decided by
+a declared action with that table's delete effect, and if even one row is not permitted, the whole request is rejected).
+nyxis also sets the same constraints in the DB (`PostgresSql.createTable`), and the model (`Nyxis.Authz.step`) decides
+first (a violation is `Outcome.conflict`). The DB-side constraints are a backstop for when the decision is wrong, in
+which case the whole request is closed. -/
 
-/-- 列の組の一意性の宣言。 -/
+/-- A uniqueness declaration for a column tuple. -/
 structure Unique where
   table : Table
   columns : List Column
   deriving Repr, DecidableEq
 
-/-- 参照される行を削除するときの振る舞い。`cascade` は参照する行を判定するアクション(そのテーブルの削除効果)。 -/
+/-- The behavior when deleting a referenced row. `cascade` carries the action that decides the referencing rows (that
+    table's delete effect). -/
 inductive OnDelete where
   | restrict
   | cascade (action : EntityUID)
   deriving Repr, DecidableEq
 
-/-- 実体参照の列の参照整合の宣言: 参照する側のテーブルと列、参照される側のテーブル、削除時の振る舞い。 -/
+/-- A referential integrity declaration for an entity reference column: the referencing table and column, the referenced
+    table, and the behavior on delete. -/
 structure Reference where
   table : Table
   column : Column
@@ -389,94 +415,102 @@ structure Reference where
   onDelete : OnDelete
   deriving Repr, DecidableEq
 
-/-- スキーマが宣言する制約。 -/
+/-- The constraints the schema declares. -/
 structure Constraints where
   uniques : List Unique := []
   references : List Reference := []
   deriving Repr, DecidableEq
 
-/-- 一意性の組の絞り込み: 行 `new` の列の値との等値。`new` に組の列が 1 つでも無ければ比べない(`none`)。 -/
+/-- The filters for a uniqueness tuple: equality with the values of row `new`'s columns. Not compared (`none`) if `new`
+    lacks even one of the tuple's columns. -/
 def Unique.filtersOf (u : Unique) (new : Row) : Option (List Filter) :=
   u.columns.mapM fun c => (new.find? c).map fun v => ⟨c, .eq, v⟩
 
-/-- 実体 `uid` を列 `column` で参照する行の絞り込み。 -/
+/-- The filter for rows that reference entity `uid` through column `column`. -/
 def Reference.filterOf (column : Column) (uid : EntityUID) : List Filter :=
   [⟨column, .eq, .prim (.entityUID uid)⟩]
 
 end Db
 
-/-- アクション呼び出しの結果。`denied` は認可層が、`notFound` / `conflict` / `ok` は DB 層が決める。 -/
+/-- The result of an action call. `denied` is decided by the authorization layer; `notFound` / `conflict` / `ok` by the
+    DB layer. -/
 inductive Outcome where
-  /-- 認可層が拒否した(効果の宣言が無い・操作が効果の範囲外・Cedar が deny)。DB 操作は発行されていない。 -/
+  /-- The authorization layer rejected it (no effect declaration, the operation is outside the effect's scope, or Cedar
+      denies). No DB operation has been issued. -/
   | denied
-  /-- 行が無い(読み取り・更新・削除)。 -/
+  /-- The row does not exist (read, update, delete). -/
   | notFound
-  /-- 行が既にある(挿入)。 -/
+  /-- The row already exists (insert). -/
   | conflict
-  /-- 成功。読み取りではその行、書き込み(挿入・更新・削除)では `none`。
-      書き込みの効果で行を返すと、宣言された効果(更新では列)を超えた読み取りになるので返さない。 -/
+  /-- Success. For reads, that row; for writes (insert, update, delete), `none`. Returning a row from a write effect
+      would be a read beyond the declared effect (for updates, the columns), so none is returned. -/
   | ok (row : Option Db.Row)
-  /-- 一覧の成功。対象テーブルの行のうち絞り込みに合い、その主体にそのアクションが permit された行(`total` はその数)
-      を並べ替えてページを切ったものを、主キーと共に返す。 -/
+  /-- A successful list. Returns, with their primary keys, the rows of the target table that match the filters and for
+      which the action is permitted to the principal (`total` is their number), sorted and paged. -/
   | list (rows : List (Db.Key × Db.Row)) (total : Nat)
-  /-- 外部効果(添付の署名付き URL の発行)の成功。Supabase Storage が発行した署名付き URL。行は渡らない。
-      純粋モデルではこの値は要求の外部効果の結果の列(`Nyxis.Runtime.Externals`)から来る任意の文字列で、定理は
-      その発行の記録(`Nyxis.Authz.External`)が認可済みであることを述べる(主定理の (6)(7))。
-      メール送信と `async` の呼び出しの成功は `ok none`(送信の結果は値を持たず、DB も変えない)。 -/
+  /-- A successful external effect (issuing a signed URL for an attachment). The signed URL issued by Supabase Storage.
+      No row is passed. In the pure model this value is an arbitrary string from the request's sequence of external
+      effect results (`Nyxis.Runtime.Externals`), and the theorem states that the record of its issuance
+      (`Nyxis.Authz.External`) is authorized (items (6)(7) of the main theorem). Successful mail sends and `async` calls
+      are `ok none` (the send's result has no value and does not change the DB). -/
   | signed (url : String)
-  /-- `sync` の外部 API 呼び出しの 2xx の応答を、正本で宣言したレコード型に(宣言したキーの欠落と型違いだけを
-      拒み、余分なキーは捨てて)復号した値。行は渡らない。純粋モデルではこの値は要求の外部効果の結果の列から来る
-      任意の値で、定理はその呼び出しの記録が認可済みであること(主定理の (6)(8))と、値がその呼び出しの記録に由来し
-      判定を変えないこと((9))を述べる。 -/
+  /-- The value obtained by decoding the 2xx response of a `sync` external API call into the record type declared in the
+      approved schema (rejecting only missing declared keys and type mismatches, and discarding extra keys). No row is
+      passed. In the pure model this value is an arbitrary value from the request's sequence of external effect results,
+      and the theorem states that the record of that call is authorized (items (6)(8) of the main theorem) and that the
+      value derives from that call's record and does not change decisions ((9)). -/
   | called (value : Value)
-  /-- `sync` の外部 API 呼び出しの 2xx 以外の応答。状態コードと生の本文(ハンドラが業務上の失敗として扱う)。 -/
+  /-- A non-2xx response of a `sync` external API call. The status code and the raw body (the handler treats it as a
+      business failure). -/
   | calledError (status : Nat) (body : String)
 
-/-- 結果がハンドラに渡す(主キー, 行)の組。読み取りの成功では呼び出しの主キー `key` とその行、一覧では返す
-    各組、それ以外は無い。定理はこの組の出所について述べる(`Nyxis.Runtime.authorization_safety` の (3))。 -/
+/-- The (primary key, row) pairs the result passes to the handler. For a successful read, the call's primary key `key`
+    and that row; for a list, each returned pair; otherwise none. The theorem states where these pairs come from (item
+    (3) of `Nyxis.Runtime.authorization_safety`). -/
 def Outcome.entries (key : Db.Key) : Outcome → List (Db.Key × Db.Row)
   | .ok (some row) => [(key, row)]
   | .list rows _ => rows
   | .ok none | .denied | .notFound | .conflict | .signed _ | .called _ | .calledError _ _ => []
 
-/-- 外部効果の結果の値を持つ結果か(署名付き URL、呼び出しの応答)。こうした結果は外部効果の処理でだけ生じる
-    (主定理の (7)(9))。 -/
+/-- Whether the result carries the value of an external effect's result (a signed URL, a call's response). Such results
+    arise only from processing external effects (items (7)(9) of the main theorem). -/
 def Outcome.isExternal : Outcome → Bool
   | .signed _ | .called _ | .calledError _ _ => true
   | .ok _ | .denied | .notFound | .conflict | .list _ _ => false
 
-/-- 外部 API 呼び出しの応答か(`called` / `calledError`)。 -/
+/-- Whether it is an external API call's response (`called` / `calledError`). -/
 def Outcome.isCalled : Outcome → Bool
   | .called _ | .calledError _ _ => true
   | .ok _ | .denied | .notFound | .conflict | .list _ _ | .signed _ => false
 
 namespace Db
 
-/-- DB の状態の純粋モデル。(テーブル, 主キー) = エンティティ UID から行への有限写像。 -/
+/-- A pure model of the DB state. A finite map from (table, primary key) = entity UID to rows. -/
 abbrev Store := Cedar.Data.Map EntityUID Row
 
 namespace Store
 
-/-- テーブル `table` の主キー `key` の行。 -/
+/-- The row of table `table` with primary key `key`. -/
 def find? (s : Store) (table : Table) (key : Key) : Option Row :=
   Cedar.Data.Map.find? s ⟨table, key⟩
 
-/-- 行を置く。既にあれば置き換える。 -/
+/-- Puts a row. Replaces it if it already exists. -/
 def put (s : Store) (table : Table) (key : Key) (row : Row) : Store :=
   Cedar.Data.Map.make
     (((⟨table, key⟩ : EntityUID), row) :: s.toList.filter (fun kv => kv.1 != (⟨table, key⟩ : EntityUID)))
 
-/-- 行を消す。 -/
+/-- Removes a row. -/
 def remove (s : Store) (table : Table) (key : Key) : Store :=
   Cedar.Data.Map.filter (fun uid _ => uid != (⟨table, key⟩ : EntityUID)) s
 
-/-- テーブル `table` の現在の全行(主キーと行)。主キーは現在の状態にある行のものを順に取り、行はその主キーで
-    `find?` を引く(読み取りの操作 `apply (.read …)` と同じ経路)。一覧はこの各行について判定する。 -/
+/-- All current rows of table `table` (primary keys and rows). The primary keys are taken in order from the rows in the
+    current state, and each row is looked up with `find?` by that primary key (the same path as the read operation
+    `apply (.read …)`). A list makes a decision for each of these rows. -/
 def rows (s : Store) (table : Table) : List (Key × Row) :=
   (s.toList.filterMap fun kv => if kv.1.ty == table then some kv.1.eid else none).filterMap
     fun key => (s.find? table key).map (key, ·)
 
-/-- `rows` が返す各行は、その主キーで `find?` を引いた現在の行である。 -/
+/-- Each row `rows` returns is the current row looked up with `find?` by its primary key. -/
 theorem rows_find? (s : Store) (table : Table) (key : Key) (row : Row)
     (h : (key, row) ∈ s.rows table) : s.find? table key = some row := by
   simp only [rows, List.mem_filterMap] at h
@@ -486,7 +520,7 @@ theorem rows_find? (s : Store) (table : Table) (key : Key) (row : Row)
   obtain ⟨rfl, rfl⟩ := hk
   exact hf
 
-/-- DB 操作を適用する。新しい状態と、ハンドラに返す結果。 -/
+/-- Applies a DB operation. Returns the new state and the result passed back to the handler. -/
 def apply (s : Store) : Operation → Store × Outcome
   | .read t k =>
     match s.find? t k with
@@ -505,25 +539,27 @@ def apply (s : Store) : Operation → Store × Outcome
     | some _ => (s.remove t k, .ok none)
     | none => (s, .notFound)
 
-/-- 読み取りは DB の状態を変えない。 -/
+/-- Reads do not change the DB state. -/
 theorem apply_read_fst (s : Store) (table : Table) (key : Key) :
     (s.apply (.read table key)).1 = s := by
   simp only [apply]
   split <;> rfl
 
-/-- 行の操作の結果は一覧の結果ではない(一覧の結果は `Nyxis.Authz.step` が一覧の効果でだけ作る)。 -/
+/-- The result of a row operation is not a list result (list results are produced by `Nyxis.Authz.step` only for list
+    effects). -/
 theorem apply_snd_ne_list (s : Store) (op : Operation) (rows : List (Key × Row)) (total : Nat) :
     (s.apply op).2 ≠ .list rows total := by
   cases op <;> simp only [apply] <;> split <;> simp
 
-/-- 行の操作の結果は外部効果の結果ではない(署名付き URL と呼び出しの応答は `Nyxis.Authz.step` が外部効果でだけ
-    渡す)。 -/
+/-- The result of a row operation is not an external effect result (signed URLs and call responses are passed by
+    `Nyxis.Authz.step` only for external effects). -/
 theorem apply_snd_isExternal (s : Store) (op : Operation) :
     (s.apply op).2.isExternal = false := by
   cases op <;> simp only [apply] <;> split <;> rfl
 
-/-- 行を含む結果は、同じ直前状態の主キー読み取りだけから生じる: 結果が渡す行は、操作が読み取りで、
-    その主キーで `find?` を引いた現在の行である。書き込みに渡した値や既存行が結果として返ることはない。 -/
+/-- A result containing a row arises only from a primary key read on the same prior state: the row the result passes is
+    the current row looked up with `find?` by that primary key, and the operation is a read. Values passed to writes and
+    existing rows are never returned as results. -/
 theorem apply_row (s : Store) (op : Operation) (row : Row)
     (h : (s.apply op).2 = .ok (some row)) :
     ∃ table key, op = .read table key ∧ s.find? table key = some row := by
@@ -531,8 +567,9 @@ theorem apply_row (s : Store) (op : Operation) (row : Row)
   all_goals split at h <;> simp_all
   exact ⟨_, _, ⟨rfl, rfl⟩, by assumption⟩
 
-/-- 結果が渡す(主キー, 行)の組は、操作が読み取りのときだけ生じ、主キーは `entries` に渡した呼び出しの主キー、
-    行はその読み取りの主キーで `find?` を引いた現在の行である(一覧の結果は `apply` からは生じない)。 -/
+/-- A (primary key, row) pair the result passes arises only when the operation is a read; the primary key is the call's
+    primary key passed to `entries`, and the row is the current row looked up with `find?` by that read's primary key
+    (list results never arise from `apply`). -/
 theorem apply_entries (s : Store) (op : Operation) (key : Key) (kv : Key × Row)
     (h : kv ∈ (s.apply op).2.entries key) :
     ∃ table readKey, op = .read table readKey ∧ kv.1 = key ∧ s.find? table readKey = some kv.2 := by

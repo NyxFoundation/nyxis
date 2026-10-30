@@ -1,7 +1,7 @@
 import Nyxis.Build
 import Nyxis.Internal.PostgresShape
 
-/-! 内部のビルド時メタデータ。アプリケーションの最終監査の後にだけ import する。 -/
+/-! Internal build-time metadata. Imported only after the application's final audit. -/
 namespace Nyxis.Internal.PostgresShapeBuild
 open Lean Elab Command
 

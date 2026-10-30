@@ -1,23 +1,25 @@
 import Nyxis.CedarSchema
 import Nyxis.Internal.PostgresValue
 
-/-! 正本から導いた列の型・必須属性による行の検査(A4。定理の外)。型の情報は `Authz.Schema` に持たせず、
-認可の定理とモデルを変えない。列の型は、スカラー(`Bool` / `Long` / `String` / エンティティ参照 /
-拡張型 `decimal` / `datetime` / `duration`)、スカラーの集合 `Set<…>`、スカラーを属性に持つレコード
-`{ … }` に対応する。対応しない Cedar の形(名前空間・共通型・tags・enum・集合やレコードの入れ子・
-`ipaddr`・組み込み型と同名のエンティティ)は拒む。実体の親(`entity T in [P]` と `@parents`)は列の保存形式を
-変えない(祖先は親を指す列の値から判定時に決まる)ので、正本の検査(`CedarSchema.elaborate`)に委ねて受け入れる。
-SQL は実行しない。PostgreSQL の接続層が、認可の前(全行)と SQL 発行の前(提案値)に使う。
+/-! Row checks by the column types and required attributes derived from the approved sources (A4; outside the theorems).
+The type information is not stored in `Authz.Schema`, so the authorization theorems and the model are unchanged. Column
+types correspond to scalars (`Bool` / `Long` / `String` / entity references / the extension types `decimal` / `datetime`
+/ `duration`), sets of scalars `Set<…>`, and records with scalar attributes `{ … }`. Unsupported Cedar forms
+(namespaces, common types, tags, enums, nested sets or records, `ipaddr`, entities with the same name as a built-in
+type) are rejected. Entity parents (`entity T in [P]` and `@parents`) do not change the column storage format (ancestors
+are determined at decision time from the values of the columns pointing to parents), so they are accepted, deferring to
+the check of the approved sources (`CedarSchema.elaborate`). No SQL is executed. The PostgreSQL connection layer uses
+this before authorization (all rows) and before issuing SQL (proposed values).
 -/
 namespace Nyxis.Internal.PostgresShape
 open Nyxis Db Cedar.Spec
 
-/-- スカラーの列の型。集合の要素とレコードの属性にもなる。 -/
+/-- The type of a scalar column. Also used for set elements and record attributes. -/
 inductive ScalarType where
   | bool | int | string | decimal | datetime | duration | entity (ty : EntityType)
   deriving Repr, DecidableEq
 
-/-- 列の型。スカラー、スカラーの集合、スカラーの属性(名前・省略可か・型)を持つレコード。 -/
+/-- A column type: a scalar, a set of scalars, or a record with scalar attributes (name, whether optional, type). -/
 inductive CellType where
   | scalar (ty : ScalarType)
   | set (elem : ScalarType)
@@ -33,11 +35,11 @@ structure Attribute where
 abbrev Shape := List (Table × List Attribute)
 private def invalid : Except String α := .error "Unsupported PostgreSQL shape or invalid row"
 
-/-- 列として保存できる Cedar の拡張型(`__cedar::` で修飾してもよい)。 -/
+/-- The Cedar extension types that can be stored as columns (may be qualified with `__cedar::`). -/
 def extensionTypes : List (String × ScalarType) :=
   [("decimal", .decimal), ("datetime", .datetime), ("duration", .duration)]
 
-/-- エンティティ型の名前にできない組み込みの型名。 -/
+/-- Built-in type names that cannot be used as entity type names. -/
 def builtinTypeNames : List String := ["Bool", "Long", "String", "decimal", "datetime", "duration", "ipaddr"]
 
 private def scalarType (schema : Authz.Schema) (ty : CedarSchema.Ty) : Except String ScalarType :=
@@ -68,10 +70,11 @@ private def cellType (schema : Authz.Schema) (ty : CedarSchema.Ty) : Except Stri
     return .record fields
   | ty => .scalar <$> scalarType schema ty
 
-/-- モデルと同じ Cedar の正本を読む。手書きの列の写像は持たない。
-対応するのは、名前空間の無いレコード形のエンティティで、スカラー・スカラーの集合・スカラーのレコードの
-属性を持つものだけ(親を指す列を持つエンティティを含む)。予約型 `Anonymous` / `Service`(テーブルではない)は形状に含めない。別名・tags・enum・入れ子の複合属性は、保存形式が現在
-保てない意味を消すのではなく拒む。
+/-- Reads the same approved Cedar sources as the model. There is no hand-written column mapping. Only record-shaped
+entities without a namespace whose attributes are scalars, sets of scalars or records of scalars are supported
+(including entities with columns pointing to parents). The reserved types `Anonymous` / `Service` (not tables) are not
+included in the shape. Aliases, tags, enums and nested composite attributes are rejected rather than silently dropping
+meaning the storage format cannot currently preserve.
 -/
 def compile (source : String) : Except String Shape := do
   let doc ← (CedarSchema.parseDocumentString source).mapError (fun _ => "Invalid Cedar shape source")
@@ -84,7 +87,7 @@ def compile (source : String) : Except String Shape := do
       | .typeAlias _ => invalid
       | .action _ => pure ()
       | .entity entity =>
-        -- 名前付きの送り先(`@external`)はテーブルではないので形状に含めない。
+        -- A named destination (`@external`) is not a table, so it is not included in the shape.
         if entity.annotations.any (·.key == "external") then continue
         unless entity.tags.isNone && entity.enum.isNone do invalid
         if entity.names.any builtinTypeNames.contains then invalid
@@ -111,8 +114,8 @@ private def acceptsScalar (ty : ScalarType) (value : Value) : Bool :=
   | .entity expected, .prim (.entityUID uid) => uid.ty == expected
   | _, _ => false
 
-/-- 集合は各要素が要素の型に合うこと。レコードは供給された各属性が宣言された属性の型に合い、
-省略可でない属性がすべて揃うこと。 -/
+/-- For a set, each element matches the element type. For a record, each supplied attribute matches the declared
+attribute's type, and all non-optional attributes are present. -/
 private def acceptsCell (ty : CellType) (value : Value) : Bool :=
   match ty, value with
   | .scalar t, v => acceptsScalar t v
@@ -125,7 +128,8 @@ private def acceptsCell (ty : CellType) (value : Value) : Bool :=
     fields.all (fun (k, optional, _) => optional || m.contains k)
   | _, _ => false
 
-/-- 供給された各セルが宣言された列・型・保存形式に合うこと。参照先の行の存在は検査しない。 -/
+/-- Each supplied cell matches the declared column, type and storage format. Existence of referenced rows is not
+checked. -/
 private def validateCells (shape : Shape) (table : Table) (row : Row) : Except String (List Attribute) := do
   let [(_, attrs)] := shape.filter (·.1 == table) | invalid
   unless (attrs.map (·.name)).eraseDups == attrs.map (·.name) do invalid
@@ -135,29 +139,31 @@ private def validateCells (shape : Shape) (table : Table) (row : Row) : Except S
     let _ ← PostgresValue.encode value
   return attrs
 
-/-- 完全な行: 省略可でない属性がすべて揃っていること。挿入する行と、更新を重ねた後の行に使う。 -/
+/-- A complete row: all non-optional attributes are present. Used for inserted rows and for rows after applying an
+update. -/
 def validateRow (shape : Shape) (table : Table) (row : Row) : Except String Unit := do
   let attrs ← validateCells shape table row
   unless attrs.all (fun a => a.optional || (row.find? a.name).isSome) do invalid
 
-/-- 更新の差分: 供給された列だけを検査する。更新後の完全な行は呼び出し側が別に `validateRow` で検査する。 -/
+/-- An update patch: checks only the supplied columns. The caller separately checks the complete row after the update
+with `validateRow`. -/
 def validatePatch (shape : Shape) (table : Table) (changes : Row) : Except String Unit := do
   let _ ← validateCells shape table changes
 
-/-- メタデータを使う前に、モデルと形状のテーブル・列の完全な一致を要求する。 -/
+/-- Before using the metadata, requires the tables and columns of the model and the shape to match exactly. -/
 def validateSchema (shape : Shape) (schema : Authz.Schema) : Except String Unit := do
   unless shape.map (fun (t, attrs) => (t, attrs.map (·.name))) == schema.tables do invalid
   unless (shape.map Prod.fst).eraseDups == shape.map Prod.fst do invalid
   for (_, attrs) in shape do
     unless (attrs.map (·.name)).eraseDups == attrs.map (·.name) do invalid
 
-/-- 認可の材料をモデルへ渡す前に、すべて検査する。 -/
+/-- Checks all decision materials before passing them to the model. -/
 def validateStore (shape : Shape) (store : Store) : Except String Unit := do
   for (uid, row) in store.toList do
     validateRow shape uid.ty row
 
-/-- 提案値は、結果が競合・行の不在であっても検査する。更新では、直前のモデルの状態を使って
-変更を重ねた後の完全な行も検査する。 -/
+/-- Proposed values are checked even if the result is a conflict or a missing row. For an update, the complete row after
+applying the changes is also checked, using the preceding model state. -/
 def validateOperation (shape : Shape) (store : Store) (op : Operation) : Except String Unit := do
   match op with
   | .insert table _ row => validateRow shape table row

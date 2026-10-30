@@ -47,7 +47,7 @@ private def failed : IO α := throw (IO.userError "injected read failure")
 
 def main : IO Unit := do
   let s : PostgresSnapshot.Result := ⟨["_nyxis_id", "admin"],
-    [[some "日本語", some "[\"bool\",true]"], [some "", none]]⟩
+    [[some "\u65E5\u672C\u8A9E", some "[\"bool\",true]"], [some "", none]]⟩
   let r := mock s
   check "NULL, empty key and UTF-8 bytes" r (some s)
   let empty : PostgresSnapshot.Result := ⟨s.columns, []⟩

@@ -1,13 +1,14 @@
 import Nyxis
 
 /-!
-# Test.Fixture — コアの検査データ
+# Test.Fixture — core test data
 
-`Test.Smoke` と `Test/Postgres*.lean` が共有する、コア専用のスキーマ・ポリシー・DB の初期状態と、
-1 回の呼び出しを検査する補助。Cedar の抽象構文で手書きし、アプリケーションのファイルは読まない。
+Core-only schema, policies and initial DB state shared by `Test.Smoke` and `Test/Postgres*.lean`, plus helpers for
+checking a single call. Hand-written in Cedar's abstract syntax; does not read application files.
 
-- 利用者 alice・bob・root(管理者)と、alice の公開済み投稿 pub1・下書き draft1。
-- 投稿の読み取り・一覧・作成・編集・公開・削除、管理者権限の付与、利用者の登録・読み取り・一覧。
+- Users alice, bob and root (administrator), and alice's published post pub1 and draft draft1.
+- Reading, listing, creating, editing, publishing and deleting posts; granting administrator rights; registering,
+  reading and listing users.
 -/
 
 namespace Test.Fixture
@@ -18,7 +19,7 @@ open Nyxis
 open Nyxis.Db
 open Nyxis.Authz
 
-/-! ## スキーマ -/
+/-! ## Schema -/
 
 def userT : EntityType := ⟨"User", []⟩
 def postT : EntityType := ⟨"Post", []⟩
@@ -28,7 +29,7 @@ def act (name : String) : EntityUID := ⟨actionT, name⟩
 def user (id : String) : EntityUID := ⟨userT, id⟩
 def post (id : String) : EntityUID := ⟨postT, id⟩
 
-/-- 型環境のエンティティ項目(標準型。属性はすべて必須、親と tags は無し)。 -/
+/-- An entity entry of the type environment (standard type; all attributes required, no parents or tags). -/
 def entityTy (attrs : List (String × Cedar.Validation.CedarType)) : Cedar.Validation.EntitySchemaEntry :=
   .standard { ancestors := Set.make [], attrs := Map.make (attrs.map fun (n, t) => (n, .required t)), tags := none }
 
@@ -36,17 +37,17 @@ def userAttrs : List (String × Cedar.Validation.CedarType) := [("admin", .bool 
 def postAttrs : List (String × Cedar.Validation.CedarType) :=
   [("author", .entity userT), ("title", .string), ("body", .string), ("published", .bool .anyBool)]
 
-/-- 判定の文脈の型 `{ values: { … } }`。 -/
+/-- The type of the decision context `{ values: { … } }`. -/
 def valuesCtx (fields : List (String × Cedar.Validation.QualifiedType)) : Cedar.Validation.RecordType :=
   Map.make [("values", .required (.record (Map.make fields)))]
 
-/-- 型環境のアクション項目。 -/
+/-- An action entry of the type environment. -/
 def actionTy (principals resources : List EntityType)
     (context : Cedar.Validation.RecordType := Map.empty) : Cedar.Validation.ActionSchemaEntry :=
   { appliesToPrincipal := Set.make principals, appliesToResource := Set.make resources,
     ancestors := Set.make [], context }
 
-/-- cedar-lean の型環境(手書き。`Nyxis.CedarSchema` が正本から構成するものと同じ形)。 -/
+/-- The cedar-lean type environment (hand-written; the same shape that `Nyxis.CedarSchema` builds from the sources). -/
 def types : Cedar.Validation.Schema :=
   ⟨ Map.make [(userT, entityTy userAttrs), (postT, entityTy postAttrs), (anonymousType, entityTy [])]
   , Map.make
@@ -76,7 +77,7 @@ def schema : Schema :=
       , ⟨act "listUsers", ⟨.list, userT⟩⟩ ]
     types }
 
-/-! ## ポリシー -/
+/-! ## Policies -/
 
 def resourceAttr (a : Attr) : Expr := .getAttr (.var .resource) a
 def principalAttr (a : Attr) : Expr := .getAttr (.var .principal) a
@@ -105,7 +106,7 @@ def policies : Policies :=
   , permitWhen "read-user" (.is userT) (.actionInAny [act "readUser", act "listUsers"]) (.is userT)
       (.or (.binaryApp .eq (.var .resource) (.var .principal)) principalIsAdmin) ]
 
-/-! ## DB の初期状態 -/
+/-! ## Initial DB state -/
 
 def row (kvs : List (Column × Cell)) : Row := Map.make kvs
 
@@ -124,10 +125,11 @@ def bob : Principal := .user (user "bob")
 def root : Principal := .user (user "root")
 def anon : Principal := .anonymous
 
-/-- 検査用の固定のサーバー生成値(fixture のアクションは `context` に `now` / `id` を宣言していないので判定に現れない)。 -/
+/-- Fixed server-generated values for tests (the fixture's actions do not declare `now` / `id` in `context`, so they do
+    not appear in decisions). -/
 def gen : Generated := { now := ⟨1700000000000⟩, id := "00000000-0000-4000-8000-000000000001" }
 
-/-! ## 1 回の呼び出しの検査 -/
+/-! ## Checking a single call -/
 
 def isOk : Outcome → Bool
   | .ok _ => true
@@ -137,12 +139,13 @@ def isDenied : Outcome → Bool
   | .denied => true
   | _ => false
 
-/-- 呼び出しが許可され、操作が 1 つ発行され、その操作の主体とサーバー生成値が呼び出しのものである。 -/
+/-- The call is allowed, exactly one operation is issued, and that operation's principal and server-generated values are
+    those of the call. -/
 def allowed (p : Principal) (s : Store) (action : String) (key : Key) (values : Row := Map.empty) : Bool :=
   let r := step schema policies p gen s (act action) key values {}
   isOk r.outcome && (match r.issued with | [i] => i.principal == p && i.generated == gen | _ => false)
 
-/-- 呼び出しが拒否され、操作は発行されず、DB の状態も変わらない。 -/
+/-- The call is denied, no operation is issued, and the DB state does not change. -/
 def denied (p : Principal) (s : Store) (action : String) (key : Key) (values : Row := Map.empty) : Bool :=
   let r := step schema policies p gen s (act action) key values {}
   isDenied r.outcome && r.issued.isEmpty && r.store == s

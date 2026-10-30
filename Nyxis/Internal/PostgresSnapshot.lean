@@ -1,15 +1,14 @@
 import Nyxis.Internal.PostgresSql
 
-/-! 内部の SELECT スナップショットの純粋な復号(A4。定理の外)。
-SQL の NULL は属性の欠落を意味し、Cedar の値にはならない。Store を返す前にスナップショット全体を
-検証する。Map.make が重複した主キーを黙って潰してはならない。
-呼び出し側はすべてのテーブルを同じ SERIALIZABLE トランザクションの中で読まなければならない。
-このモジュールは SQL を実行せず、認可もせず、ハンドラにデータを返さない。
+/-! Pure decoding of the internal SELECT snapshot (A4; outside the theorems). An SQL NULL means the attribute is absent;
+it never becomes a Cedar value. The whole snapshot is validated before a Store is returned. Map.make must not silently
+collapse duplicate primary keys. The caller must read all tables inside the same SERIALIZABLE transaction. This module
+executes no SQL, performs no authorization, and returns no data to handlers.
 -/
 namespace Nyxis.Internal.PostgresSnapshot
 open Nyxis Db Cedar.Spec
 
-/-- PostgresSql.selectTable のテキスト形式の結果。none は SQL の NULL。 -/
+/-- The text-format result of PostgresSql.selectTable. none is SQL NULL. -/
 structure Result where
   columns : List String
   rows : List (List (Option String))
@@ -26,10 +25,10 @@ private def attributes (columns : List Column) (values : List (Option String)) :
       | some stored => return some (column, ← PostgresValue.decode stored)
     return Cedar.Data.Map.make (cells.filterMap id)
 
-/-- 写像を作る前に、SELECT の投影と各行を、重複も含めて検査する。 -/
+/-- Before building the map, checks the SELECT projection and every row, including duplicates. -/
 def tableRows (schema : Authz.Schema) (table : Table) (result : Result) :
     Except String (List (EntityUID × Row)) := do
-  -- SQL の配置の検証を再利用する(対応しないテーブルと識別子の衝突を含む)。
+  -- Reuse the SQL layout validation (including unsupported tables and identifier collisions).
   let _ ← PostgresSql.selectTable schema table
   let some columns := (schema.tables.find? (fun entry => entry.1 == table)).map Prod.snd
     | invalid
@@ -41,8 +40,8 @@ def tableRows (schema : Authz.Schema) (table : Table) (result : Result) :
     let keys := rows.map Prod.fst
     if keys.eraseDups != keys then invalid else pure rows
 
-/-- スキーマの各テーブルにちょうど 1 つの結果を要求する。テーブルの欠落は空のテーブルではない。
-結果の順序は問わない。重複・余分・対応しないテーブルは拒む。
+/-- Requires exactly one result for each table of the schema. A missing table is not an empty table. The order of
+results does not matter. Duplicate, extra and unsupported tables are rejected.
 -/
 def restore (schema : Authz.Schema) (results : List (Table × Result)) : Except String Store := do
   let expected := schema.tables.map Prod.fst
@@ -85,7 +84,7 @@ private theorem forall₂_imp {r s : α → β → Prop}
   | nil => exact .nil
   | cons head _ ih => exact .cons (imp _ _ head) ih
 
-/-- 入力の各セルは、属性を省く(SQL の NULL)か、復号に成功するかのどちらか。 -/
+/-- Each input cell either omits the attribute (SQL NULL) or decodes successfully. -/
 def AttributeCell (input : Column × Option String) (output : Option (Column × Cedar.Spec.Value)) : Prop :=
   match input.2 with
   | none => output = none
@@ -126,8 +125,8 @@ private theorem attributes_success (columns : List Column) (values : List (Optio
           cases hc
           exact ⟨value, hd, rfl⟩
 
-/-- 主キーがあり NUL を含まない。属性は Map.make までは入力順を保つ。
-構成について述べるもので、Cedar の写像の検索の意味論は述べない。 -/
+/-- The primary key is present and contains no NUL. Attributes keep input order up to Map.make. This describes the
+construction and says nothing about the lookup semantics of Cedar maps. -/
 def DecodedRow (table : Table) (columns : List Column)
     (input : List (Option String)) (output : EntityUID × Row) : Prop :=
   ∃ key values cells, input = some key :: values ∧ key.contains '\x00' = false ∧
@@ -161,10 +160,11 @@ private theorem decodeRow_success (table : Table) (columns : List Column)
           obtain ⟨hl, cells, hc, hr⟩ := attributes_success columns values row ha
           exact ⟨key, values, cells, rfl, by simpa using hk, hl, hc, by rw [hr]⟩
 
-/-- 日本語: 実tableRowsが成功すると、投影は主キーと宣言列に一致し、入力順の
-各行は非NULLかつNULを含まない主キーを持つ。属性セル数は宣言列数と等しく、
-NULLは属性欠落、非NULLは実decode成功の値となり、その順のMap.makeが返却行を構成する。
-値デコーダ内部・Map検索・外部DB実状態の意味論は含まない。 -/
+/-- When the real tableRows succeeds, the projection matches the primary key and the declared columns, and each row in
+input order has a non-NULL primary key containing no NUL. The number of attribute cells equals the number of declared
+columns; NULL means the attribute is absent, non-NULL becomes the value of a successful real decode, and Map.make in
+that order constructs the returned row. The value decoder internals, Map lookup and the semantics of the external DB's
+actual state are not included. -/
 theorem tableRows_cells (schema : Authz.Schema) (table : Table) (result : Result)
     (rows : List (EntityUID × Row)) (h : tableRows schema table result = .ok rows) :
     ∃ columns,
@@ -199,9 +199,9 @@ theorem tableRows_cells (schema : Authz.Schema) (table : Table) (result : Result
             exact forall₂_imp (fun _ _ hr => decodeRow_success table columns _ _ hr)
               (mapM_success _ _ _ hm)
 
-/-- 日本語: 実tableRowsが成功したなら、SELECT生成とテーブル検索が成功し、
-列の並びは主キーと宣言列に一致する。復号前後の行数は等しく、復号後の
-主キーに重複はない。セル値の復号とMap検索の意味論、外部DBとの一致は含まない。 -/
+/-- If the real tableRows succeeds, SELECT generation and the table lookup succeeded, and the column order matches the
+primary key and the declared columns. The row counts before and after decoding are equal, and the decoded primary keys
+have no duplicates. Cell value decoding, Map lookup semantics and agreement with the external DB are not included. -/
 theorem tableRows_success (schema : Authz.Schema) (table : Table) (result : Result)
     (rows : List (EntityUID × Row)) (h : tableRows schema table result = .ok rows) :
     ∃ command columns, PostgresSql.selectTable schema table = .ok command ∧
@@ -238,10 +238,10 @@ theorem tableRows_success (schema : Authz.Schema) (table : Table) (result : Resu
               forall₂_length _ _ _ (mapM_success _ _ _ hm)
             exact ⟨command, columns, rfl, rfl, by simpa using hp, hl, by simpa using hd⟩
 
-/-- 日本語: 実restoreが成功したなら、スキーマと結果のテーブル名に重複はなく、
-個数が等しく、全スキーマテーブルが結果に含まれる。入力順の各結果について
-実tableRowsが成功し、その復号行を同じ順序で連結したMapが返却Storeそのもの。
-外部DB実状態やSQLの意味論、Mapの検索意味論は主張しない。 -/
+/-- If the real restore succeeds, the table names of the schema and of the results have no duplicates, their counts are
+equal, and every schema table is included in the results. The real tableRows succeeds for each result in input order,
+and the Map of those decoded rows concatenated in the same order is exactly the returned Store. Nothing is claimed about
+the external DB's actual state, SQL semantics, or Map lookup semantics. -/
 theorem restore_success (schema : Authz.Schema) (results : List (Table × Result))
     (store : Store) (h : restore schema results = .ok store) :
     let expected := schema.tables.map Prod.fst
@@ -270,7 +270,7 @@ theorem restore_success (schema : Authz.Schema) (results : List (Table × Result
       cases h
       exact ⟨rows, mapM_success _ _ _ hm, rfl⟩
 
-/-- SQL の NULL は属性を省く。NULL でない各セルは、解析されタグのついた Cedar の値を持つ。 -/
+/-- SQL NULL omits the attribute. Each non-NULL cell has a parsed, tagged Cedar value. -/
 def ValueCell (input : Column × Option String)
     (output : Option (Column × Cedar.Spec.Value)) : Prop :=
   match input.2 with
@@ -289,7 +289,7 @@ private theorem AttributeCell.values (input : Column × Option String)
     obtain ⟨json, parsed, tagged⟩ := PostgresValue.decode_success stored value decoded
     exact ⟨value, json, parsed, tagged, result⟩
 
-/-- 入力順の行の構成。NULL でない各属性について JSON のタグの関係を持つ。 -/
+/-- Construction of a row in input order, with the JSON tag relation for each non-NULL attribute. -/
 def ValueRow (table : Table) (columns : List Column)
     (input : List (Option String)) (output : EntityUID × Row) : Prop :=
   ∃ key values cells, input = some key :: values ∧ key.contains '\x00' = false ∧
@@ -304,10 +304,11 @@ private theorem DecodedRow.values (table : Table) (columns : List Column)
   exact ⟨key, values, cells, shape, noNul, length,
     forall₂_imp AttributeCell.values related, result⟩
 
-/-- 日本語: 実tableRows成功時、入力順の各行は非NULLかつNUL無しの主キーを持ち、
-NULL属性は欠落する。非NULL属性はJSON解析に成功し、タグ別Decoded関係のCedar値となる。
-整数値保存はDecoded.int_valueで得られる。返却行は同じ順序のセルから構成される。
-JSON解析器内部・Map検索・外部DB実状態との一致は含まない。 -/
+/-- When the real tableRows succeeds, each row in input order has a non-NULL primary key without NUL, and NULL
+attributes are absent. Non-NULL attributes parse as JSON successfully and become Cedar values in the per-tag Decoded
+relation. Preservation of integer values is obtained from Decoded.int_value. The returned rows are built from the cells
+in the same order. The JSON parser internals, Map lookup and agreement with the external DB's actual state are not
+included. -/
 theorem tableRows_values (schema : Authz.Schema) (table : Table) (result : Result)
     (rows : List (EntityUID × Row)) (h : tableRows schema table result = .ok rows) :
     ∃ columns,
@@ -318,10 +319,10 @@ theorem tableRows_values (schema : Authz.Schema) (table : Table) (result : Resul
   exact ⟨columns, found, projection,
     forall₂_imp (DecodedRow.values table columns) related⟩
 
-/-- 日本語: 実restore成功時、入力の各テーブル結果について宣言列と投影が一致し、
-入力順の全行・全属性がValueRow/ValueCellのタグ別JSON復号関係を満たす。
-それらの行をテーブル結果順に連結したMap.makeが返却Storeそのものである。
-Map検索・JSON解析器内部・SQL意味論や外部DB実状態との一致は主張しない。 -/
+/-- When the real restore succeeds, the declared columns and the projection match for each input table result, and every
+row and attribute in input order satisfies the per-tag JSON decoding relation ValueRow/ValueCell. Map.make over those
+rows concatenated in table-result order is exactly the returned Store. Nothing is claimed about Map lookup, the JSON
+parser internals, SQL semantics, or agreement with the external DB's actual state. -/
 theorem restore_values (schema : Authz.Schema) (results : List (Table × Result))
     (store : Store) (h : restore schema results = .ok store) :
     ∃ rows, List.Forall₂ (fun entry decoded => ∃ columns,
