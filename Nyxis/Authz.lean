@@ -19,7 +19,9 @@ DB 層で実行する。
     実体の祖先 — ポリシーの `in` の判定材料)。それにスキーマの全アクションの実体を加える
     (`Nyxis.Materials.entities`)。
     挿入で現在の行が無ければ、提案される行を対象の実体として加える。ただし主体自身の実体は常に
-    DB の現在の行から決まり、提案される値で置き換えない。
+    DB の現在の行から決まり、提案される値で置き換えない。所属行(`@memberships`)から得る祖先は、どの実体でも
+    挿入の前の DB の所属行から決まる(提案される所属行で主体を含む他の実体の祖先を変えない — 自分を組に加える
+    挿入を、加わった後の所属で判定しない)。
   - 文脈: 挿入・更新では提案される値を `context.values` に置く。読み取り・一覧・削除では無い。正本のアクションの
     `context` が `now`(datetime)/ `id`(String)を宣言していれば、nyxis が要求ごとに決めたサーバー生成値
     (`Generated`: 現在時刻と新しい一意 ID)を `context.now` / `context.id` に置く。ハンドラはこの値を
@@ -156,12 +158,13 @@ def judgementRequest (schema : Schema) (principal : Principal) (generated : Gene
 
 /-- Cedar に渡す実体(判定材料の全体)。DB の現在の行のうちスキーマに適合する行と、スキーマの全アクション
     (`Nyxis.Materials.entities`)。挿入で現在の行が無ければ提案される行を対象の実体として加える
-    (主体自身を除く)。 -/
+    (主体自身を除く)。所属行から得る祖先は挿入の前の状態 `store` の所属行から決める(`Materials.entitiesWith`):
+    提案される行が所属行のテーブルの行でも、主体を含む他の実体の祖先は変わらない。 -/
 def judgementEntities (schema : Schema) (principal : Principal) (store : Store) (op : Operation) : Entities :=
   match op with
   | .insert t k row =>
     if (store.find? t k).isNone && (⟨t, k⟩ : EntityUID) != principal.uid
-    then Nyxis.Materials.entities schema.types schema.parents schema.memberships (store.put t k row)
+    then Nyxis.Materials.entitiesWith schema.types schema.parents schema.memberships store (store.put t k row)
     else Nyxis.Materials.entities schema.types schema.parents schema.memberships store
   | _ => Nyxis.Materials.entities schema.types schema.parents schema.memberships store
 
@@ -214,15 +217,15 @@ def Authorized (schema : Schema) (policies : Policies) (i : Issued) : Prop :=
     ∧ isPermitted policies (judgementRequest schema i.principal i.generated i.action i.op)
         (judgementEntities schema i.principal i.store i.op) = true
 
-/-- 判定材料の全体は、ある DB の状態から組み立てた `Nyxis.Materials.entities` である
-    (挿入では提案される行を置いた状態)。 -/
+/-- 判定材料の全体は、ある DB の状態から組み立てた `Nyxis.Materials.entitiesWith` である
+    (挿入では、行は提案される行を置いた状態、所属行は挿入の前の状態)。 -/
 theorem judgementEntities_entities (schema : Schema) (principal : Principal) (store : Store)
     (op : Operation) :
-    ∃ s, judgementEntities schema principal store op
-      = Nyxis.Materials.entities schema.types schema.parents schema.memberships s := by
+    ∃ m s, judgementEntities schema principal store op
+      = Nyxis.Materials.entitiesWith schema.types schema.parents schema.memberships m s := by
   cases op <;> simp only [judgementEntities]
-  all_goals try exact ⟨_, rfl⟩
-  split <;> exact ⟨_, rfl⟩
+  all_goals try exact ⟨_, _, rfl⟩
+  split <;> exact ⟨_, _, rfl⟩
 
 /-- 認可層の判定(限定した判定材料)が permit なら、判定材料の全体でも permit である
     (cedar-lean の slicing 定理。前提は `permits` が検査した型環境・要求・level の検査の成功と、
@@ -240,11 +243,11 @@ theorem permits_authorized (schema : Schema) (policies : Policies) (principal : 
     obtain ⟨hprem, hperm⟩ := h
     obtain ⟨hwf, hreq⟩ := Nyxis.Materials.premisesHold_spec hprem
     have hl := Nyxis.Materials.levelOf_spec hlevel
-    obtain ⟨s, hs⟩ := judgementEntities_entities schema principal store op
+    obtain ⟨m, s, hs⟩ := judgementEntities_entities schema principal store op
     unfold materials at hperm
     rw [hs] at hperm ⊢
     unfold isPermitted at hperm ⊢
-    rw [Nyxis.Materials.isAuthorized_slice _ _ _ _ _ _ _ hwf hreq hl] at hperm
+    rw [Nyxis.Materials.isAuthorized_slice _ _ _ _ _ _ _ _ hwf hreq hl] at hperm
     exact hperm
 
 /-! ## 宣言された外部効果
@@ -1287,7 +1290,8 @@ theorem RowsAgree.put {s₁ s₂ : Store} {table : Table} {filters : List Filter
     exact this
 
 /-- 判定材料の全体は、取得が整合し対象の有無が分かっていれば、答えを持つ実体(行の有無が分かり、所属行を取得済み)
-    について全体の状態から組んだものと同じ `find?` を返す(挿入で提案される行を置く分岐も一致する)。 -/
+    について全体の状態から組んだものと同じ `find?` を返す(挿入で提案される行を置く分岐も一致する。所属行はどちらも
+    挿入の前の状態から見る)。 -/
 theorem judgementEntities_find?_eq (schema : Schema) (k : Known) (full : Store) (principal : Principal)
     (op : Operation) (u : EntityUID) (hc : k.Consistent full)
     (ht : k.decided op.target = true) (hk : k.knows schema.types schema.memberships u = true) :
@@ -1310,12 +1314,11 @@ theorem judgementEntities_find?_eq (schema : Schema) (k : Known) (full : Store) 
         split
         · rfl
         · exact hagree htab
-      · intro htab m hm
-        exact RowsAgree.put (hmem htab m hm) t key row
-    · exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
-  | read t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
-  | update t key changes => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
-  | delete t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
+      · exact hmem
+    · exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
+  | read t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
+  | update t key changes => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
+  | delete t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
 
 /-- 検査に通った部分的な取得から組んだ限定した判定材料は、全体の状態から組んだものと等しい。 -/
 theorem materials_eq_of_covers (schema : Schema) (policies : Policies) (k : Known) (full : Store)

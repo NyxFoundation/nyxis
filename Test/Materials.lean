@@ -191,7 +191,7 @@ def agreesAt (p : Principal) (action : String) (op : Operation) (expected : Bool
 /-! ### 判定の実体の構成と前提の検査に効き目があること -/
 
 -- アクションの実体を加えなければ cedar-lean の実体の検査(全アクションの存在)は通らない
-#guard !isOk (Cedar.Validation.validateEntities ts (Map.make (Nyxis.Materials.rowEntries ts schema.parents schema.memberships store)))
+#guard !isOk (Cedar.Validation.validateEntities ts (Map.make (Nyxis.Materials.rowEntries ts schema.parents schema.memberships store store)))
 #guard isOk (Cedar.Validation.validateEntities ts (Nyxis.Materials.entities ts schema.parents schema.memberships store))
 -- 型違いの行(admin が文字列)は適合せず、判定の実体に現れない
 #guard !Nyxis.Materials.conforms ts alice (row [("admin", strV "yes")])
@@ -811,6 +811,14 @@ def memAgrees (p : Principal) (action : String) (op : Operation) (expected : Boo
 #guard memAgrees (.user alice) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "acme")) true
 #guard memAgrees (.user bob) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "acme")) false
 #guard memAgrees (.user alice) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "zen")) false
+-- 自分を他の組に加える挿入: 提案される所属行は対象の実体になるだけで、主体の祖先(所属行から決まる)は DB の現在の
+-- 所属行から決まる(提案される行で `principal in resource.team` を満たせない)
+#guard memAgrees (.user bob) "addMember" (.insert memT "m5" (memRow "bob" "acme-ed" "acme")) false
+#guard memAgrees (.user carol) "addMember" (.insert memT "m5" (memRow "carol" "acme-ed" "acme")) false
+#guard ((judgementEntities memSchema (.user bob) memStore (.insert memT "m5" (memRow "bob" "acme-ed" "acme"))).find? bob).map
+  (·.ancestors) == some (Set.make [team "acme-vw", org "acme", team "zen-ed", org "zen"])
+#guard ((judgementEntities memSchema (.user bob) memStore (.insert memT "m5" (memRow "bob" "acme-ed" "acme"))).find?
+  (mem "m5")).map (·.attrs) == some (memRow "bob" "acme-ed" "acme")
 -- 所属行の削除: 本人か組織の owner
 #guard memAgrees (.user bob) "removeMember" (.delete memT "m2") true
 #guard memAgrees (.user alice) "removeMember" (.delete memT "m2") true
@@ -838,6 +846,11 @@ def memStep (p : Principal) (action : String) (key : Key) (values : Row := Map.e
 #guard (listRows memSchema memPolicies (.user dave) gen
   (memStep (.user alice) "addMember" "m5" (memRow "dave" "acme-ed" "acme")).store (act "listDocs") docT {}).map (·.1)
   == []
+-- 自分を他の組に加える挿入は拒否され、何も発行せず、所属行は増えない(bob は acme-ed のメンバーではない)
+#guard (match (memStep (.user bob) "addMember" "m5" (memRow "bob" "acme-ed" "acme")).outcome with
+  | .denied => true | _ => false)
+#guard (memStep (.user bob) "addMember" "m5" (memRow "bob" "acme-ed" "acme")).issued.isEmpty
+#guard (memStep (.user bob) "addMember" "m5" (memRow "bob" "acme-ed" "acme")).store.find? memT "m5" == none
 
 /-- `memStore` からの部分的な取得: `uids` の行と、`members` の利用者の所属行(すべて取得したと記録する)。 -/
 def memKnown (uids : List EntityUID) (members : List EntityUID) (absent : List EntityUID := []) :
