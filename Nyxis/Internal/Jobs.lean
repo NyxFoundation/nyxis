@@ -1,7 +1,7 @@
 import Nyxis.Internal.PostgresRun
 import Nyxis.Internal.Generated
 
-/-! Triggering scheduled jobs (A10; core-only, unproven).
+/-! Triggering scheduled jobs (Assumptions 2 and 3; core-only, unproven).
 
 Runs the scheduled jobs the app declares (`Runtime.App.jobs`; `Job := Generated → Handler Unit`, the same type as a
 handler, with no IO) inside the same process at a fixed interval (core setting), with the service principal

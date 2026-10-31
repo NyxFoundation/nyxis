@@ -33,8 +33,9 @@ Not included in `import Nyxis`:
 
 - `Nyxis.ReadSafety` — corollaries about the provenance of rows passed to handlers (referenced by the connection layer's
   proofs).
-- `Nyxis.AppCheck` — the audit `nyxis_check_app` called by the application's final module (`ASSUMPTIONS.md` A7).
+- `Nyxis.AppCheck` — the audit `nyxis_check_app` called by the application's final module (`ASSUMPTIONS.md` Assumption 3).
 - `Nyxis.Internal.*` — connection code (JWT verification, PostgreSQL, the HTTP entry point, CORS, the real startup
-  `ApprovedServer`). The audit rejects imports of these from an application. Only the startup code imports them, after
-  the audit.
+  `ApprovedServer`). Only the startup code imports them, after the audit. The audit rejects only those that bring in
+  constants its checks catch (the extern attributes of lean-pq and JOSE, the elaborator of `PostgresShapeBuild`);
+  `Generated` / `HttpAuth` / `CallSend` and others pass it (`docs/connection.md` §8).
 -/

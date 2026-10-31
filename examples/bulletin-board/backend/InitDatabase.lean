@@ -2,7 +2,7 @@ import BulletinBoard
 import Nyxis.Internal.PostgresInit
 import BulletinBoard.Approved
 
-/-! Explicit sample database provisioning, trusted startup code under A4/A7.
+/-! Explicit sample database provisioning, trusted startup code under Assumptions 1 and 3.
 The audited application is imported before the internal database bridge.
 This executable is separate from HTTP startup: no migration, seeding or grants.
 -/

@@ -2,7 +2,7 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSql
 import Nyxis.Internal.IOTrace
 
-/-! Internal matching of write results (A4; the conditions for normal termination in Lean are proved below). This is not
+/-! Internal matching of write results (Assumption 1; the conditions for normal termination in Lean are proved below). This is not
 authorization. The correspondence between the FFI and the external DB is trusted. Only operations issued by the model
 enter here, and this runs inside the snapshot's transaction. A failure must abort that transaction; no state or HTTP
 success leaks before COMMIT.

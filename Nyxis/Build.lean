@@ -134,8 +134,8 @@ elab_rules : command
         s!"Cedar policies built at build time from `{path.getString}` (`Nyxis.CedarPolicy.parse`). Policies {policies.length}: {", ".intercalate (policies.map (·.id))}."
 
 /-- Declare the two human-approved Cedar sources together, relative to this Lean file.
-The resulting `Nyxis.Approved.app` accepts only a router, keeping both inputs fixed.
-This command parses/embeds the documents; human approval itself is the developer's A6 duty.
+The resulting `Nyxis.Approved.app` accepts only a router (and, optionally, periodic jobs), keeping both inputs fixed.
+This command parses/embeds the documents; human approval itself is the developer's duty under Assumption 3.
 -/
 syntax (name := nyxisApproved)
   "nyxis_approved " ident " from " str " and " str : command

@@ -141,7 +141,7 @@ def Principal.service (id : String) : Principal := .user ⟨serviceType, id⟩
 /-- Server-generated values: the current time and a fresh unique ID that nyxis decides per request. They are passed to
     handlers for proposing values, and to policies as `context.now` / `context.id` if the action's `context` in the
     sources declares them. The values are decided by the connection code (`Nyxis.Internal.Generated.fresh`: the real
-    clock and randomness; A2/A4), and the pure model speaks about arbitrary values (uniqueness and clock correctness are
+    clock and randomness; Assumptions 1 and 2), and the pure model speaks about arbitrary values (uniqueness and clock correctness are
     not part of the theorem's claims). -/
 structure Generated where
   /-- The current time when processing of the request started. -/

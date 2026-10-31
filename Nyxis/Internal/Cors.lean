@@ -1,6 +1,6 @@
 import Nyxis.Http
 
-/-! Core HTTP middleware (A4). The configuration comes from the deployment, never from the application's handlers. CORS
+/-! Core HTTP middleware (Assumption 1). The configuration comes from the deployment, never from the application's handlers. CORS
 is a browser transport policy, not authorization. -/
 namespace Nyxis.Internal.Cors
 open Std.Async

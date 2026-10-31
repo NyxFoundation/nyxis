@@ -7,7 +7,7 @@ import Nyxis.Runtime
 Small pieces shared by the connection layer for exposing the runtime over the Lean standard library's `Std.Http` (an
 HTTP/1.1 server): extracting the path and query string from the request line, selecting request headers, the body limit,
 converting the model's response into an HTTP response, and starting the server. This is connection code outside the
-theorem and is trusted for now (`ASSUMPTIONS.md` A4 (b)).
+theorem and is trusted for now (`ASSUMPTIONS.md` Assumption 1).
 
 The main part, which turns a request into an `AuthenticatedRequest` with its principal, drives the model and authorizes
 against the current PostgreSQL rows, is `Nyxis.Internal.PostgresHttp` (applications cannot import it; startup is

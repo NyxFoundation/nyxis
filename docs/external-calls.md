@@ -228,8 +228,9 @@ The statement of `Nyxis.Runtime.authorization_safety` is unchanged; items of the
   `Authz.step_external_indep`). The only way a response value reaches the DB is through `values` that the handler proposes
   in a separate action, which go through the decision in (1).
 
-Changes to the pure model: `call (dest method path : …) (columns : List Column) (mode : CallMode)` in `Db.EffectKind`,
-`call` in `Authz.Payload`, `called` / `calledError` in `Db.Outcome`, and the element type of `Runtime.Externals`. The proven
+Changes to the pure model:
+`call (destination : String) (method : CallMethod) (target : CallTarget) (columns : List Column) (proposes : Bool) (mode : CallMode)`
+in `Db.EffectKind`, `call` in `Authz.Payload`, `called` / `calledError` in `Outcome`, and the element type of `Runtime.Externals`. The proven
 scope of the connection code (`StagedRun.external`: `Driver.external` is called only for recorded contents) is stated in the
 same form for the async INSERT and `Outbox.loop` (the loop sends only the contents of outbox rows). The outside-world
 behavior of `Outbox.loop` (interval, retries) is, like `Jobs.loop`, unproven and remains under Assumption 1 (connection code).

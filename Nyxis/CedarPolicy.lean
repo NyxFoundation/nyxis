@@ -34,7 +34,7 @@ annotations with `:`, parenthesized entity references in a scope (`principal == 
 
 Cedar's own validation of the policies (consistency with the schema) is done separately with `cedar validate`. This
 building code is not covered by proofs; its behavior is checked by the checks in `Test/Policy.lean` and by agreement
-with the hand-written copy in `Test/Smoke.lean` (A6 in `ASSUMPTIONS.md`).
+with the hand-written copy in `Test/Smoke.lean` (Assumption 1 in `ASSUMPTIONS.md`).
 -/
 
 namespace Nyxis.CedarPolicy

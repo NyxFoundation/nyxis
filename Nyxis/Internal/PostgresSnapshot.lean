@@ -1,6 +1,6 @@
 import Nyxis.Internal.PostgresSql
 
-/-! Pure decoding of the internal SELECT snapshot (A4; outside the theorems). An SQL NULL means the attribute is absent;
+/-! Pure decoding of the internal SELECT snapshot (Assumption 1; outside the theorems). An SQL NULL means the attribute is absent;
 it never becomes a Cedar value. The whole snapshot is validated before a Store is returned. Map.make must not silently
 collapse duplicate primary keys. The caller must read all tables inside the same SERIALIZABLE transaction. This module
 executes no SQL, performs no authorization, and returns no data to handlers.

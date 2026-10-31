@@ -2,7 +2,7 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSql
 import Nyxis.Internal.Native
 
-/-! Explicitly provisions a new database from the approved schema (A4; unproved). It is never called from an HTTP
+/-! Explicitly provisions a new database from the approved schema (Assumption 1; unproved). It is never called from an HTTP
 request and is not exposed in the handler-facing API. DROP, ALTER and IF NOT EXISTS are not used: an existing table must
 fail rather than hide a deployment mismatch.
 -/

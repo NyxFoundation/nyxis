@@ -2,7 +2,7 @@ import TeamDocs
 import Nyxis.Internal.PostgresInit
 import TeamDocs.Approved
 
-/-! Explicit construction of the team-docs DB. Startup code trusted under A4/A7. Imports the audited application before
+/-! Explicit construction of the team-docs DB. Startup code trusted under Assumptions 1 and 3. Imports the audited application before
 the internal DB connection. A separate executable from the HTTP startup; it performs no migrations, seed data or
 permission creation.
 -/

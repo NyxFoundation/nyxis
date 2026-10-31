@@ -1,7 +1,7 @@
 import Nyxis.CedarSchema
 import Nyxis.Internal.PostgresValue
 
-/-! Row checks by the column types and required attributes derived from the approved sources (A4; outside the theorems).
+/-! Row checks by the column types and required attributes derived from the approved sources (Assumption 1; outside the theorems).
 The type information is not stored in `Authz.Schema`, so the authorization theorems and the model are unchanged. Column
 types correspond to scalars (`Bool` / `Long` / `String` / entity references / the extension types `decimal` / `datetime`
 / `duration`), sets of scalars `Set<…>`, and records with scalar attributes `{ … }`. Unsupported Cedar forms

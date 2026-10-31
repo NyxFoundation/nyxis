@@ -43,6 +43,7 @@ permit (
   resource is User
 ) when { principal.admin };
 
+// A user can register only their own row, and only as a non-admin (admin=false).
 @id("register-self")
 permit (
   principal is User,

@@ -1,0 +1,2 @@
+# Hashed inputs: a CRLF checkout changes their bytes and fails the SHA256 checks.
+scripts/patches/* -text

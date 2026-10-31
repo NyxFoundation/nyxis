@@ -1,7 +1,7 @@
 import Nyxis.Internal.PostgresResult
 import Nyxis.Internal.IOTrace
 
-/-! Internal fetching of decision materials (A4; unproved). This unfiltered Store must never be exposed to handlers. All
+/-! Internal fetching of decision materials (Assumption 1; unproved). This unfiltered Store must never be exposed to handlers. All
 SELECTs and the authorized processing after them share one SERIALIZABLE transaction, and results are exposed only after
 a checked COMMIT.
 -/

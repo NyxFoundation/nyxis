@@ -2,7 +2,7 @@ import Nyxis.Build
 import Nyxis.Runtime
 
 /-! The approved declaration owned by the second official sample (team-docs). The real startup accepts only the router
-of an App built from this declaration. Parsing and embedding are trusted build-time code (A4/A6); the kernel checks the
+and the periodic jobs of an App built from this declaration. Parsing and embedding are trusted build-time code (Assumptions 1 and 3); the kernel checks the
 equations and specializations below. These statements do not prove HTTP/JWT/SQL correspondence or non-interference. -/
 open Nyxis
 

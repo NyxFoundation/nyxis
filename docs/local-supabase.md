@@ -144,6 +144,12 @@ The test CA is passed only to the child process's environment, and no test confi
 Auth's admin credentials and JWTs are never sent to the JWKS fetch destination.
 On exit it deletes only the 3 users and the dedicated DB it created, and saves no JWTs, OTPs or credentials.
 
+The second check, without arguments, checks HTTP and persisted rows with the approved ES256 fixture,
+confirming success with a valid JWT and anonymization / rejection of draft reads and edits with a bad signature, an expired token or another issuer.
+In both modes, with the same sample process, it checks 4 kinds of JWKS failure and recovery, 8 DB failures with rollback/recovery,
+and 101 authenticated reads exceeding the connection limit of 100 with 0 connections left over while the server is alive.
+These 2 checks are the checks of the sample's own path. They do not substitute for cloud configuration or TLS verification on Linux.
+
 ## Check of the fetch range of decision materials (100,000-row scale)
 
 ```sh
@@ -160,12 +166,6 @@ of `pg_stat_user_tables` and `pg_stat_user_indexes`, and checks that for the 100
 (up to a margin of 2 rows for index point lookups), at most 16 rows in total except for the list, and that the median response time (12 runs) is within twice that of the empty state.
 Finally it confirms with its own SELECT that a full scan of 100,000 rows does appear in the same statistics views.
 On exit it deletes only the dedicated DB, and prints no credentials.
-
-The second check, without arguments, checks HTTP and persisted rows with the approved ES256 fixture,
-confirming success with a valid JWT and anonymization / rejection of draft reads and edits with a bad signature, an expired token or another issuer.
-In both modes, with the same sample process, it checks 4 kinds of JWKS failure and recovery, 8 DB failures with rollback/recovery,
-and 101 authenticated reads exceeding the connection limit of 100 with 0 connections left over while the server is alive.
-These 2 checks are the checks of the sample's own path. They do not substitute for cloud configuration or TLS verification on Linux.
 
 ## Loading connection information for a real Supabase
 

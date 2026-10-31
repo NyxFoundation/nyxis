@@ -1,7 +1,7 @@
 import BulletinBoard
 import BulletinBoard.Server
 
-/-! Sample-specific startup, trusted connection code under A4/A7, outside the theorem.
+/-! Sample-specific startup, trusted connection code under Assumptions 1 and 3, outside the theorem.
 Sample runs its final application audit before this module imports the internal database
 bridge. Do not import this launcher from application modules or expand AppCheck's trust set.
 Credentials come only from the environment; startup performs no DDL or data seeding.

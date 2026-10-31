@@ -19,7 +19,7 @@
 # by nyxis_check_app in BulletinBoard.lean. Other namespaces and private helper functions are also checked. The check
 # does not isolate the execution of build-time IO. IO in main, the internals of trusted dependencies, and configurations
 # that drop the check are outside this check's guarantee. For the exact scope and the remaining assumptions, see
-# ASSUMPTIONS.md A7.
+# Assumption 3 in ASSUMPTIONS.md.
 #
 # Exit 0 if all of these hold, otherwise 1. After the variants, the original is restored and `lake build` is confirmed
 # to exit 0 again. The original is saved to a temporary directory and restored by a trap even if interrupted (the

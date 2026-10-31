@@ -1,6 +1,6 @@
 #!/bin/sh
 # Check: nyxis rejects, at build time, a schema with an action that has no effect declaration, or with an effect that
-# references a column not in the schema. Two variants are made from the sample schema BulletinBoard/schema.cedarschema:
+# references a column not in the schema. Two variants are made from the sample schema examples/bulletin-board/backend/schema.cedarschema:
 # (1) no-effect — remove the @effect of one action (deletePost) (2) unknown-column — write a nonexistent column bodyy in
 # the effect of editPost Each is temporarily put in place of the original and `lake build` is run; it passes if the
 # build exits non-zero and reports the expected error. Finally the original is restored and `lake build` is checked to

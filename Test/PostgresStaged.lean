@@ -153,7 +153,7 @@ private def driver (fake : Fake) (fault : Nat) : PostgresRun.Driver where
       return reader ⟨"_nyxis_id" :: columnsOf table, rows⟩
     | .filtered query =>
       -- The fake DB reproduces the WHERE clause with the model's `ListQuery.matches` (agreement with the real DB is the
-      -- A4 trust).
+      -- Assumption 1 trust).
       fake.events.modify (· ++ [s!"select {table.id} where"])
       let rows := ((db.rows table).filter fun kv => query.matches kv.2).map fun (k, r) => encodeRow table k r
       return reader ⟨"_nyxis_id" :: columnsOf table, rows⟩

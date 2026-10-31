@@ -1,7 +1,7 @@
 import Nyxis.Internal.CurlStdin
 import Nyxis.Authz
 
-/-! Sending mail over SMTP(S) through the approved curl (A9; core only, unproven).
+/-! Sending mail over SMTP(S) through the approved curl (Assumptions 2 and 3; core only, unproven).
 
 The connection layer (`PostgresRun.runStaged`) calls this only for external-effect records that the authorization layer
 (`Nyxis.Authz.externalStep`) permitted (`Authz.Payload.mail`: recipient, subject, and body, all values of declared
@@ -19,7 +19,7 @@ recipient, subject, and body, and are never used for the destination host, the s
 - `--proto =smtp,smtps`, no redirect following, 5 seconds to connect and 20 seconds for the whole transfer. A send
   failure (curl exit code other than 0) is an exception: the whole request becomes 503 and the transaction is rolled
   back (it is never silently treated as success). Whether delivery succeeds is the responsibility of the relay and
-  beyond (A9).
+  beyond (Assumption 2).
 -/
 namespace Nyxis.Internal.MailSend
 

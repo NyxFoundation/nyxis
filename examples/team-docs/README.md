@@ -5,7 +5,7 @@ also be shared with individual users. Documents have creation and update times, 
 Like the first sample (`../bulletin-board/`), it consists of a backend in a separate package that takes nyxis as a Lake dependency
 (`backend/`) and a Next.js frontend (`frontend/`; to be built after a human provides the design).
 
-Only the backend exists so far. List filtering, ordering and paging (`GET /docs?org=&title=&since=&before=&sort=&dir=&limit=&offset=`;
+Only the backend exists so far. List filtering, ordering and paging (`GET /docs?org=&title=&titleFrom=&titleTo=&since=&before=&sort=&dir=&limit=&offset=`;
 the response is `{"rows": [...], "total": n}`), attachments (`POST /docs/{id}/attachment` issues a signed
 upload URL and `GET /docs/{id}/attachment` a signed download URL; the client exchanges files directly with Supabase
 Storage, and they do not pass through nyxis), update notifications (a user who can read a document subscribes with `POST /docs/{id}/subscriptions`

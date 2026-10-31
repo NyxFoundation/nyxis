@@ -2,7 +2,7 @@ import Lean.Data.Json
 import Nyxis.Internal.JwksFetch
 import Nyxis.Internal.CurlStdin
 
-/-! Issuing Supabase Storage signed URLs through the approved curl (A8; core only, unproven).
+/-! Issuing Supabase Storage signed URLs through the approved curl (Assumptions 2 and 3; core only, unproven).
 
 The connection layer (`PostgresRun.runStaged`) calls this only for external-effect records that the authorization layer
 (`Nyxis.Authz.signStep`) permitted (`Nyxis.Authz.External`: the kind and the object path). The URL reached is derived in

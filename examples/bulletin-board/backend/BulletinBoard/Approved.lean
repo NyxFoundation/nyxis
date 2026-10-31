@@ -2,7 +2,7 @@ import Nyxis.Build
 import Nyxis.Runtime
 
 /-! Approved sources owned by the sample application. Startup accepts only their router.
-Parsing/embedding is trusted build code (A4/A6); the following equalities and specialization
+Parsing/embedding is trusted build code (Assumptions 1 and 3); the following equalities and specialization
 are kernel checked. These statements do not prove HTTP/JWT/SQL refinement or noninterference.
 -/
 open Nyxis

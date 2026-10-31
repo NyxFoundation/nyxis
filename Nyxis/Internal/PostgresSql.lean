@@ -1,7 +1,7 @@
 import Nyxis.Authz
 import Nyxis.Internal.PostgresValue
 
-/-! Internal SQL planning for applications (A4; outside the theorems). No SQL is executed here. Identifiers come only
+/-! Internal SQL planning for applications (Assumption 1; outside the theorems). No SQL is executed here. Identifiers come only
 from the schema, and values only from parameters. Entity types without a namespace are used. Namespaced types are
 rejected until their DB layout is settled. A nullable JSONB column represents a missing attribute. SQL NULL is not a
 Cedar cell.
@@ -128,7 +128,7 @@ def selectTable (schema : Authz.Schema) (table : Table) : Except String Command 
 - If the column is NULL (a missing attribute), it does not match (both conditions become NULL / false).
 - If an equality constant is a value that cannot be put into storage format (a string containing NUL, `ipaddr`, nested
   sets, etc.), no stored row can equal that value (the storage format holds only values that went through nyxis's
-  encoding; A3), so the condition is the constant `false` (the model's `v == f.value` is also false). An ordering
+  encoding; Assumptions 2 and 3), so the condition is the constant `false` (the model's `v == f.value` is also false). An ordering
   constant containing NUL is rejected (the model can compare it, so this errs on the closed side).
 Identifiers come only from the columns of the approved sources, and values only from parameters. `index` is the number
 of the next parameter to use. -/

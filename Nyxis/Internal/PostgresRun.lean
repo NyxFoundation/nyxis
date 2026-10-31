@@ -6,7 +6,7 @@ import Nyxis.Internal.PostgresShape
 import Nyxis.Internal.ExternalSend
 import Nyxis.Internal.Outbox
 
-/-! The internal boundary from the model to SQL (A4; unproved). There is no handler-facing API. Only the model generates
+/-! The internal boundary from the model to SQL (Assumption 1; unproved). There is no handler-facing API. Only the model generates
 operations. The snapshot, replay and checked COMMIT share one SERIALIZABLE transaction. A disagreement with SQL aborts
 without returning a response.
 
@@ -252,7 +252,7 @@ def process (app : App) (shape : PostgresShape.Shape) (store : Store) (request :
   return plan.response
 
 /-- One SQL call and the matching of its result, with consecutive IO states. This states only Lean return values; the
-meaning of the external SQL remains under A4. -/
+meaning of the external SQL remains under Assumption 1. -/
 def Checked (schema : Authz.Schema) (driver : Driver) (issued : Authz.Issued)
     (command : PostgresSql.Command) (w w' : Void IO.RealWorld) : Prop :=
   let expected := (issued.store.apply issued.op).2
@@ -671,7 +671,7 @@ per-request cost is proportional to the size of the whole DB. `handleStaged`, fo
 
 No `Store` of all tables exists in Lean. `StagedRun` is the record of normal termination (each stage's fetch, checks,
 decision, execution and issuance), and `Chain` states that each stage's fetch is consistent with the whole state at that
-point (the state after applying the operations of the preceding stages) (at the connection layer, the A4 trust that "the
+point (the state after applying the operations of the preceding stages) (at the connection layer, the Assumption 1 trust that "the
 results of point lookups are the DB's current rows"); from both, `StagedRun.model` derives with
 `Authz.step_eq_of_covers` that the response, the issued list (principal, action, operation) and the external-effect
 records (principal, generated values, action, kind, target, path) match `runHandler` (and hence `handleRequest`).
@@ -714,7 +714,8 @@ def runStaged (app : App) (shape : PostgresShape.Shape) (driver : Driver) (princ
 
 /-- The record of normal termination of staged execution: the partial fetch used by each call (`knowns`), the executed
     SQL and its operations (`commands`, in execution order), the recorded external effects (`externals`, in order of
-    occurrence), and the external-effect results obtained from Storage (`exts`, one per call). Each stage consists of a
+    occurrence), and the external-effect results obtained from outside (`exts`, one per call: Storage's signed URLs
+    and external API responses). Each stage consists of a
     successful fetch, the shape check of the fetched rows, the closure check, the pre-check of `step`'s issuance using
     only the fetched rows, execution and matching in plan order (`Executes`), successful issuance/send for the recorded
     external effects (`sendExternal`), and the record of the continuation advanced with `step`'s result (together with
@@ -752,7 +753,7 @@ inductive StagedRun (app : App) (shape : PostgresShape.Shape) (driver : Driver) 
 
 /-- If the real runStaged terminates normally, then for each call, successful point lookups, the shape check of the
 fetched rows, the closure check, the pre-check of step's issuance using only the fetched rows, SQL execution in plan
-order and matching against the expected values from the preceding state, and successful issuance to Storage for the
+order and matching against the expected values from the preceding state, and successful issuance/send for the
 recorded external effects succeed in consecutive IO states, and the continuation advances with step's result (together
 with the issuance result) (`StagedRun`). Agreement between the fetch and the external DB, SQL semantics, Storage
 behavior, COMMIT and HTTP transport are not included. -/
@@ -813,7 +814,7 @@ theorem runStaged_success (app : App) (shape : PostgresShape.Shape) (driver : Dr
     lists agree), and the same holds for the continuation with respect to the result decided on the whole state (if
     consistent, the same as the result on the fetched rows; the external-effect result is the same value `ext`) and the
     state after applying its operations. At the connection layer this corresponds to the trust that "the results of
-    point lookups (for filters, the SELECT with a WHERE clause) are the DB's current rows" (`ASSUMPTIONS.md` A4), which
+    point lookups (for filters, the SELECT with a WHERE clause) are the DB's current rows" (`ASSUMPTIONS.md` Assumption 1), which
     cannot be checked in Lean. -/
 inductive Chain (schema : Authz.Schema) (policies : Cedar.Spec.Policies) (principal : Authz.Principal)
     (generated : Authz.Generated) : Store → Handler α → List Known → List Authz.ExternalResult → Prop where
@@ -1000,7 +1001,7 @@ def ChainRequest (app : App) (full : Store) (request : AuthenticatedRequest) (kn
 
 /-- If each stage's fetch in the staged-execution record of one request is consistent with the whole state, the response
 is exactly the response of the pure handleRequest on the same initial state together with the list of external-effect
-results obtained from Storage, and the list of operations corresponding to each executed SQL statement (principal,
+results obtained from outside, and the list of operations corresponding to each executed SQL statement (principal,
 generated values, action, operation) and the list of recorded external effects (principal, generated values, action,
 kind, target, path) match handleRequest's issued list and record list. -/
 theorem StagedRequest.model {app : App} {shape : PostgresShape.Shape} {driver : Driver}
@@ -1076,9 +1077,9 @@ authorized for the principal and generated values of the same request on the mat
 issuance to Storage, sending mail and calling the external API were performed only for that content. The response can be
 reproduced by a replayer that does not receive the Store from only the request and each stage's result list, and each
 row in the result list is the row that an authorized read for the same principal points to in the rows fetched at that
-stage (no trust). If each stage's fetch is consistent with the whole state at that point (trusted as A4 at the
+stage (no trust). If each stage's fetch is consistent with the whole state at that point (trusted as Assumption 1 at the
 connection layer), the response is exactly the response of handleRequest on the same initial state and the list of
-results obtained from Storage, and the list of operations corresponding to the SQL (principal, generated values, action,
+results obtained from outside, and the list of operations corresponding to the SQL (principal, generated values, action,
 operation) and the list of external-effect records match handleRequest's issued list and record list. Agreement between
 the fetch and the external DB's actual state, SQL semantics, Storage behavior, persistence and HTTP transport are not
 included. Determining the request principal from the JWT is the responsibility of a separate connection boundary. The

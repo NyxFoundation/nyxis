@@ -1,7 +1,7 @@
 import TeamDocs
 import TeamDocs.Server
 
-/-! Startup of team-docs. Connection code trusted under A4/A7, outside the theorems. Imports the internal DB connection
+/-! Startup of team-docs. Connection code trusted under Assumptions 1 and 3, outside the theorems. Imports the internal DB connection
 after loading the audited application (`TeamDocs`). Do not import this module from application modules, and do not widen
 AppCheck's trusted set. Credentials are taken only from environment variables; no DDL or seed data is applied at
 startup.

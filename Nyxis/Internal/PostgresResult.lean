@@ -2,7 +2,7 @@ import Nyxis.Internal.Postgres
 import Nyxis.Internal.PostgresSnapshot
 import Nyxis.Internal.IOTrace
 
-/-! Internal extraction of libpq SELECT results (A4; the conditions for normal termination in Lean are proved below).
+/-! Internal extraction of libpq SELECT results (Assumption 1; the conditions for normal termination in Lean are proved below).
 There is no handler API and no SQL execution here. The caller owns the result exclusively during extraction and reads
 all tables in one transaction.
 -/

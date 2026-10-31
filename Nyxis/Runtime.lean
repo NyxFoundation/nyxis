@@ -79,7 +79,7 @@ structure App where
 /-- An authenticated HTTP request, or one trigger of a scheduled job: the principal nyxis decided from the JWT (for a
     scheduled job, the service principal decided from the core settings), the server-generated values nyxis decided for
     this request (the current time and a new unique ID), the request summary, the sequence of external effect results
-    (signed URLs the connection layer obtained from Storage; the handler cannot choose them), and, for a scheduled-job
+    (signed URLs from Storage and responses from external APIs that the connection layer obtained; the handler cannot choose them), and, for a scheduled-job
     trigger, its index in `App.jobs` (`job`; `none` for HTTP requests; the connection layer's HTTP entry builds only
     `none`). -/
 structure AuthenticatedRequest where

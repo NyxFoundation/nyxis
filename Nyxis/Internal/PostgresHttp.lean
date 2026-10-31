@@ -5,11 +5,11 @@ import Nyxis.Internal.HttpAuth
 import Nyxis.Internal.HttpResponse
 import Nyxis.Internal.Generated
 
-/-! Glue code from HTTP to PostgreSQL (A4; the processing after the body is read is partially proved). Applications
+/-! Glue code from HTTP to PostgreSQL (Assumption 1; the processing after the body is read is partially proved). Applications
 cannot import this. Startup (`ApprovedServer`) selects the approved JWT verifier, and neither the principal nor the
 connection string is determined from any field of the request. Server-generated values (the current time and unique IDs)
 are determined exactly once, right after authentication, by `generate` (`Generated.fresh` in production), and never from
-any field of the request. The external-effect settings (Supabase Storage and mail relay) are core settings and are never
+any field of the request. The external-effect settings (Supabase Storage, the mail relay and the external API destinations) are core settings and are never
 determined from any field of the request. The HTTP entry point builds requests with `job := none` (routing), so
 scheduled jobs and the service principal are never started from here.
 -/
@@ -108,7 +108,7 @@ fetched at that stage, and it also passes the shape check (no trust). The respon
 does not receive the Store, from only the request and each stage's result list, and each row in the result list is a row
 that an authorized read for the same principal points to among the rows fetched at that stage (no trust; there is no
 other input through which rows fetched for the authorization decision reach the response). If each stage's fetch is
-consistent with the whole state at that point (ChainRequest; trusted as A4 at the connection layer), the response is
+consistent with the whole state at that point (ChainRequest; trusted as Assumption 1 at the connection layer), the response is
 exactly the response of handleRequest on the same initial state, and the list of operations corresponding to the SQL
 (principal, action, operation) matches handleRequest's issued list. The other success response is the fixed 502
 (`PostgresRun.gatewayResponse`) that maps only the failure where an external API call's response did not match its

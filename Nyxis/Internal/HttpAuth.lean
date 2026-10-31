@@ -2,7 +2,7 @@ import Std.Http
 import Nyxis.Authz
 
 /-! The internal authentication boundary. Not part of the handler API. The conversion from subject to principal and the
-Bearer extraction are proven below. Decoding HTTP headers and verifying the JWT remain in A2/A4. The verifier must
+Bearer extraction are proven below. Decoding HTTP headers and verifying the JWT remain in Assumptions 1 and 2. The verifier must
 return a subject only after the approved JWT implementation has checked the signature, algorithm, issuer, audience and
 time claims. This module does not parse JOSE and does not trust a subject supplied by the request. The production
 startup passes JwksFetch.verify.

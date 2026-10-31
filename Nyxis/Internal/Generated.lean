@@ -1,7 +1,7 @@
 import Std.Time
 import Nyxis.Authz
 
-/-! Implementation of the server-generated values (corresponding to the A2 clock and the A4 runtime randomness; outside
+/-! Implementation of the server-generated values (corresponding to the Assumption 2 clock and the Assumption 1 runtime randomness; outside
 the theorem). Determines the current time and a new unique ID per request. The connection code (`PostgresHttp.dispatch`)
 calls it exactly once right after authentication and passes the values to the handler and the authorization layer as
 `Runtime.AuthenticatedRequest.generated`. The values are not derived from any field of the request. The pure model and

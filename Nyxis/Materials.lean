@@ -31,12 +31,12 @@ decision made had all tables been fetched. This module ties that agreement to ex
   and every entity reachable from the request has been fetched (`closedAt`: an executable check), the slice of the
   decision materials built only from the fetched rows equals the slice built from the whole (`sliceAtLevel_eq`).
   `Nyxis.Authz.permits_eq_of_covers` / `step_eq_of_covers` tie this to the agreement of the authorization layer's
-  decision and of `step`'s result. The connection layer (PostgreSQL point lookups) assembles this `Known` and makes the
-  decision only after passing this check (not implemented).
+  decision and of `step`'s result. The connection layer (PostgreSQL point lookups; `PostgresRun.runStaged`) assembles this `Known` and
+  makes the decision only after passing this check.
 
 Rows that do not conform (rows whose column types or required columns do not match the schema) do not appear among the
 decision's entities. Such rows do not arise in practice, because nyxis generates the DDL from the approved schema,
-rejects writes by shape checks, and the DB is reachable only by the dedicated nyxis role (`ASSUMPTIONS.md` A3); the
+rejects writes by shape checks, and the DB is reachable only by the dedicated nyxis role (`ASSUMPTIONS.md` Assumptions 2 and 3); the
 real-DB connection layer (`PostgresRun`) closes the whole request with 503 if the shape check of a fetched row fails.
 Action entities have no attributes or tags, their ancestors are as declared, and they are added because cedar-lean's
 entity consistency (`Entities.HasAllActions`) requires all actions to exist. `in` for action groups
@@ -603,7 +603,7 @@ def Known.knows (ts : Cedar.Validation.Schema) (mc : MembershipColumns) (k : Kno
     entities known not to exist are not in `full` either, and for the filters recorded as fully fetched, the rows
     matching the filters are the same as sets as in the whole. In the connection layer this corresponds to the trust
     that "the results of point lookups (for filters, SELECTs with WHERE clauses) are the DB's current rows"
-    (`ASSUMPTIONS.md` A4). -/
+    (`ASSUMPTIONS.md` Assumption 1). -/
 def Known.Consistent (k : Known) (full : Store) : Prop :=
   (∀ uid row, Map.find? k.rows uid = some row → Map.find? full uid = some row) ∧
   (∀ uid ∈ k.absent, Map.find? full uid = none) ∧

@@ -1,6 +1,6 @@
 import Nyxis.Internal.PostgresResult
 
-/-! Point lookups of decision materials (A4; outside the theorems). The connection layer for limiting decision materials
+/-! Point lookups of decision materials (Assumption 1; outside the theorems). The connection layer for limiting decision materials
 (`Nyxis.Materials`).
 
 Fetches from the DB, by primary-key point lookups (the read SELECT of `PostgresSql.operation`), only the entities needed
@@ -23,7 +23,7 @@ Whether the `Known` assembled here covers the decision materials is checked by t
 the executable check `Nyxis.Authz.coversStep` before deciding (if it fails, the whole request is closed). That the fetch
 is consistent with the DB's current rows (`Known.Consistent`; for a list, all rows of the target table that match the
 filters) corresponds to the trust that the results of the point lookups (for a list, the SELECT with a WHERE clause) are
-the DB's current rows (`ASSUMPTIONS.md` A4). This unfiltered `Known` must never be exposed to handlers.
+the DB's current rows (`ASSUMPTIONS.md` Assumption 1). This unfiltered `Known` must never be exposed to handlers.
 -/
 namespace Nyxis.Internal.PostgresMaterials
 open Nyxis Nyxis.Db Nyxis.Authz Cedar.Spec

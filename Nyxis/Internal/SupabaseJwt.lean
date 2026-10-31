@@ -1,7 +1,7 @@
 import JoseLibcrypto
 import Nyxis.Internal.HttpAuth
 
-/-! Core-only JWT connection code (A2/A4). Callers pass the issuer and the JWKS from trusted configuration and
+/-! Core-only JWT connection code (Assumptions 1 and 2). Callers pass the issuer and the JWKS from trusted configuration and
 transport, never from the request. Parsing, key preparation, and signature and claim verification are the approved
 library's responsibility. Network transport is supplied by trusted core code. This module must not be imported into
 Nyxis's public API or into the set of modules AppCheck trusts.

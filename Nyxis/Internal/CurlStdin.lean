@@ -1,5 +1,5 @@
 /-! Shared helper that launches the approved curl with its configuration passed on standard input (`--config -`) (core
-only, unproven; the curl of A2/A4). Used by `StorageSign`, `MailSend` and `CallSend`. Credentials and request values are
+only, unproven; the curl of Assumptions 1 and 2). Used by `StorageSign`, `MailSend` and `CallSend`. Credentials and request values are
 placed only inside the configuration and never appear in the process arguments. Diagnostics (stderr) are discarded, and
 the child process is always reaped. -/
 namespace Nyxis.Internal.CurlStdin

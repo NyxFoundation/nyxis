@@ -51,7 +51,7 @@ nyxis checks the structure and effect declarations it needs.
 cedar-lean's `Cedar.Validation.Schema` has no annotations, so nyxis does the parsing and builds the type environment
 (attribute types, `appliesTo`, ancestors, context types) from the same document, storing it in `Authz.Schema.types`
 (used by the precondition check for restricting decision materials; `Nyxis.Materials`). This construction code is not
-covered by proofs; its behavior is checked by the tests in `Test/Schema.lean` and `Test/Smoke.lean` (A6 in
+covered by proofs; its behavior is checked by the tests in `Test/Schema.lean` and `Test/Smoke.lean` (Assumption 1 in
 `ASSUMPTIONS.md`).
 -/
 

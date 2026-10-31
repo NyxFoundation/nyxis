@@ -4,9 +4,9 @@ import Nyxis.Internal.JwksFetch
 import Nyxis.Internal.Jobs
 import Nyxis.Internal.Outbox
 
-/-! Real startup (A4/A6/A7; outside the theorems). Import this only from the startup code, after the application audit.
+/-! Real startup (Assumptions 1 and 3; outside the theorems). Import this only from the startup code, after the application audit.
 The authorization inputs are built only from the declaration, and there is no argument accepting an arbitrary App or
-verifier. Human approval of the declared sources, and the startup code's choice of that declaration, remain under A6/A7.
+verifier. Human approval of the declared sources, and the startup code's choice of that declaration, remain under Assumption 3.
 -/
 namespace Nyxis.Internal.ApprovedServer
 
@@ -78,7 +78,7 @@ by a replayer that does not receive the Store, from only the request and each st
 result lists is the row that a read authorized for the same principal under the declared sources points to among the
 rows fetched at that stage (no trust needed; there is no other input through which rows fetched for authorization
 decisions reach the response). If each stage's fetch is consistent with the whole state at that time (ChainRequest;
-trusted under A4), the response is exactly the response of handleRequest by the declared App on the same initial state,
+trusted under Assumption 1), the response is exactly the response of handleRequest by the declared App on the same initial state,
 and the list of operations corresponding to the SQL (principal, action, operation) and the list of external-effect
 records match its issued list and recorded list. The Full/Any structure of the returned HTTP response is also preserved.
 The other form of backend success is a fixed 502 that reflects only a failure where an external API call's response did

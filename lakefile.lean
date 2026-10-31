@@ -25,7 +25,7 @@ def cryptoShimLinkArgs (nyxisDir : System.FilePath) : Array String :=
   else #[s!"-Wl,-rpath,{nyxisDir / ".lake" / "vendor" / "lean-libcrypto" / ".lake" / "build" / "lib"}"]
 
 package nyxis where
-  version := v!"0.1.8"
+  version := v!"0.1.9"
   moreLinkArgs := postgresLinkArgs ++ cryptoShimLinkArgs __dir__
 
 require Cedar from git "https://github.com/cedar-policy/cedar-spec" @

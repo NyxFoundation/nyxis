@@ -1,6 +1,6 @@
 import Nyxis.Internal.SupabaseJwt
 
-/-! HTTPS fetch of the JWKS through the approved curl (A2/A4; core only, unproven). Request data, a shell, command
+/-! HTTPS fetch of the JWKS through the approved curl (Assumptions 1 and 2; core only, unproven). Request data, a shell, command
 substitution, and specifying a CA for testing do not enter this API. PATH, the curl/TLS versions, and the CA trust store
 are the responsibility of the deployment environment.
 -/
