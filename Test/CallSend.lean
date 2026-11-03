@@ -71,6 +71,14 @@ def parse (s : String) : Lean.Json := (Lean.Json.parse s).toOption.getD .null
 -- The authentication header, URL, and body do not appear in the arguments (only the fixed transport policy)
 #guard (arguments 3 10 65536).all fun a => !(a.splitOn "Authorization").length > 1 && !(a.splitOn "https://").length > 1
 #guard (arguments 3 7 1024).contains "7" && (arguments 3 7 1024).contains "1024" && (arguments 3 7 1024).contains "=https"
+-- The sync arguments are unchanged: the body is received before the status code, under the body limit
+#guard arguments 3 7 1024 == #["--disable", "--silent", "--globoff", "--noproxy", "*",
+  "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--connect-timeout", "3", "--max-time", "7",
+  "--max-filesize", "1024", "--write-out", "\n%{http_code}", "--config", "-"]
+-- An outbox delivery discards the body unread (no body limit either) and outputs only the status code; same transport policy
+#guard arguments 3 7 1024 (discardBody := true) == #["--disable", "--silent", "--globoff", "--noproxy", "*",
+  "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--connect-timeout", "3", "--max-time", "7",
+  "--output", "/dev/null", "--write-out", "\n%{http_code}", "--config", "-"]
 
 -- Splitting the output: body + newline + status code
 #guard splitOutput "{\"id\":\"c\"}\n200" == some (200, "{\"id\":\"c\"}")

@@ -14,6 +14,8 @@ and columns, and the effect declaration of each action). It is called at build t
 - An `update` effect whose referenced columns are not in that table, are empty, or are duplicated.
 - An effect whose target table is not in the `resource` of that action's `appliesTo`.
 - An `@effect` attached to something other than an action (an entity, a common type, an attribute).
+- An action whose parent (`in`) is not a declared action, or a cycle in the action hierarchy (including an action that
+  is its own parent).
 - A document with namespace, common type (`type`) or enum type declarations, or an action whose `context` declaration
   does not match the context type nyxis determines (the cedar-lean type environment `Authz.Schema.types` cannot be
   built).
@@ -50,9 +52,9 @@ nyxis checks the structure and effect declarations it needs.
 
 cedar-lean's `Cedar.Validation.Schema` has no annotations, so nyxis does the parsing and builds the type environment
 (attribute types, `appliesTo`, ancestors, context types) from the same document, storing it in `Authz.Schema.types`
-(used by the precondition check for restricting decision materials; `Nyxis.Materials`). This construction code is not
-covered by proofs; its behavior is checked by the tests in `Test/Schema.lean` and `Test/Smoke.lean` (Assumption 1 in
-`ASSUMPTIONS.md`).
+(used by the precondition check for restricting decision materials; `Nyxis.Materials`). The ancestors of an action are
+the transitive closure of its parents (`in`), as in Cedar. This construction code is not covered by proofs; its behavior
+is checked by the tests in `Test/Schema.lean` and `Test/Smoke.lean` (Assumption 1 in `ASSUMPTIONS.md`).
 -/
 
 namespace Nyxis.CedarSchema
@@ -1125,6 +1127,33 @@ def actionEntry (tys : List EntityType) (ets : Cedar.Validation.EntitySchema)
   return { appliesToPrincipal := Cedar.Data.Set.make principals, appliesToResource := Cedar.Data.Set.make resources,
            ancestors := Cedar.Data.Set.make parents, context }
 
+/-- Widens each action's ancestors from its direct parents (the `ancestors` of `actionEntry`) to their transitive
+    closure. Cedar's schema also closes the hierarchy (`compute_tc`) and rejects undeclared parents and cycles.
+    cedar-lean's well-formedness of the type environment likewise requires the ancestors to be declared actions,
+    transitive and acyclic (in a type environment that fails it, the per-decision premises do not hold and
+    `Authz.permits` denies every request). Duplicate declarations of the same action are rejected earlier by
+    `collectActions`. -/
+def closeActionHierarchy (acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry × Pos)) :
+    Except CedarLex.Error (List (EntityUID × Cedar.Validation.ActionSchemaEntry)) := do
+  let parentsOf (uid : EntityUID) : List EntityUID :=
+    ((acts.find? (·.1 == uid)).map (·.2.1.ancestors.toList)).getD []
+  for (uid, entry, pos) in acts do
+    for p in entry.ancestors.toList do
+      unless acts.any (·.1 == p) do
+        throw ⟨pos, s!"the parent {p.eid} of action {uid.eid} is not a declared action"⟩
+  acts.mapM fun (uid, entry, pos) => do
+    -- Breadth-first from the parents. Widening as many times as there are actions collects every reachable action.
+    let mut seen : List EntityUID := []
+    let mut frontier := entry.ancestors.toList
+    for _ in [0:acts.length] do
+      let fresh := frontier.eraseDups.filter (!seen.contains ·)
+      if fresh.isEmpty then break
+      seen := seen ++ fresh
+      frontier := fresh.flatMap parentsOf
+    if seen.contains uid then
+      throw ⟨pos, s!"the action hierarchy is cyclic at action {uid.eid}"⟩
+    return (uid, { entry with ancestors := Cedar.Data.Set.make seen })
+
 /-- Builds the cedar-lean type environment, the parent columns and the membership rows from the parsed source schema and
     the action declarations built from it. Destinations (`@external`) are not put in the type environment, and are
     rejected if they appear in attribute types, parents or tags. -/
@@ -1168,14 +1197,14 @@ def typeSchema (doc : Document) (ctx : Ctx) (actions : List Authz.ActionDecl) :
   for (ty, items) in pending do
     let some entry := etsMap.find? ty | throw ⟨default, s!"the type of entity {showType ty} does not exist"⟩
     memberships := memberships ++ [(ty, ← membershipsOf tys etsMap ty entry.ancestors.toList items)]
-  let mut acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry) := []
+  let mut acts : List (EntityUID × Cedar.Validation.ActionSchemaEntry × Pos) := []
   for ns in doc do
     for d in ns.decls do
       if let .action a := d then
         for n in a.names do
           let entry ← actionEntry tys etsMap actions a n
-          acts := acts ++ [(⟨⟨"Action", []⟩, n⟩, entry)]
-  return (⟨etsMap, Cedar.Data.Map.make acts⟩, parents, memberships)
+          acts := acts ++ [(⟨⟨"Action", []⟩, n⟩, entry, a.pos)]
+  return (⟨etsMap, Cedar.Data.Map.make (← closeActionHierarchy acts)⟩, parents, memberships)
 
 /-! ## Uniqueness and referential-integrity declarations
 

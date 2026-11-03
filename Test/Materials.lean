@@ -200,7 +200,7 @@ def agreesAt (p : Principal) (action : String) (op : Operation) (expected : Bool
 /-! ### The construction of the decision's entities and the premise checks are effective -/
 
 -- Without adding the action entities, cedar-lean's entity check (all actions exist) does not pass
-#guard !isOk (Cedar.Validation.validateEntities ts (Map.make (Nyxis.Materials.rowEntries ts schema.parents schema.memberships store)))
+#guard !isOk (Cedar.Validation.validateEntities ts (Map.make (Nyxis.Materials.rowEntries ts schema.parents schema.memberships store store)))
 #guard isOk (Cedar.Validation.validateEntities ts (Nyxis.Materials.entities ts schema.parents schema.memberships store))
 -- A row with a wrong type (admin is a string) does not conform and does not appear among the decision's entities
 #guard !Nyxis.Materials.conforms ts alice (row [("admin", strV "yes")])
@@ -860,6 +860,15 @@ def memAgrees (p : Principal) (action : String) (op : Operation) (expected : Boo
 #guard memAgrees (.user alice) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "acme")) true
 #guard memAgrees (.user bob) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "acme")) false
 #guard memAgrees (.user alice) "addMember" (.insert memT "m5" (memRow "dave" "acme-ed" "zen")) false
+-- An insert adding oneself to another team: the proposed membership row only becomes the resource's entity; the
+-- principal's ancestors (determined by membership rows) come from the DB's current membership rows (the proposed row
+-- cannot satisfy `principal in resource.team`)
+#guard memAgrees (.user bob) "addMember" (.insert memT "m5" (memRow "bob" "acme-ed" "acme")) false
+#guard memAgrees (.user carol) "addMember" (.insert memT "m5" (memRow "carol" "acme-ed" "acme")) false
+#guard ((judgementEntities memSchema (.user bob) memStore (.insert memT "m5" (memRow "bob" "acme-ed" "acme"))).find? bob).map
+  (·.ancestors) == some (Set.make [team "acme-vw", org "acme", team "zen-ed", org "zen"])
+#guard ((judgementEntities memSchema (.user bob) memStore (.insert memT "m5" (memRow "bob" "acme-ed" "acme"))).find?
+  (mem "m5")).map (·.attrs) == some (memRow "bob" "acme-ed" "acme")
 -- Deleting a membership row: the user themselves or the organization's owner
 #guard memAgrees (.user bob) "removeMember" (.delete memT "m2") true
 #guard memAgrees (.user alice) "removeMember" (.delete memT "m2") true
@@ -890,6 +899,12 @@ def memStep (p : Principal) (action : String) (key : Key) (values : Row := Map.e
 #guard (listRows memSchema memPolicies (.user dave) gen
   (memStep (.user alice) "addMember" "m5" (memRow "dave" "acme-ed" "acme")).store (act "listDocs") docT {}).map (·.1)
   == []
+-- An insert adding oneself to another team is denied, issues nothing, and adds no membership row (bob is not a member
+-- of acme-ed)
+#guard (match (memStep (.user bob) "addMember" "m5" (memRow "bob" "acme-ed" "acme")).outcome with
+  | .denied => true | _ => false)
+#guard (memStep (.user bob) "addMember" "m5" (memRow "bob" "acme-ed" "acme")).issued.isEmpty
+#guard (memStep (.user bob) "addMember" "m5" (memRow "bob" "acme-ed" "acme")).store.find? memT "m5" == none
 
 /-- A partial fetch from `memStore`: the rows of `uids`, and the membership rows of the users in `members` (recorded as
     fully fetched). -/
@@ -934,5 +949,40 @@ def memStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
 #guard memStepAgrees (memKnown [alice, org "acme", team "acme-ed", mem "m1"] [alice]) (.user alice) "deleteTeam" "acme-ed"
 #guard memStepAgrees (memKnown [carol, org "zen", team "zen-ed", mem "m3", mem "m4", bob] [carol, bob]) (.user carol)
   "deleteTeam" "zen-ed"
+
+/-! ## Multi-level action groups
+
+`readOne` is in the group `readSome`, which is in the group `readAll`. The ancestors are the transitive closure, so a
+permit on `action in Action::"readAll"` permits all three, and a forbid on `action in Action::"readSome"` denies
+`readSome` and `readOne`. Neither reaches `readOther`, which is outside the group. -/
+
+def groupSchemaText : String := r#"
+entity User = { "admin": Bool };
+entity Doc = { "owner": User };
+@effect("read Doc")
+action "readAll" appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readSome" in ["readAll"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readOne" in ["readSome"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readOther" appliesTo { principal: [User], resource: [Doc] };
+"#
+
+def groupSchema : Schema := (Nyxis.CedarSchema.parse groupSchemaText).toOption.getD schema
+def groupStore : Store := Map.make [(alice, userRow false), (doc "d", row [("owner", uidV alice)])]
+def groupPermits (policies : String) (action : String) : Bool :=
+  permits groupSchema ((Nyxis.CedarPolicy.parse policies).toOption.getD []) (.user alice) gen groupStore
+    (act action) (.read docT "d")
+def groupActions : List String := ["readAll", "readSome", "readOne", "readOther"]
+
+#guard isOk (Nyxis.CedarSchema.parse groupSchemaText)
+#guard groupActions.map (groupPermits "permit (principal, action in Action::\"readAll\", resource);") ==
+  [true, true, true, false]
+#guard groupActions.map (groupPermits r#"
+permit (principal, action in Action::"readAll", resource);
+permit (principal, action == Action::"readOther", resource);
+forbid (principal, action in Action::"readSome", resource);
+"#) == [true, false, false, true]
 
 end Test.Materials

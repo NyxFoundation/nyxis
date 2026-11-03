@@ -38,9 +38,10 @@ Rows that do not conform (rows whose column types or required columns do not mat
 decision's entities. Such rows do not arise in practice, because nyxis generates the DDL from the approved schema,
 rejects writes by shape checks, and the DB is reachable only by the dedicated nyxis role (`ASSUMPTIONS.md` Assumptions 2 and 3); the
 real-DB connection layer (`PostgresRun`) closes the whole request with 503 if the shape check of a fetched row fails.
-Action entities have no attributes or tags, their ancestors are as declared, and they are added because cedar-lean's
-entity consistency (`Entities.HasAllActions`) requires all actions to exist. `in` for action groups
-(`action "a" in [Action::"g"]`) is decided by these ancestors.
+Action entities have no attributes or tags, their ancestors are the transitive closure of the parents in the source
+schema (`Nyxis.CedarSchema.closeActionHierarchy`), and they are added because cedar-lean's entity consistency
+(`Entities.HasAllActions`) requires all actions to exist. `in` for action groups (`action "a" in [Action::"g"]`) is
+decided by these ancestors.
 
 Ancestors of row entities (entity parents): in a table that the approved schema declares as `entity T in [P]` with the
 columns pointing to parents given by `@parents("column, …")`, the row's entity has as ancestors those values of these
@@ -265,32 +266,42 @@ def rowData (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Membership
     (uid : EntityUID) (row : Row) : EntityData :=
   { attrs := row, ancestors := rowAncestors ts pc mc store uid row, tags := Map.empty }
 
-/-- The entities of the rows of the DB state that conform to the schema (in the primary key order of `Store`). Each row
-    is looked up again with `find?` by its primary key (the same path as `Store.rows`; even if the same primary key is
-    duplicated, only the row from `find?` becomes the entity). -/
-def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) :
+/-- The entities of the rows of the DB state `store` that conform to the schema (in the primary key order of `Store`).
+    Each row is looked up again with `find?` by its primary key (the same path as `Store.rows`; even if the same primary
+    key is duplicated, only the row from `find?` becomes the entity). The ancestors taken from membership rows are
+    determined from the membership rows of the state `members` (`entitiesWith`). -/
+def rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (members store : Store) :
     List (EntityUID × EntityData) :=
   store.toList.filterMap fun kv =>
     match Map.find? store kv.1 with
-    | some row => if conforms ts kv.1 row then some (kv.1, rowData ts pc mc store kv.1 row) else none
+    | some row => if conforms ts kv.1 row then some (kv.1, rowData ts pc mc members kv.1 row) else none
     | none => none
 
-/-- The entities of all the schema's actions. No attributes or tags; ancestors are as declared
-    (`actionSchemaEntryToEntityData`). Each action's entry is looked up with `find?` in the type environment (even if
+/-- The entities of all the schema's actions. No attributes or tags; ancestors are those of the entry in the type
+    environment (the transitive closure of the source schema's parents; `actionSchemaEntryToEntityData`). Each action's entry is looked up with `find?` in the type environment (even if
     there are duplicate declarations, it is the same entry as `find?`). -/
 def actionEntries (ts : Cedar.Validation.Schema) : List (EntityUID × EntityData) :=
   ts.acts.toList.filterMap fun kv =>
     (ts.acts.find? kv.1).map fun entry => (kv.1, Cedar.Validation.actionSchemaEntryToEntityData entry)
 
+/-- The general form of the decision's entities: the rows of the state `store` that conform to the schema (with the
+    values of the columns pointing to parents, and the values of the membership rows of the state `members`, as
+    ancestors) and all the schema's actions. The decision of an insert (`Nyxis.Authz.judgementEntities`) uses the state
+    with the proposed row placed for the rows and the pre-insert state for the membership rows (the proposed row only
+    becomes the resource's entity; it does not change the ancestors of any other entity, the principal included). -/
+def entitiesWith (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (members store : Store) :
+    Entities :=
+  Map.make (rowEntries ts pc mc members store ++ actionEntries ts)
+
 /-- The decision's entities: the rows of the DB state that conform to the schema (with the values of the columns
     pointing to parents and of membership rows as ancestors) and all the schema's actions. -/
-def entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) : Entities :=
-  Map.make (rowEntries ts pc mc store ++ actionEntries ts)
+abbrev entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store) : Entities :=
+  entitiesWith ts pc mc store store
 
-theorem mem_rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns) (store : Store)
-    (u : EntityUID) (d : EntityData) :
-    (u, d) ∈ rowEntries ts pc mc store ↔
-      ∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc store u row := by
+theorem mem_rowEntries (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
+    (members store : Store) (u : EntityUID) (d : EntityData) :
+    (u, d) ∈ rowEntries ts pc mc members store ↔
+      ∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc members u row := by
   simp only [rowEntries, List.mem_filterMap]
   constructor
   · rintro ⟨⟨u', r⟩, _, hsome⟩
@@ -321,9 +332,9 @@ theorem mem_actionEntries (ts : Cedar.Validation.Schema) (u : EntityUID) (d : En
 /-- The pairs of the decision's entities are unique per key (rows are the rows from `find?`, actions are the entries
     from `find?`, and their UIDs do not overlap). -/
 theorem entries_functional (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (store : Store) :
-    ∀ k v v', (k, v) ∈ rowEntries ts pc mc store ++ actionEntries ts →
-      (k, v') ∈ rowEntries ts pc mc store ++ actionEntries ts → v = v' := by
+    (members store : Store) :
+    ∀ k v v', (k, v) ∈ rowEntries ts pc mc members store ++ actionEntries ts →
+      (k, v') ∈ rowEntries ts pc mc members store ++ actionEntries ts → v = v' := by
   intro k v v' h h'
   simp only [List.mem_append, mem_rowEntries, mem_actionEntries] at h h'
   rcases h with ⟨row, hr, hc, rfl⟩ | ⟨entry, he, rfl⟩ <;>
@@ -345,12 +356,12 @@ theorem entries_functional (ts : Cedar.Validation.Schema) (pc : ParentColumns) (
 
 /-- `find?` on the decision's entities: a conforming current row, or an action of the schema. -/
 theorem entities_find?_iff (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (store : Store) (u : EntityUID) (d : EntityData) :
-    (entities ts pc mc store).find? u = some d ↔
-      (∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc store u row) ∨
+    (members store : Store) (u : EntityUID) (d : EntityData) :
+    (entitiesWith ts pc mc members store).find? u = some d ↔
+      (∃ row, Map.find? store u = some row ∧ conforms ts u row = true ∧ d = rowData ts pc mc members u row) ∨
       (∃ entry, ts.acts.find? u = some entry ∧ d = Cedar.Validation.actionSchemaEntryToEntityData entry) := by
-  unfold entities
-  rw [find?_make_iff_mem (entries_functional ts pc mc store)]
+  unfold entitiesWith
+  rw [find?_make_iff_mem (entries_functional ts pc mc members store)]
   simp only [List.mem_append, mem_rowEntries, mem_actionEntries]
 
 /-- `(key, row)` is in the table's current sequence of rows if and only if it is the current row looked up with `find?`
@@ -409,14 +420,14 @@ theorem rowData_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : Mem
   · rfl
 
 /-- If, for a UID of a table in the type environment, `find?` agrees in two states and that entity's membership rows are
-    the same as sets, then `find?` on the decision's entities also agrees (UIDs of types that are not tables do not
-    become row entities, so they do not depend on the state). -/
+    the same as sets (between the states the membership rows are taken from), then `find?` on the decision's entities
+    also agrees (UIDs of types that are not tables do not become row entities, so they do not depend on the state). -/
 theorem entities_find?_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (s₁ s₂ : Store) (u : EntityUID)
+    (m₁ s₁ m₂ s₂ : Store) (u : EntityUID)
     (h : (ts.ets.find? u.ty).isSome = true → Map.find? s₁ u = Map.find? s₂ u)
     (hm : (ts.ets.find? u.ty).isSome = true →
-      ∀ m ∈ (mc.lookup u.ty).getD [], RowsAgree s₁ s₂ m.table (m.filterOf u)) :
-    (entities ts pc mc s₁).find? u = (entities ts pc mc s₂).find? u := by
+      ∀ m ∈ (mc.lookup u.ty).getD [], RowsAgree m₁ m₂ m.table (m.filterOf u)) :
+    (entitiesWith ts pc mc m₁ s₁).find? u = (entitiesWith ts pc mc m₂ s₂).find? u := by
   apply Option.ext
   intro d
   rw [entities_find?_iff, entities_find?_iff]
@@ -431,7 +442,7 @@ theorem entities_find?_eq (ts : Cedar.Validation.Schema) (pc : ParentColumns) (m
   | some entry =>
     have htab : (ts.ets.find? u.ty).isSome = true := by rw [hty]; rfl
     rw [h htab]
-    simp only [rowData_eq ts pc mc s₁ s₂ u _ (hm htab)]
+    simp only [rowData_eq ts pc mc m₁ m₂ u _ (hm htab)]
 
 /-! ## Per-decision premise checks -/
 
@@ -488,15 +499,15 @@ theorem rowAncestors_ty (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc 
   simp only [Set.mem_make, List.mem_filter] at hanc
   exact Set.contains_prop_bool_equiv.mp hanc.2
 
-/-- The decision's entities `entities ts pc mc store` are, for every DB state, instances of each environment of type
-    environment `ts` (cedar-lean's `InstanceOfSchema`): each entity is a conforming row (with ancestor types as
+/-- The decision's entities `entitiesWith ts pc mc members store` are, for every DB state, instances of each environment
+    of type environment `ts` (cedar-lean's `InstanceOfSchema`): each entity is a conforming row (with ancestor types as
     declared) or an action of the schema, and all actions exist. -/
 theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (env : Cedar.Validation.TypeEnv) (store : Store) (hets : env.ets = ts.ets) (hacts : env.acts = ts.acts) :
-    Cedar.Thm.InstanceOfSchema (entities ts pc mc store) env := by
+    (env : Cedar.Validation.TypeEnv) (members store : Store) (hets : env.ets = ts.ets) (hacts : env.acts = ts.acts) :
+    Cedar.Thm.InstanceOfSchema (entitiesWith ts pc mc members store) env := by
   constructor
   · intro uid data hfind
-    rcases (entities_find?_iff ts pc mc store uid data).mp hfind with ⟨row, _, hconf, rfl⟩ | ⟨entry, hfind', rfl⟩
+    rcases (entities_find?_iff ts pc mc members store uid data).mp hfind with ⟨row, _, hconf, rfl⟩ | ⟨entry, hfind', rfl⟩
     · left
       unfold conforms at hconf
       simp only [Bool.and_eq_true] at hconf
@@ -519,7 +530,7 @@ theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentCol
           rw [hschema]
           exact htype
         · intro anc hanc
-          exact rowAncestors_ty ts pc mc store uid row entry hentry anc hanc
+          exact rowAncestors_ty ts pc mc members uid row entry hentry anc hanc
         · unfold Cedar.Thm.InstanceOfEntityTags
           split
           · intro v hv
@@ -538,10 +549,10 @@ theorem instanceOfSchema_entities (ts : Cedar.Validation.Schema) (pc : ParentCol
 /-- If the type environment is well-formed and the request is an instance of some environment, the decision's entities
     satisfy, under that environment, the premise of cedar-lean's slicing theorem (`InstanceOfWellFormedSchema`). -/
 theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (store : Store) (req : Request)
+    (members store : Store) (req : Request)
     (hwf : ts.validateWellFormed = .ok ())
     (hreq : Cedar.Validation.validateRequest ts req = .ok ()) :
-    Cedar.Thm.InstanceOfWellFormedSchema ts req (entities ts pc mc store) := by
+    Cedar.Thm.InstanceOfWellFormedSchema ts req (entitiesWith ts pc mc members store) := by
   simp only [Cedar.Validation.validateRequest] at hreq
   split at hreq
   · rename_i hany
@@ -553,7 +564,7 @@ theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentCo
     · exact Cedar.Thm.instance_of_request_type_refl hmatch
     · simp only [Cedar.Validation.Schema.environments, List.mem_map] at henv
       obtain ⟨rty, _, rfl⟩ := henv
-      exact instanceOfSchema_entities ts pc mc _ store rfl rfl
+      exact instanceOfSchema_entities ts pc mc _ members store rfl rfl
   · cases hreq
 
 /-! ## The agreement theorem -/
@@ -564,13 +575,14 @@ theorem instanceOfWellFormedSchema (ts : Cedar.Validation.Schema) (pc : ParentCo
     cedar-lean's level validation at `level` (each the success of an executable check). The proof is delegated to
     cedar-lean's slicing theorem and does not touch the evaluator's internals. -/
 theorem isAuthorized_slice (ts : Cedar.Validation.Schema) (pc : ParentColumns) (mc : MembershipColumns)
-    (policies : Policies) (store : Store) (req : Request) (level : Nat)
+    (policies : Policies) (members store : Store) (req : Request) (level : Nat)
     (hwf : ts.validateWellFormed = .ok ())
     (hreq : Cedar.Validation.validateRequest ts req = .ok ())
     (hlevel : Cedar.Validation.validateWithLevel policies ts level = .ok ()) :
-    isAuthorized req ((entities ts pc mc store).sliceAtLevel req level) policies
-      = isAuthorized req (entities ts pc mc store) policies :=
-  (Cedar.Thm.validate_with_level_is_sound_wf (instanceOfWellFormedSchema ts pc mc store req hwf hreq) hlevel).symm
+    isAuthorized req ((entitiesWith ts pc mc members store).sliceAtLevel req level) policies
+      = isAuthorized req (entitiesWith ts pc mc members store) policies :=
+  (Cedar.Thm.validate_with_level_is_sound_wf
+    (instanceOfWellFormedSchema ts pc mc members store req hwf hreq) hlevel).symm
 
 /-! ## Partial fetch -/
 

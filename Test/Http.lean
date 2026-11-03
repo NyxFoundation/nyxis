@@ -106,14 +106,29 @@ private def allowed : Response :=
 -- For the same name, only the first one is used (the second and later are not used even if valid).
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "\"a\""), (.etag, "\"b\"")] } "etag" == ["\"a\""]
 #guard valuesOf { status := .ok, body := "", headers := [(.etag, "bad\nvalue"), (.etag, "\"b\"")] } "etag" == []
--- Cache-Control: public / s-maxage, which allow storing in a shared cache, are dropped (regardless of case or
+-- Cache-Control: directives that allow storing in a shared cache are replaced with no-store (regardless of case or
 -- whitespace).
 #guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "private, max-age=0")] } "cache-control"
   == ["private, max-age=0"]
-#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "public, max-age=60")] } "cache-control" == []
-#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "max-age=60, S-MaxAge = 10")] } "cache-control" == []
-#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, " Public ")] } "cache-control" == []
-#guard acceptableCacheControl "no-cache, no-store, must-revalidate"
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "public, max-age=60")] } "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "max-age=60, S-MaxAge = 10")] } "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, " Public ")] } "cache-control" == ["no-store"]
+-- must-revalidate also allows sharing an authenticated response (RFC 9111 §3.5): while fresh, it is reused without
+-- re-authorization.
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "max-age=60, must-revalidate")] }
+  "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, " MuSt-ReVaLiDaTe ")] }
+  "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "must-revalidate"),
+    (.cacheControl, "private, max-age=60")] } "cache-control" == ["no-store"]
+#guard acceptableCacheControl "no-cache, no-store"
+#guard !acceptableCacheControl "must-revalidate"
+#guard !acceptableCacheControl "no-cache, no-store, must-revalidate"
+-- A rejected directive mixed in must not erase the original no-store and make the response storable.
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "no-cache, no-store, must-revalidate")] }
+  "cache-control" == ["no-store"]
+#guard valuesOf { status := .ok, body := "", headers := [(.cacheControl, "must-revalidate, \r\nSet-Cookie: a=b")] }
+  "cache-control" == []
 #guard !acceptableCacheControl "public"
 #guard !acceptableCacheControl "s-maxage=1"
 #guard acceptable .etag "public"

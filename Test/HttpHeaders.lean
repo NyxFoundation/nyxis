@@ -36,7 +36,7 @@ private def echo : Authz.Principal → Authz.Generated → Request → Handler R
 
 /-- Try disallowed insertions: a Content-Type containing a newline (Set-Cookie injection), an ETag containing a newline
     and a second one, a Cache-Control that allows storing in a shared cache, and a second Content-Type. Only the valid
-    Location remains, and Content-Type falls back to the default. -/
+    Location remains, Content-Type falls back to the default, and Cache-Control is replaced with no-store. -/
 private def inject : Authz.Principal → Authz.Generated → Request → Handler Response := fun _ _ _ =>
   pure { status := .created, body := "injected?"
          headers := [(.contentType, "text/html\r\nSet-Cookie: a=b"), (.etag, "bad\nvalue"), (.etag, "\"second\""),
@@ -49,7 +49,9 @@ private def plain : Authz.Principal → Authz.Generated → Request → Handler 
     from Authorization. -/
 private def readDraft : Authz.Principal → Authz.Generated → Request → Handler Response := fun _ _ _ => do
   match ← Handler.callAction (act "readPost") "draft1" with
-  | .ok (some _) => pure { status := .ok, body := "draft" }
+  | .ok (some _) =>
+    pure { status := .ok, body := "draft"
+           headers := [(.cacheControl, "max-age=60, must-revalidate")] }
   | .denied => pure { status := .forbidden, body := "forbidden" }
   | _ => pure { status := .notFound, body := "not found" }
 
@@ -71,6 +73,7 @@ def main (args : List String) : IO Unit := do
   let verify : String → IO (Option String) := fun token =>
     match token with
     | "test-alice" => pure (some "alice")
+    | "test-bob" => pure (some "bob")
     | "test-root" => pure (some "root")
     | _ => pure none
   let backend : AuthenticatedRequest → IO Response := fun r =>

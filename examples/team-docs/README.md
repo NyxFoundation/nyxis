@@ -44,7 +44,7 @@ optionally, `NYXIS_JOB_INTERVAL_SECONDS` (the interval; default 60). This sample
 startup is refused without `NYXIS_SERVICE_PRINCIPAL`.
 For external API calls, pass the keys named by the approved source's destinations, `NYXIS_EXT_SUMMARIZER` and `NYXIS_EXT_AUDIT` (secret; pass them only as environment variables;
 any string for the mock API). They are required as long as the approved source has destinations; without them startup is refused. Optionally, the transport limits
-`NYXIS_CALL_CONNECT_TIMEOUT` / `NYXIS_CALL_MAX_TIME` / `NYXIS_CALL_MAX_RESPONSE_BYTES` (defaults 3 seconds, 10 seconds, 64KiB) and,
+`NYXIS_CALL_CONNECT_TIMEOUT` / `NYXIS_CALL_MAX_TIME` / `NYXIS_CALL_MAX_RESPONSE_BYTES` (defaults 3 seconds, 10 seconds, 64KiB; the body limit applies to `sync` only) and,
 for the outbox's internal loop, `NYXIS_OUTBOX_INTERVAL_SECONDS` / `NYXIS_OUTBOX_MAX_ATTEMPTS` /
 `NYXIS_OUTBOX_BACKOFF_BASE_SECONDS` (defaults 5 seconds, 8 attempts, 10 seconds; `docs/external-calls.md` §5).
 `backend/.lake/build/bin/initTeamDocsDatabase` creates the approved source's tables from scratch (it fails if tables already exist).

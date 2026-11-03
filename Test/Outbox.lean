@@ -25,8 +25,10 @@ and runs in three modes against real PostgreSQL (local Supabase) and the HTTPS m
   starts two processes at once against the same DB and checks, from the mock API's records, that each row is sent
   exactly once, that a switch from 5xx to 2xx is resent and becomes `sent` (with resend intervals of at least the
   exponential backoff), that 4xx immediately becomes `failed`, and that exceeding the maximum number of attempts (a row
-  that always gets 5xx, and a `url: column` row pointing at a closed port = transport failures) becomes `failed`. The
-  transition `Outbox.settle` itself is checked at build time by the `#guard`s below.
+  that always gets 5xx, and a `url: column` row pointing at a closed port = transport failures) becomes `failed`. Since
+  the response body is discarded, it also checks that the outcome follows the status code: a 2xx whose body is not UTF-8
+  or is over the limit becomes `sent`, and a 4xx whose body is not UTF-8 becomes `failed`. The transition `Outbox.settle`
+  itself is checked at build time by the `#guard`s below.
 
 Receives through environment variables a new DB pointed to by `NYXIS_DATABASE_URL`, `NYXIS_CHECK_EXTERNAL_PORT` (the
 mock API's port), `NYXIS_EXT_NOTIFY` (the destination's key), and `NYXIS_OUTBOX_*` (the internal loop's settings). Does
@@ -204,7 +206,8 @@ def Context.status (ctx : Context) (name : String) (id : String) (expected : Str
 def parallelOrders : List String := (List.range 12).map fun i => s!"o-par{i}"
 
 def orders : List String :=
-  ["o-ok", "o-twice", "o-boom", "o-404", "o-retry", "o-max", "o-hook"] ++ parallelOrders
+  ["o-ok", "o-twice", "o-boom", "o-404", "o-retry", "o-max", "o-hook", "o-binary", "o-large", "o-binary-404"] ++
+    parallelOrders
 
 def enqueue (ctx : Context) : IO Unit := do
   -- Prepare the rows (no calls).
@@ -221,6 +224,14 @@ def enqueue (ctx : Context) : IO Unit := do
   ctx.expect "notify o-retry (mock answers 5xx twice, then 2xx)" alice .post "/orders/o-retry/notify" 200 "" (some "")
   ctx.expect "notify o-404 (mock answers 4xx)" alice .post "/orders/o-404/notify" 200 "" (some "")
   ctx.expect "notify o-max (mock always answers 5xx)" alice .post "/orders/o-max/notify" 200 "" (some "")
+  -- The response body is discarded: a 2xx whose body is not UTF-8 or is over the limit, and a 4xx whose body is not
+  -- UTF-8, are each decided by the status code in one attempt.
+  ctx.expect "notify o-binary (mock answers 2xx with a non-UTF-8 body)" alice .post "/orders/o-binary/notify" 200 ""
+    (some "")
+  ctx.expect "notify o-large (mock answers 2xx with a body over the response limit)" alice .post
+    "/orders/o-large/notify" 200 "" (some "")
+  ctx.expect "notify o-binary-404 (mock answers 4xx with a non-UTF-8 body)" alice .post "/orders/o-binary-404/notify"
+    200 "" (some "")
   ctx.expect "notify-twice o-twice (two rows in one request)" alice .post "/orders/o-twice/notify-twice" 200 "" (some "")
   ctx.expect "ping o-hook (url column, no auth)" alice .post "/orders/o-hook/ping" 200 "" (some "")
   ctx.expect "ping o-dead (transport failures at delivery, retried then failed)" alice .post "/orders/o-dead/ping" 200 ""

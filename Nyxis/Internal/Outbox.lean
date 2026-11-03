@@ -20,7 +20,7 @@ headers from the core settings per destination), updates the state in the same t
 `sent` and 4xx immediately becomes `failed` (retrying would not change it); 5xx, other status codes, and transport
 failures increment `attempts` and retry with exponential backoff (`base × 2^attempts` seconds), becoming `failed` once
 the maximum number of attempts is exceeded. nyxis does not delete `failed` rows (the operator inspects them with SQL;
-D8). Response bodies are discarded.
+D8). Response bodies are discarded unread (the body limit `NYXIS_CALL_MAX_RESPONSE_BYTES` applies to `sync` only).
 
 A row whose state update or COMMIT fails after sending (the process crashed) stays `pending` and is resent later
 (delivery is at least once; that the same content may arrive more than once is in "what the theorem does not state" of
@@ -136,17 +136,20 @@ def readDue (r : PostgresResult.Reader) : IO (Option Due) := do
 inductive Delivered where
   /-- The response's status code. -/
   | status (code : Nat)
-  /-- A transport failure (connection, TLS, deadline, body limit). Retried. -/
+  /-- A transport failure (connection, TLS, deadline, interrupted reception). Retried. -/
   | transport
   /-- The destination is not configured, or the URL is not HTTPS. Retrying would not change it. -/
   | config
 
 /-- Sends only the row's content (the body is the stored JSON, the authentication header comes from the core settings).
-    The response body is discarded. -/
+    The response body is discarded unread, so once the response has been received and a status code returned, the size
+    and encoding of the body do not change the transition (a received 2xx or 4xx is not mistaken for a transport failure
+    and resent). A body whose reception exceeds the deadline or is cut short is still a transport failure. -/
 def deliver (calls : CallSend.Config) (due : Due) : IO Delivered := do
   let some auth := calls.auth.lookup due.destination | return .config
   unless isHttpsUrl due.url do return .config
-  let (code, output) ← CurlStdin.run (CallSend.arguments calls.connectTimeout calls.maxTime calls.maxResponseBytes)
+  let (code, output) ← CurlStdin.run
+    (CallSend.arguments calls.connectTimeout calls.maxTime calls.maxResponseBytes (discardBody := true))
     (CallSend.configTextJson due.url due.method due.body? auth)
   unless code == 0 do return .transport
   let some (status, _) := CallSend.splitOutput output | return .transport

@@ -53,14 +53,15 @@ def headerName : ResponseHeader → Std.Http.Header.Name
   | .etag => .mk "etag"
   | .location => .mk "location"
 
-/-- Of the Cache-Control directives, `public` and `s-maxage`, which let a shared cache resend a response permitted for
-    an authenticated principal to another principal, are not accepted (RFC 9111 §3.5: a response to a request with
-    Authorization is not stored in a shared cache unless one of these is present). Directives are comma-separated, and
-    names are case-insensitive. -/
+/-- Of the Cache-Control directives, `public`, `s-maxage` and `must-revalidate`, which let a shared cache resend a
+    response permitted for an authenticated principal to another principal, are not accepted (RFC 9111 §3.5: a response
+    to a request with Authorization is not stored in a shared cache unless one of these is present). `must-revalidate`
+    only requires revalidation once the response is stale; while fresh, it may be shared without re-authorization.
+    Directives are comma-separated, and names are case-insensitive. -/
 def acceptableCacheControl (value : String) : Bool :=
   (value.splitOn ",").all fun directive =>
     let name := ((directive.splitOn "=").headD "").trimAscii.toString.toLower
-    name != "public" && name != "s-maxage"
+    name != "public" && name != "s-maxage" && name != "must-revalidate"
 
 /-- Whether a value set by the handler may be put on the response. For anything other than `Cache-Control`, only
     validity as an HTTP header value is required (checked by `responseBuilder` with `Header.Value.ofString?`). -/
@@ -69,16 +70,19 @@ def acceptable (name : ResponseHeader) (value : String) : Bool :=
   | .cacheControl => acceptableCacheControl value
   | _ => true
 
-/-- The value of `name` set by the handler. The first one is used, and only when it is accepted by `acceptable` and
-    valid as an HTTP header value. -/
+/-- The first value of `name` set by the handler. It is dropped when it is not valid as an HTTP header value. A
+    Cache-Control that `acceptable` rejects is replaced with `no-store`, so the handler's own storage prohibition is
+    never weakened. -/
 def headerValueOf (r : Response) (name : ResponseHeader) : Option Std.Http.Header.Value :=
   (r.headers.find? (·.1 == name)).bind fun h =>
-    if acceptable name h.2 then Std.Http.Header.Value.ofString? h.2 else none
+    (Std.Http.Header.Value.ofString? h.2).map fun value =>
+      if acceptable name h.2 then value else Std.Http.Header.Value.ofString! "no-store"
 
 /-- Build the HTTP response line from the handler's response. The status code is exactly what the handler returned.
     Content-Type comes from `contentTypeOf`; each other allowed header is added once, in the order of
-    `ResponseHeader.all`, only when the first value for that name is accepted by `headerValueOf` (invalid values and
-    disallowed directives are dropped, and second and later values of the same name are not used). Names not in
+    `ResponseHeader.all`, only when the first value for that name is accepted by `headerValueOf` (invalid values are
+    dropped, a Cache-Control that is not accepted is replaced with `no-store`, and second and later values of the same
+    name are not used). Names not in
     `ResponseHeader` (Set-Cookie etc.) cannot be represented. -/
 def responseBuilder (r : Response) : Std.Http.Response.Builder :=
   ResponseHeader.all.foldl (fun builder name =>

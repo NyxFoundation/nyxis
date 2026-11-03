@@ -117,6 +117,64 @@ action "edit", "edit2" in [Action::"readDoc"] appliesTo { principal: [Group], re
   "// c\r@effect(\"delete Post\") action \"deletePost\" appliesTo { principal: [User], resource: [Post] };\n")).toOption.map
   (·.actions.map (·.action.eid))) == some ["readPost", "deletePost"]
 
+/-! ## Action parents (action groups)
+
+The ancestors of `action "a" in ["b"]` are the transitive closure of the parents, as in Cedar, and the type environment
+is well-formed (multi-level action groups included). An undeclared parent and a cycle in the hierarchy (including an
+action that is its own parent) are rejected. -/
+
+def actionBase : String := r#"
+entity User = { "admin": Bool };
+entity Doc = { "title": String };
+@effect("read Doc")
+action "readAll" appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readSome" in ["readAll"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "readOne" in [Action::"readSome"] appliesTo { principal: [User], resource: [Doc] };
+"#
+
+/-- The (names of the) ancestors of action `n` in the constructed type environment. -/
+def actionAncestors (s n : String) : Option (List String) := do
+  let schema ← (parse s).toOption
+  let entry ← schema.types.acts.find? ⟨⟨"Action", []⟩, n⟩
+  return entry.ancestors.toList.map (·.eid)
+
+/-- Constructible, and the type environment satisfies cedar-lean's well-formedness (one of the per-decision premises). -/
+def wellFormed (s : String) : Bool :=
+  match parse s with
+  | .ok schema => match schema.types.validateWellFormed with
+    | .ok _ => true
+    | .error _ => false
+  | .error _ => false
+
+#guard actionAncestors actionBase "readOne" == some ["readAll", "readSome"]
+#guard actionAncestors actionBase "readSome" == some ["readAll"]
+#guard actionAncestors actionBase "readAll" == some []
+#guard wellFormed actionBase
+#guard rejectedWith (actionBase.replace "in [\"readAll\"]" "in [\"nope\"]") "is not a declared action"
+#guard rejectedWith (actionBase.replace "action \"readAll\" appliesTo" "action \"readAll\" in [\"readOne\"] appliesTo")
+  "hierarchy is cyclic"
+#guard rejectedWith (actionBase.replace "in [Action::\"readSome\"]" "in [Action::\"readOne\"]") "hierarchy is cyclic"
+
+-- A parent declared later in the file, and the same ancestor reached through two parents (a diamond).
+def actionDiamond : String := r#"
+entity User = { "admin": Bool };
+entity Doc = { "title": String };
+@effect("read Doc")
+action "leaf" in ["left", "right"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "left" in ["top"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "right" in ["top"] appliesTo { principal: [User], resource: [Doc] };
+@effect("read Doc")
+action "top" appliesTo { principal: [User], resource: [Doc] };
+"#
+
+#guard actionAncestors actionDiamond "leaf" == some ["left", "right", "top"]
+#guard actionAncestors actionDiamond "left" == some ["top"]
+#guard wellFormed actionDiamond
+
 /-! ## Entity parents
 
 `entity T in [P]` becomes the ancestor types in the type environment, and `@parents("column, …")` names the parent

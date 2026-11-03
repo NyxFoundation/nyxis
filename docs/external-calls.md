@@ -171,7 +171,10 @@ Performed as one stage of `PostgresRun.runStaged`, at the same position as exist
    - 5xx, transport failure: increment `attempts` and determine the next time with exponential backoff.
    - 4xx: immediately `failed` (retrying would not change it).
    - Maximum number of attempts exceeded: `failed`.
-5. The response body is discarded (`async` has no response type).
+5. The response body is discarded unread (`async` has no response type). Once the response has been received and a
+   status code returned, the size and encoding of the body do not change the transitions above (a received 2xx or 4xx is
+   not resent as a transport failure). A body whose reception exceeds the deadline or is cut short is still a transport
+   failure.
 
 ### 4.3 Shape of `_nyxis_outbox`
 
@@ -197,7 +200,7 @@ Performed as one stage of `PostgresRun.runStaged`, at the same position as exist
   transitions are unchanged).
 - `_nyxis_id` is `<the request's unique ID>-<which async call of that request it is>` (the number of rows of the same
   request written earlier in the same transaction). The categories of `last_error` are `status` (a non-2xx response) /
-  `transport` (connection, TLS, deadline, body limit) / `config` (the destination is not in the configuration, or the URL
+  `transport` (connection, TLS, deadline, interrupted reception) / `config` (the destination is not in the configuration, or the URL
   is not HTTPS; not retried) / `attempts` (maximum number of attempts exceeded).
 - Not reachable from the application's handlers or policies (not in `Authz.Schema.tables`). No effect for reading it is
   added for now (D8).
@@ -209,7 +212,7 @@ Performed as one stage of `PostgresRun.runStaged`, at the same position as exist
 | `NYXIS_EXT_<name>` (the name the sources' `auth` refers to) | Key per destination | Required (startup is refused if unset) |
 | `NYXIS_CALL_CONNECT_TIMEOUT` | Connection (seconds) | 3 |
 | `NYXIS_CALL_MAX_TIME` | Total transfer (seconds). A sync `<seconds>s` can only be shorter than this | 10 |
-| `NYXIS_CALL_MAX_RESPONSE_BYTES` | Response body | 65536 |
+| `NYXIS_CALL_MAX_RESPONSE_BYTES` | Response body (sync only; async discards the body unread) | 65536 |
 | `NYXIS_OUTBOX_INTERVAL_SECONDS` | Interval of the internal loop | 5 |
 | `NYXIS_OUTBOX_MAX_ATTEMPTS` | Maximum number of attempts | 8 |
 | `NYXIS_OUTBOX_BACKOFF_BASE_SECONDS` | Backoff base (`base × 2^attempts`) | 10 |

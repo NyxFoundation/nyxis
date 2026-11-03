@@ -19,7 +19,10 @@ effect in the DB layer only when the decision is permit.
     `@parents("column, …")`, the values of those columns are the entity's ancestors — the materials for `in` in
     policies). The entities of all actions in the schema are added to them (`Nyxis.Materials.entities`). For an insert
     with no current row, the proposed row is added as the resource's entity. However, the principal's own entity is
-    always determined from the DB's current row and is never replaced by proposed values.
+    always determined from the DB's current row and is never replaced by proposed values. The ancestors taken from
+    membership rows (`@memberships`) are, for every entity, determined from the DB's membership rows before the insert
+    (the proposed membership row does not change the ancestors of other entities, the principal included — an insert
+    adding oneself to a team is not judged with the membership it would create).
   - Context: for inserts and updates, the proposed values are put in `context.values`. None for reads, lists and
     deletes. If the action's `context` in the sources declares `now` (datetime) / `id` (String), the server-generated
     values that nyxis decides per request (`Generated`: the current time and a fresh unique ID) are put in `context.now`
@@ -180,12 +183,15 @@ def judgementRequest (schema : Schema) (principal : Principal) (generated : Gene
 
 /-- The entities passed to Cedar (the whole of the decision materials). The DB's current rows that conform to the
     schema, and all actions of the schema (`Nyxis.Materials.entities`). For an insert with no current row, the proposed
-    row is added as the resource's entity (except for the principal itself). -/
+    row is added as the resource's entity (except for the principal itself). The ancestors taken from membership rows are
+    determined from the membership rows of the pre-insert state `store` (`Materials.entitiesWith`): even when the
+    proposed row is a row of a membership-row table, the ancestors of other entities, the principal included, do not
+    change. -/
 def judgementEntities (schema : Schema) (principal : Principal) (store : Store) (op : Operation) : Entities :=
   match op with
   | .insert t k row =>
     if (store.find? t k).isNone && (⟨t, k⟩ : EntityUID) != principal.uid
-    then Nyxis.Materials.entities schema.types schema.parents schema.memberships (store.put t k row)
+    then Nyxis.Materials.entitiesWith schema.types schema.parents schema.memberships store (store.put t k row)
     else Nyxis.Materials.entities schema.types schema.parents schema.memberships store
   | _ => Nyxis.Materials.entities schema.types schema.parents schema.memberships store
 
@@ -241,15 +247,15 @@ def Authorized (schema : Schema) (policies : Policies) (i : Issued) : Prop :=
     ∧ isPermitted policies (judgementRequest schema i.principal i.generated i.action i.op)
         (judgementEntities schema i.principal i.store i.op) = true
 
-/-- The whole of the decision materials is `Nyxis.Materials.entities` assembled from some DB state (for an insert, the
-    state with the proposed row placed). -/
+/-- The whole of the decision materials is `Nyxis.Materials.entitiesWith` assembled from some DB states (for an insert,
+    the rows from the state with the proposed row placed and the membership rows from the pre-insert state). -/
 theorem judgementEntities_entities (schema : Schema) (principal : Principal) (store : Store)
     (op : Operation) :
-    ∃ s, judgementEntities schema principal store op
-      = Nyxis.Materials.entities schema.types schema.parents schema.memberships s := by
+    ∃ m s, judgementEntities schema principal store op
+      = Nyxis.Materials.entitiesWith schema.types schema.parents schema.memberships m s := by
   cases op <;> simp only [judgementEntities]
-  all_goals try exact ⟨_, rfl⟩
-  split <;> exact ⟨_, rfl⟩
+  all_goals try exact ⟨_, _, rfl⟩
+  split <;> exact ⟨_, _, rfl⟩
 
 /-- If the authorization layer's decision (on the restricted decision materials) is permit, it is permit on the whole of
     the decision materials as well (cedar-lean's slicing theorem; the premises are the success of the type-environment,
@@ -268,11 +274,11 @@ theorem permits_authorized (schema : Schema) (policies : Policies) (principal : 
     obtain ⟨hprem, hperm⟩ := h
     obtain ⟨hwf, hreq⟩ := Nyxis.Materials.premisesHold_spec hprem
     have hl := Nyxis.Materials.levelOf_spec hlevel
-    obtain ⟨s, hs⟩ := judgementEntities_entities schema principal store op
+    obtain ⟨m, s, hs⟩ := judgementEntities_entities schema principal store op
     unfold materials at hperm
     rw [hs] at hperm ⊢
     unfold isPermitted at hperm ⊢
-    rw [Nyxis.Materials.isAuthorized_slice _ _ _ _ _ _ _ hwf hreq hl] at hperm
+    rw [Nyxis.Materials.isAuthorized_slice _ _ _ _ _ _ _ _ hwf hreq hl] at hperm
     exact hperm
 
 /-! ## Declared external effects
@@ -1386,7 +1392,8 @@ theorem RowsAgree.put {s₁ s₂ : Store} {table : Table} {filters : List Filter
 
 /-- If the fetch is consistent and the presence of the target is known, the whole of the decision materials returns, for
     entities that have an answer (whose row presence is known and whose membership rows have been fetched), the same
-    `find?` as the one built from the full state (the branch placing the proposed row for an insert agrees as well). -/
+    `find?` as the one built from the full state (the branch placing the proposed row for an insert agrees as well; both
+    take the membership rows from the pre-insert state). -/
 theorem judgementEntities_find?_eq (schema : Schema) (k : Known) (full : Store) (principal : Principal)
     (op : Operation) (u : EntityUID) (hc : k.Consistent full)
     (ht : k.decided op.target = true) (hk : k.knows schema.types schema.memberships u = true) :
@@ -1409,12 +1416,11 @@ theorem judgementEntities_find?_eq (schema : Schema) (k : Known) (full : Store) 
         split
         · rfl
         · exact hagree htab
-      · intro htab m hm
-        exact RowsAgree.put (hmem htab m hm) t key row
-    · exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
-  | read t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
-  | update t key changes => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
-  | delete t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ hagree hmem
+      · exact hmem
+    · exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
+  | read t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
+  | update t key changes => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
+  | delete t key => exact Nyxis.Materials.entities_find?_eq _ _ _ _ _ _ _ _ hagree hmem
 
 /-- The restricted decision materials built from a partial fetch that passed the check equal those built from the full
     state. -/

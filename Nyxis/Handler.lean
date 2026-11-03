@@ -21,9 +21,9 @@ constructor, so they never reach the handler. The runtime reads the JWT and turn
 The response a handler returns is `Http.Response`: the status code, the body, and the few response headers nyxis allows
 (`ResponseHeader`: Content-Type, Cache-Control, ETag, Location. The names are enumerated by the type, and Set-Cookie has
 no constructor). If Content-Type is not set, it is `text/plain; charset=utf-8`. Values that are not valid HTTP header
-values (newlines, control characters, non-ASCII), and the Cache-Control directives `public` / `s-maxage`, which would
-let a shared cache resend a response for an authenticated principal to another principal, are dropped by the connection
-layer (`Nyxis.Http.responseBuilder`).
+values (newlines, control characters, non-ASCII) are dropped by the connection layer. A Cache-Control containing
+`public` / `s-maxage` / `must-revalidate`, which would let a shared cache resend a response for an authenticated
+principal to another principal, is replaced with `no-store` (`Nyxis.Http.responseBuilder`).
 -/
 
 namespace Nyxis
@@ -127,9 +127,9 @@ structure Request where
   headers : List (RequestHeader × String) := []
 
 /-- The HTTP response a handler returns. `headers` are the response headers nyxis allows (only the first of the same
-    name is used, and values that are not valid HTTP header values (newlines, control characters, non-ASCII) and the
-    Cache-Control directives `public` / `s-maxage`, which allow storing in a shared cache, are dropped). If Content-Type
-    is not set, it is `text/plain; charset=utf-8`. -/
+    name is used, and values that are not valid HTTP header values (newlines, control characters, non-ASCII) are
+    dropped. A Cache-Control containing `public` / `s-maxage` / `must-revalidate`, which allow storing in a shared
+    cache, is replaced with `no-store`). If Content-Type is not set, it is `text/plain; charset=utf-8`. -/
 structure Response where
   status : Std.Http.Status
   body : String

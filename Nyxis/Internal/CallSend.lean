@@ -23,7 +23,9 @@ exception `invalidResponse` is raised — the transaction is rolled back, and th
 `PostgresRun.handleStaged` maps only this exception to a fixed 502 (`PostgresRun.gatewayResponse`)). A non-2xx response
 passes the status code and the raw body to the handler as `ExternalResult.calledError` (the transaction continues).
 `async` calls are not sent here (the connection layer writes them to the outbox in the request's transaction, and the
-internal loop `Nyxis.Internal.Outbox` sends them later with the same transport policy (`arguments` / `configTextJson`)).
+internal loop `Nyxis.Internal.Outbox` sends them later with the same `configTextJson` and `arguments (discardBody := true)`;
+`async` has no response type, so the response body is discarded unread, and the body limit
+(`NYXIS_CALL_MAX_RESPONSE_BYTES`) applies to `sync` only).
 -/
 namespace Nyxis.Internal.CallSend
 
@@ -161,13 +163,14 @@ def configText (url : String) (method : CallMethod) (body? : Option (List (Colum
   configTextJson url method (body?.map body) auth
 
 /-- The fixed transport policy (same shape as `StorageSign.arguments`). The status code is read at the end of the body.
-    -/
-def arguments (connectTimeout maxTime maxResponseBytes : Nat) : Array String := #[
-  "--disable", "--silent", "--globoff", "--noproxy", "*",
-  "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0",
-  "--connect-timeout", toString connectTimeout, "--max-time", toString maxTime,
-  "--max-filesize", toString maxResponseBytes,
-  "--write-out", "\n%{http_code}", "--config", "-"]
+    With `discardBody`, the body is discarded unread (`--output /dev/null`; no body limit applies) and the output is the
+    status code alone. -/
+def arguments (connectTimeout maxTime maxResponseBytes : Nat) (discardBody : Bool := false) : Array String :=
+  #["--disable", "--silent", "--globoff", "--noproxy", "*",
+    "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0",
+    "--connect-timeout", toString connectTimeout, "--max-time", toString maxTime] ++
+  (if discardBody then #["--output", "/dev/null"] else #["--max-filesize", toString maxResponseBytes]) ++
+  #["--write-out", "\n%{http_code}", "--config", "-"]
 
 /-- Split curl's output (body + newline + status code) into the body and the status code. -/
 def splitOutput (output : String) : Option (Nat × String) :=
