@@ -11,6 +11,7 @@ Technical terms do not appear on screen. The mapping between screen wording and 
 |---|---|
 | Guest | Anonymous. The principal of a request with no JWT or with a JWT that failed verification. An expired JWT is the same |
 | Signed in | Authenticated, with your own user row (`User`) registered |
+| Sign in with an email address | Passwordless sign-in through Supabase Auth: a sign-in link and a one-time code are emailed to the address, and opening the link or entering the code signs you in. A first-time address becomes a new Auth user |
 | "You" tag | The post's `author` is you (the author) |
 | Admin | The user row's `admin` is true |
 | Not registered | Has a valid JWT but no user row (unregistered) |
@@ -53,8 +54,8 @@ API mapping (the current table is in `backend/BulletinBoard/Handlers.lean`; plan
 | S2 | PostDetail | (the post's title) | `/posts/[id]` | A title in the list, "Open by ID", typing the URL | `post-detail-author.png`, `post-detail-denied.png`, `mobile-post-detail-denied.png` |
 | S3 | PostCreate | New post | `/posts/new` | "New post" in the menu or the list | `post-create.png` |
 | S4 | PostEdit | Edit | `/posts/[id]/edit` | "Edit" on a post, typing the URL | `post-edit.png` |
-| S5 | Login | Nyxis Board | `/login` | "Sign in with Google". Keeps the return destination in `?next=` | `login.png` |
-| S6 | AuthCallback | Signing in | `/auth/callback` | Return from Google authentication. Opening it directly goes to S5 | `auth-callback.png` |
+| S5 | Login | Nyxis Board | `/login` | "Sign in with Google", or an email address. Keeps the return destination in `?next=` | `login.png` (the email form is not in the mockup yet) |
+| S6 | AuthCallback | Signing in | `/auth/callback` | Return from Google authentication or from the emailed link; also after a one-time code is accepted on S5. Opening it directly goes to S5 | `auth-callback.png` |
 | S7 | Me | You | `/me` | The person mark at the top right | `me.png` |
 | S8 | AdminUsers | Admin | `/admin` | "Admin" in the menu (shown only to admins), "Try it" on S7, typing the URL | `admin-users.png` |
 | S9 | NotFound | Not found | Any other route | Typing the URL | None (the "Not found" of component P3 at full width) |
@@ -152,23 +153,31 @@ API mapping (the current table is in `backend/BulletinBoard/Handlers.lean`; plan
 ## S5 Login (Sign in)
 
 - Route: `/login` (`?next=<return destination>`, `?error=<reason>`)
-- Purpose: start Google OAuth (Supabase Auth). There is no password or magic-link UI.
-- Contents: the vermilion square and "Nyxis Board", [Sign in with Google], and "Browse without signing in". No other text.
+- Purpose: start Google OAuth (Supabase Auth), or sign in with an email address (passwordless: Supabase Auth emails a sign-in link and a one-time code, and opening the link or entering the code signs you in). There is no password UI.
+- Contents: the vermilion square and "Nyxis Board", [Sign in with Google], "or", an email input with [Email me a sign-in link], and "Browse without signing in". After the email is sent: "Check your email", one sentence naming the address, a code input with [Sign in], "Use another address", and "Browse without signing in". No other text.
 
 | State ID | Who | Condition | Display |
 |---|---|---|---|
-| `Login.anonymous` | Guest | — | Mockup `login.png` |
+| `Login.anonymous` | Guest | — | Mockup `login.png` (the email input and its button sit below the Google button; the mockup is to be updated by the designer) |
 | `Login.alreadyLoggedIn` | Signed in, admin, not registered | — | The person mark and "You're signed in" + [Go home][Sign out] |
 | `Login.oauthError` | Guest | `?error=` present | The sentence "Couldn't sign in" above the button. No stamp |
-| `Login.authOffline` | Guest | Supabase Auth unreachable | A black band "Can't connect" + "Try again" |
+| `Login.authOffline` | Guest | Supabase Auth unreachable (sending the email or checking the code, or `?error=offline`) | A black band "Can't connect". Input is kept; submitting again retries |
+| `Login.emailInvalid` | Guest | The address is not in the shape of an email address | Not sent; the input turns amber with "Enter your email address" |
+| `Login.sending` | Guest | Sending the email | The button cannot be pressed |
+| `Login.sendRejected` | Guest | Auth refused to send (rate limit, email provider disabled) | The input turns amber with "Couldn't send the email. Check the address, or wait a moment". Input is kept |
+| `Login.emailSent` | Guest | The email was sent | "Check your email" + the address, the code input, [Sign in], "Use another address" |
+| `Login.codeInvalid` | Guest | The code is not 6 to 10 digits | Not sent; the code input turns amber with "Enter the code from the email" |
+| `Login.verifying` | Guest | Checking the code with Auth | "Sign in" cannot be pressed |
+| `Login.codeRejected` | Guest | Auth refused the code (wrong or expired) | The code input turns amber with "That code didn't work". Input is kept |
 
 - The Google button design is implemented according to Google's brand guidelines (U5 in `README.md`).
+- The emailed link opens S6 with an authorization code (PKCE, as after Google). The one-time code gets the session straight from Auth, and S5 continues to S6 (`?verified=1`) for registration and the return destination. The sign-in completes in the tab that opened the link or entered the code.
 
 ## S6 AuthCallback (Signing in)
 
 - Route: `/auth/callback`
-- Purpose: exchange the authorization code for a session, register on the first visit, and navigate to the return destination.
-- Contents: the heading "Signing in" and a progress indicator of 3 circles (Google / Registration / Go home) connected by lines.
+- Purpose: exchange the authorization code (from Google or from the emailed link) for a session, or take over the session that a one-time code obtained on S5, register on the first visit, and navigate to the return destination.
+- Contents: the heading "Signing in" and a progress indicator of 3 circles (Sign in / Registration / Go home) connected by lines. The first circle was labeled "Google" until the email sign-in was added (the mockup `auth-callback.png` still shows that label).
 
 | State ID | Who | Condition | Display |
 |---|---|---|---|
@@ -180,7 +189,7 @@ API mapping (the current table is in `backend/BulletinBoard/Handlers.lean`; plan
 | `AuthCallback.registerDenied` | Not registered | 403 | A vermilion "Not allowed" stamp on the second circle + [Try again][Continue without registering] |
 | `AuthCallback.registerBadRequest` | Not registered | 400 | Same as above (as an implementation inconsistency) |
 | `AuthCallback.registerOffline` | Not registered | 503 / network failure | A black band "Can't connect" + [Try again][Continue without registering]. The JWT is kept |
-| `AuthCallback.direct` | Everyone | No authorization code | Go to S5 |
+| `AuthCallback.direct` | Everyone | No authorization code and no session handed over from S5 | Go to S5 |
 
 - The return destination is taken from `?next=`, defaulting to `/`. External URLs are not accepted.
 
@@ -311,6 +320,10 @@ The mechanical check after implementation must reach at least the following comb
 | S5 | `Login.anonymous` | Guest | — |
 | S5 | `Login.alreadyLoggedIn` | Author | — |
 | S5 | `Login.oauthError` | Guest | `?error=access_denied` |
+| S5 | `Login.emailInvalid` | Guest | Send with an address that is not an email address |
+| S5 | `Login.emailSent` | Guest | Send to a test user's address (the mail is read from Mailpit) |
+| S5 | `Login.codeInvalid` | Guest | Enter a code that is not 6 to 10 digits |
+| S5 | `Login.codeRejected` | Guest | Enter a wrong code |
 | S6 | `AuthCallback.registering` | New person | First sign-in |
 | S6 | `AuthCallback.alreadyRegistered` | Author | Second sign-in |
 | S6 | `AuthCallback.registerOffline` | New person | Backend stopped during registration |

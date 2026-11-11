@@ -97,6 +97,16 @@ private def fullDoc : Row := row
    ("labels", .set (Cedar.Data.Set.make [.prim (.string "x")])), ("created", stamp 10),
    ("price", .ext (.decimal (Int64.ofInt 12345))), ("meta", fullMeta)]
 #guard (validateRow docShape doc fullDoc).isOk
+-- Sets and records that are not in canonical form (unsorted or with duplicates) cannot be put into storage format, so
+-- they are rejected. A sorted value is accepted even when built with `Set.mk` / `Map.mk`.
+#guard !(validatePatch docShape doc (row [("viewers", .set (Cedar.Data.Set.mk [userRef "b", userRef "a"]))])).isOk
+#guard !(validatePatch docShape doc
+  (row [("labels", .set (Cedar.Data.Set.mk [.prim (.string "x"), .prim (.string "x")]))])).isOk
+#guard !(validateRow docShape doc (fullDoc.patch (row [("meta", .record (Cedar.Data.Map.mk
+  [("title", .prim (.string "t")), ("editor", userRef "e"), ("since", stamp 1)]))]))).isOk
+#guard (validatePatch docShape doc (row [("viewers", .set (Cedar.Data.Set.mk [userRef "a", userRef "b"]))])).isOk
+#guard (validateRow docShape doc (fullDoc.patch (row [("meta", .record (Cedar.Data.Map.mk
+  [("editor", userRef "e"), ("since", stamp 1), ("title", .prim (.string "t"))]))]))).isOk
 #guard (validateRow docShape doc (fullDoc.patch (row
   [("updated", stamp 11), ("ttl", .ext (.duration ⟨Int64.ofInt 5⟩)),
    ("viewers", .set Cedar.Data.Set.empty),

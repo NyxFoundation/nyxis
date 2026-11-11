@@ -539,8 +539,8 @@ theorem call_recorded (schema : Schema) (policies : Policies) (e : External)
 structure StepResult where
   /-- The DB state after processing. -/
   store : Store
-  /-- The records of the DB operations issued (in issue order). Empty if none are issued. One for a row operation; for a
-      list, a read per permitted row. -/
+  /-- The records of the DB operations issued (in issue order). Empty if none are issued. One for a row operation (for
+      a cascading delete, also the delete of each of its rows); for a list, a read per returned row. -/
   issued : List Issued
   /-- The records of the external effects issued. Exactly one when an external-effect declaration is permitted and its
       content is determined; otherwise empty. -/
@@ -590,8 +590,9 @@ outside the scope of (3) of the theorem).
 - Deleting a referenced row: a conflict if a row referencing the row being deleted (or any row removed by the cascade)
   is in a `restrict` column. If it is in a `cascade` column, that row is removed too (`cascadePlan`: deepest rows
   first). Each removed row is decided by Cedar, with the declared action (which must have the delete effect for that
-  table), on the state at that point (`cascadeRun`); if even one row is not permitted, the whole request is denied and
-  nothing is issued. The `action` of the issued records is that declared action ((5) of the main theorem). -/
+  table), on the state at that point (`cascadeRun`); if even one row is not permitted, that call is denied (`denied`)
+  and issues nothing (conflicts are decided first, and a conflict gives `conflict`). The `action` of the issued records
+  is that declared action ((5) of the main theorem). -/
 
 /-- The row an operation places: the proposed row for an insert, the current row with the changes applied for an update
     (none if there is no row), and none otherwise. -/
@@ -699,8 +700,8 @@ def integrityFilters (schema : Schema) (store : Store) (op : Operation) : List (
   uniqueFilters schema store op ++ deleteFilters schema store op
 
 /-- Decide and apply the cascade deletes in order: for each row, if the declared action has the delete effect for that
-    table and is permitted on the state at that point, issue the delete and continue. If even one row fails, `none` (the
-    whole request is denied). -/
+    table and is permitted on the state at that point, issue the delete and continue. If even one row fails, `none` (that
+    call is denied). -/
 def cascadeRun (schema : Schema) (policies : Policies) (principal : Principal) (generated : Generated) :
     Store → List (EntityUID × Table × Key) → Option (Store × List Issued)
   | store, [] => some (store, [])

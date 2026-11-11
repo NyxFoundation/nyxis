@@ -660,7 +660,7 @@ never builds elements of this form), and the theorem states the same for trigger
 for the result `trace app store requests` of processing the request sequence in order.
 
 **(1) Legitimate permissions** — every record `i` of a DB operation issued during processing (read, insert, update,
-delete; a list is included as one read per permitted row, and granting permissions as an update of the columns that
+delete; a list is included as one read per returned row (the page), and granting permissions as an update of the columns that
 represent permissions) satisfies, for the request `r` that caused it:
 
 - `i.principal = r.principal` — the principal used for the decision is that request's authenticated principal (the
@@ -688,10 +688,10 @@ represent permissions) satisfies, for the request `r` that caused it:
 **(2) Coherence** — `Coherent`: the final DB state equals the result of applying the recorded operations in order to the
 initial state `store` with `Store.apply`, and each record's `i.store` is the state just before that operation. That is,
 only operations judged legitimate in (1) change the DB state, and each decision was made on the actual state at that
-time (for a cascading delete, the state without the rows already deleted. An operation that violates a uniqueness or
-referential integrity constraint declared in the approved schema is not issued even if permitted, becomes
-`Outcome.conflict`, and the state does not change. External effects (6) issue no DB operations and do not change the
-state).
+time (for a cascading delete, the state without the rows already deleted). Note that the following are not claims of
+(2) but hold by definition (`Authz.stepOp` / `externalStep`): an operation that violates a uniqueness or referential
+integrity constraint declared in the approved schema is not issued even if permitted, becomes `Outcome.conflict`, and
+the state does not change. External effects (6) issue no DB operations, so by (2) they do not change the state.
 
 **(3) Where rows come from** — for each call `c` made by the handler of each request `r` while processing the request
 sequence (`traceCalls`: the action called `c.action`, the primary key passed `c.key`, the list query `c.query`, the DB
@@ -721,8 +721,11 @@ or there is a declaration `ref` among the approved schema's referential integrit
 `@references`) with action `i.action`, and `i.op` is a delete of a row of that declaration's table `ref.table`. That is,
 the only operations decided by an action the handler did not call are cascading deletes declared in the approved schema
 (deletes of referencing rows that go away along with the delete of a referenced row), and they are, as in (1), permitted
-on the state at that time for that declared action (which has that table's delete effect). If even one row is not
-permitted, the whole request is rejected and nothing is issued (`Authz.cascadeRun`).
+on the state at that time for that declared action (which has that table's delete effect). If there is no constraint
+violation (a conflict; this is decided first) and even one row removed by the cascade is not permitted, the delete call
+that caused the cascade is rejected (`Outcome.denied`) and that call issues nothing (by the definitions of
+`Authz.stepOp` / `cascadeRun`; what the other calls of the same request issued and the rest of the handler are
+unaffected).
 
 **(6) External effect records** — every external effect `e` recorded during processing (issuing a signed upload /
 download URL for an attachment, sending mail, an external API call; `trace.external`) satisfies, for the request `r`
@@ -739,15 +742,15 @@ the column the approved schema names with `@attachment("column")`; for
 `mail T(recipient column; subject column, body column…)`, the recipient, subject, and body are the values of that row's
 declared columns; for `call …`, the destination, method, URL, and body — as in (8)). That is, issuing signed URLs,
 sending mail, and external API calls happen only for rows the policies permitted, and the handler cannot choose their
-targets (row, path, bucket, recipient, content, destination, URL, headers). External effects issue no DB operations and
-do not change the state ((2)).
+targets (row, path, bucket, recipient, content, destination, URL, headers). External effects issue no DB operations (by
+the definition of `Authz.externalStep`) and do not change the state ((2)).
 
 **(7) Where signed URLs come from** — if the result of call `c` is a signed URL `Outcome.signed url`, there is an
 external effect `e` recorded in the same request `r`, `e` is authorized as in (6), and `e.action = c.action`,
 `e.key = c.key`, `e.store = c.store` (that call's action and primary key, and the state at decision time). That is, the
 signed URLs passed to the handler (and hence to the HTTP response) are only those from issuances permitted for that
 call. The URL's content (the string Storage returned) is not part of this theorem's claims (`r.externals` is arbitrary).
-The actual URL contains the issued object's path `e.object`, so a download permit shows the handler the current value of
+The actual URL contains the issued object's path (the object of `e.payload`), so a download permit shows the handler the current value of
 the attachment column (the object name) — that is exactly the scope the `download` effect declares (reaching the
 attachment of a permitted row), and the record of (6) states the same path.
 

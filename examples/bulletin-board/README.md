@@ -1,6 +1,6 @@
 # Official Nyxis sample — bulletin board
 
-`backend/` is an independent package that uses nyxis as a Lake dependency, and `frontend/` is an ordinary HTTP client built with the Next.js App Router. You can try listing, viewing, creating, editing, publishing/unpublishing, and deleting posts, signing in and out with Google OAuth, user self-registration, and granting and revoking admin rights. App data is handled only through the nyxis HTTP API. The frontend is not a target of the formal proofs; authorization is done by the backend.
+`backend/` is an independent package that uses nyxis as a Lake dependency, and `frontend/` is an ordinary HTTP client built with the Next.js App Router. You can try listing, viewing, creating, editing, publishing/unpublishing, and deleting posts, signing in and out with Google OAuth or with an emailed sign-in link / one-time code (passwordless), user self-registration, and granting and revoking admin rights. App data is handled only through the nyxis HTTP API. The frontend is not a target of the formal proofs; authorization is done by the backend.
 
 ## Build
 
@@ -35,6 +35,18 @@ lake build --dir examples/bulletin-board/backend
 ```
 
 If the dependencies have not been fetched yet, run `python3 scripts/prepare-dependencies.py` before `lake build`. If you change the OAuth settings or `.env` while Auth is running, run `supabase stop` and then rerun `python3 scripts/local-supabase.py` to apply them. No DB reset is needed.
+
+## Email sign-in (passwordless) setup
+
+Besides Google, the sign-in screen accepts an email address. Supabase Auth emails a sign-in link and a one-time code to that address; opening the link, or entering the code on the sign-in screen, completes the sign-in. The sign-in is passwordless, and a first-time address becomes a new Auth user on its first sign-in.
+
+### Local
+
+Local Auth already has the email provider enabled (`[auth.email]` in `supabase/config.toml`). The mail template `supabase/templates/magic_link.html`, referenced by `[auth.email.template.magic_link]`, renders both the link (`{{ .ConfirmationURL }}`) and the code (`{{ .Token }}`); Auth's default template carries only the link. No mail leaves the machine: Mailpit captures it. After pressing "Email me a sign-in link", open Mailpit at `http://127.0.0.1:55324`, open the newest message to your address, and either click its link (it opens `http://127.0.0.1:55321/auth/v1/verify?...` and returns to `http://127.0.0.1:3000/auth/callback`, so the frontend must be running) or copy the 6-digit code into the sign-in screen. The same mail is available from Mailpit's HTTP API: `curl -s 'http://127.0.0.1:55324/api/v1/search?query=to:you@example.com'` lists the messages to an address, and `curl -s http://127.0.0.1:55324/api/v1/message/<ID>` returns one message with its `HTML` body. Local Auth sends at most one mail per second per address. If you change the template or `supabase/config.toml` while Auth is running, run `supabase stop` and then `python3 scripts/local-supabase.py` again; no DB reset is needed.
+
+### Production (a real Supabase project)
+
+In the Supabase dashboard of your project: under Authentication → Sign In / Providers, enable the Email provider and keep Phone disabled. Under Authentication → SMTP Settings, configure your own SMTP server (the built-in sender is for development only, is rate-limited, and does not allow the templates to be edited). Under Authentication → Emails, edit the Magic Link template so that it contains both `{{ .ConfirmationURL }}` (the link) and `{{ .Token }}` (the code), as `supabase/templates/magic_link.html` does; the default template has only the link, in which case the code path of the sign-in screen cannot be used. Under Authentication → URL Configuration, add your frontend's `<origin>/auth/callback` to the Redirect URLs (the Google sign-in needs the same entry). The sign-in screen accepts codes of 6 to 10 digits, so the project's OTP length may stay at its default.
 
 ## Start a backend that supports authenticated operations
 
@@ -81,15 +93,15 @@ Open `http://127.0.0.1:3000`. The first compilation takes a little while. The st
 ## Try the anonymous view, sign-in, and sign-out
 
 1. On Home before signing in, confirm that only `public` is in the list, and open it to see `public body` and the author `alice`. `draft1` does not appear in the list, and opening `http://127.0.0.1:3000/posts/draft1` directly shows "Can't view". The IDs in this fixture are not UUIDs, so use the URL directly instead of the "Open by ID" field.
-2. Press "Sign in with Google" via sign-in at the top right. When you return to the same tab, the code is exchanged and you self-register with `admin=false` through nyxis's `POST /users/{you}`. It continues on 201/409. If the connection fails, check that the backend and the relay are running and retry.
+2. Press "Sign in with Google" via sign-in at the top right. When you return to the same tab, the code is exchanged and you self-register with `admin=false` through nyxis's `POST /users/{you}`. It continues on 201/409. If the connection fails, check that the backend and the relay are running and retry. Alternatively, enter an email address on the sign-in screen and press "Email me a sign-in link", then read the mail in Mailpit (`http://127.0.0.1:55324`, see "Email sign-in (passwordless) setup") and either open its link or type its code into the sign-in screen; the rest is the same. The sign-in completes in the tab that opened the link or entered the code.
 3. From "New post" in the menu, enter a title and body and save as "Draft". Note the detail URL you are taken to, and check the body, the Draft tag, and the Signed in display. The backend determines the post's author from the JWT.
 4. Sign out on the detail screen. Confirm that at the same detail URL the body disappears and you see "Can't view" and the Guest display. Signing in with Google again lets you read your own draft.
 
-Auth uses PKCE. Random numbers and SHA-256 are left to the browser's standard Web Crypto. The JWT/refresh token is kept in the same tab's `sessionStorage` and refreshed on resume and before expiry. On sign-out, private content and the local session are cleared and data is fetched again anonymously. The current Auth session is also discarded, and if Auth cannot be reached, the screen says so. `/login?next=/posts/<post ID>` specifies the return destination; external URLs are not accepted.
+Auth uses PKCE for Google and for the emailed link alike. Random numbers and SHA-256 are left to the browser's standard Web Crypto. The verifier for the emailed link is kept in `localStorage` (the link usually opens in a new tab) and is consumed by the first exchange. The one-time code is checked by Auth's `/verify` and returns a session directly. The JWT/refresh token is kept in the same tab's `sessionStorage` and refreshed on resume and before expiry. On sign-out, private content and the local session are cleared and data is fetched again anonymously. The current Auth session is also discarded, and if Auth cannot be reached, the screen says so. `/login?next=/posts/<post ID>` specifies the return destination; external URLs are not accepted.
 
 ## Prepare the first admin
 
-Once Google sign-in and self-registration succeed, open `/me` ("You") from the person mark at the top right and copy your ID. In the terminal where the backend is running, type the following line and press Enter. Replace `UUID` with the copied value.
+Once sign-in (Google or email) and self-registration succeed, open `/me` ("You") from the person mark at the top right and copy your ID. In the terminal where the backend is running, type the following line and press Enter. Replace `UUID` with the copied value.
 
 ```text
 admin UUID
@@ -101,7 +113,7 @@ From then on, grant and revoke admin rights by looking up a user ID on the `/adm
 
 ## Shutting down, and starting with the anonymous view only
 
-Press Ctrl-C in the frontend and backend terminals. The backend stops sample and the JWKS relay and deletes only the isolated DB and temporary TLS material it created. The posts, user rows, and initial admin setting you created disappear with this DB. The Google users in Supabase Auth are registered by the normal sign-in and remain. Supabase itself also remains. After a forced kill or a terminal failure, cleanup may not be possible.
+Press Ctrl-C in the frontend and backend terminals. The backend stops sample and the JWKS relay and deletes only the isolated DB and temporary TLS material it created. The posts, user rows, and initial admin setting you created disappear with this DB. The Google and email users in Supabase Auth are registered by the normal sign-in and remain. Supabase itself also remains. After a forced kill or a terminal failure, cleanup may not be possible.
 
 For the anonymous view only, the backend's `--oauth` can be omitted. Then the JWKS relay and the initial-admin input are not enabled, and on exit it also checks that the DB rows are unchanged. The frontend can be started with `NEXT_PUBLIC_NYXIS_API_URL=http://127.0.0.1:8080 NEXT_TELEMETRY_DISABLED=1 npm run dev` after `cd examples/bulletin-board/frontend`.
 

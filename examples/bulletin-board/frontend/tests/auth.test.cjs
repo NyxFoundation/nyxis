@@ -6,7 +6,7 @@ const { mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const dir = mkdtempSync(path.join(tmpdir(), 'nyxis-auth-test-'));
-let auth, api, requests, values, navigated;
+let auth, api, requests, values, local, navigated;
 const sessionResponse = { access_token: 'test-access', refresh_token: 'test-refresh', token_type: 'bearer', expires_in: 3600 };
 before(() => {
   execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', 'lib/auth.ts', 'lib/api.ts', '--outDir', dir, '--module', 'commonjs', '--target', 'ES2022', '--skipLibCheck'], { stdio: 'pipe', cwd: path.resolve(__dirname, '..') });
@@ -20,6 +20,8 @@ beforeEach(() => {
   auth = require(path.join(dir, 'auth.js')); api = require(path.join(dir, 'api.js'));
   values = new Map(); requests = []; navigated = null;
   global.sessionStorage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+  local = new Map();
+  global.localStorage = { getItem: key => local.get(key) ?? null, setItem: (key, value) => local.set(key, value), removeItem: key => local.delete(key) };
   global.location = { origin: 'http://127.0.0.1:3000', href: 'http://127.0.0.1:3000/auth/callback?code=one-use', assign: value => navigated = value };
   global.history = { replaceState: (_a, _b, url) => location.href = location.origin + url };
   global.fetch = async (url, init) => { requests.push({ url, init }); return Response.json(url.endsWith('/user') ? { id: 'verified-user' } : sessionResponse); };
@@ -279,4 +281,71 @@ test('corrupt or incomplete stored sessions are ignored', () => {
   }
   values.set('nyxis.auth.session', JSON.stringify({ authBase: 'http://127.0.0.1:55321/auth/v1', accessToken: 'a', refreshToken: 'r', userId: 'u', expiresAt: 1, extra: 'dropped' }));
   assert.deepEqual(auth.storedSession(), { accessToken: 'a', refreshToken: 'r', userId: 'u', expiresAt: 1 });
+});
+
+test('email sign-in asks Auth for a link and code with PKCE, keeping the verifier for a new tab', async () => {
+  await auth.beginEmailLogin('someone@example.com', '/posts/draft1');
+  assert.equal(requests.length, 1);
+  const url = new URL(requests[0].url);
+  assert.equal(url.pathname, '/auth/v1/otp');
+  assert.equal(url.searchParams.get('redirect_to'), location.origin + '/auth/callback');
+  const body = JSON.parse(requests[0].init.body);
+  const pending = JSON.parse(local.get('nyxis.auth.pendingEmail'));
+  assert.equal(values.has('nyxis.auth.pending'), false);
+  assert.equal(pending.next, '/posts/draft1');
+  const digest = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pending.verifier))).toString('base64url');
+  assert.deepEqual(body, { email: 'someone@example.com', create_user: true, code_challenge: digest, code_challenge_method: 's256' });
+  assert.ok(!requests[0].init.body.includes(pending.verifier));
+  assert.equal(requests[0].init.headers.apikey, 'public-test-key');
+  // The emailed link opens /auth/callback; the verifier comes from the shared store and is consumed.
+  const result = await auth.finishLogin();
+  assert.equal(result.next, '/posts/draft1'); assert.equal(result.session.userId, 'verified-user');
+  assert.deepEqual(JSON.parse(requests[1].init.body), { auth_code: 'one-use', code_verifier: pending.verifier });
+  assert.equal(local.size, 0);
+});
+test('a stale emailed verifier cannot exchange; a tab verifier takes precedence over the email one', async () => {
+  local.set('nyxis.auth.pendingEmail', JSON.stringify({ verifier: 'b'.repeat(43), at: Date.now() - 3600001, next: '/' }));
+  await assert.rejects(auth.finishLogin()); assert.equal(requests.length, 0); assert.equal(local.size, 0);
+  auth.resetLogin(); location.href = location.origin + '/auth/callback?code=one-use';
+  values.set('nyxis.auth.pending', JSON.stringify({ verifier: 'a'.repeat(43), at: Date.now(), next: '/tab' }));
+  local.set('nyxis.auth.pendingEmail', JSON.stringify({ verifier: 'b'.repeat(43), at: Date.now(), next: '/mail' }));
+  const result = await auth.finishLogin();
+  assert.equal(result.next, '/tab');
+  assert.deepEqual(JSON.parse(requests[0].init.body), { auth_code: 'one-use', code_verifier: 'a'.repeat(43) });
+  assert.equal(values.has('nyxis.auth.pending'), false); assert.equal(local.size, 0);
+});
+test('send refusals and rate limits are distinct from an unreachable Auth', async () => {
+  for (const [status, kind] of [[400, 'sendRefused'], [422, 'sendRefused'], [429, 'sendRefused'], [500, 'offline'], [503, 'offline']]) {
+    global.fetch = async () => new Response('', { status });
+    await assert.rejects(auth.beginEmailLogin('someone@example.com', '/'), error => error.kind === kind);
+  }
+  global.fetch = async () => { throw new Error('network'); };
+  await assert.rejects(auth.beginEmailLogin('someone@example.com', '/'), error => error.kind === 'offline');
+});
+test('the one-time code is verified with Auth, identity comes from /user and the callback hands over the session', async () => {
+  await auth.beginEmailLogin('someone@example.com', '/posts/draft1');
+  assert.equal(auth.pendingLogin(), false);
+  await auth.verifyEmailCode('someone@example.com', '123456', '/posts/draft1');
+  assert.ok(requests[1].url.endsWith('/auth/v1/verify'));
+  assert.deepEqual(JSON.parse(requests[1].init.body), { type: 'email', email: 'someone@example.com', token: '123456' });
+  assert.equal(requests[2].init.headers.Authorization, 'Bearer test-access');
+  assert.equal(local.size, 0); assert.equal(auth.pendingLogin(), true);
+  const result = await auth.finishLogin();
+  assert.equal(result.session.userId, 'verified-user'); assert.equal(result.next, '/posts/draft1');
+  assert.equal(requests.length, 3);
+  auth.resetLogin(); assert.equal(auth.pendingLogin(), false);
+  for (const [status, kind] of [[400, 'codeRefused'], [403, 'codeRefused'], [401, 'codeRefused'], [429, 'codeRefused'], [503, 'offline']]) {
+    global.fetch = async () => new Response('', { status });
+    await assert.rejects(auth.verifyEmailCode('someone@example.com', '000000', '/'), error => error.kind === kind);
+    assert.equal(auth.pendingLogin(), false);
+  }
+  global.fetch = async url => Response.json(url.endsWith('/user') ? {} : sessionResponse);
+  await assert.rejects(auth.verifyEmailCode('someone@example.com', '000000', '/'), error => error.kind === 'oauth');
+  assert.equal(auth.pendingLogin(), false);
+});
+test('address and code shapes are checked before anything is sent', () => {
+  for (const value of ['someone@example.com', 'a.b+c@sub.example.co']) assert.ok(auth.emailPattern.test(value));
+  for (const value of ['', 'someone', 'someone@', '@example.com', 'some one@example.com']) assert.equal(auth.emailPattern.test(value), false);
+  for (const value of ['123456', '1234567890']) assert.ok(auth.codePattern.test(value));
+  for (const value of ['', '12345', '12345678901', 'abcdef', '12 34 56']) assert.equal(auth.codePattern.test(value), false);
 });

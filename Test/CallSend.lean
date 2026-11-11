@@ -68,6 +68,15 @@ def parse (s : String) : Lean.Json := (Lean.Json.parse s).toOption.getD .null
   == "url = \"https://api.example/v1/charges/n1\"\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\ndata = \"{\\\"n\\\":7}\"\nheader = \"Authorization: Bearer secret\"\n"
 #guard configText "https://api.example/v1/charges/n1" .get none none
   == "url = \"https://api.example/v1/charges/n1\"\nrequest = \"GET\"\n"
+-- Secret values: printable ASCII without spaces. Only a `header` value may contain interior spaces (SP), e.g. Basic
+-- authentication
+#guard validSecret false "sk_live_abc-123"
+#guard !validSecret false "Basic dXNlcjpwYXNz"
+#guard validSecret true "Basic dXNlcjpwYXNz"
+#guard !validSecret true "" && !validSecret true " " && !validSecret true " a" && !validSecret true "a "
+#guard !validSecret true "a\nb" && !validSecret true "a\rb" && !validSecret true "a\tb"
+#guard !validSecret true "a\x00b" && !validSecret true "a\x7Fb" && !validSecret true "café"
+#guard validSecret true ("".pushn 'a' 4096) && !validSecret true ("".pushn 'a' 4097)
 -- The authentication header, URL, and body do not appear in the arguments (only the fixed transport policy)
 #guard (arguments 3 10 65536).all fun a => !(a.splitOn "Authorization").length > 1 && !(a.splitOn "https://").length > 1
 #guard (arguments 3 7 1024).contains "7" && (arguments 3 7 1024).contains "1024" && (arguments 3 7 1024).contains "=https"

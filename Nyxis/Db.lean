@@ -14,7 +14,7 @@ a pure model of the DB state (`Store`).
   `call`) and the target table; for updates the columns, for mail the recipient column and the subject and body columns,
   and for external API calls the destination, method, path (or URL column), body columns, and execution timing. A list
   runs that action's decision for each row of the target table and returns only the permitted rows. As DB operations, it
-  issues one read per permitted row (`Nyxis.Authz.step`). External effects issue no DB operations; only when permitted
+  issues one read per returned row (the page) (`Nyxis.Authz.step`). External effects issue no DB operations; only when permitted
   for the target row do they record the external effect (issuing a signed URL to Supabase Storage, sending mail whose
   recipient and content are the values of that row's declared columns, or an HTTP call to a destination declared in the
   approved schema) (`Nyxis.Authz.External`). nyxis decides the object path (`objectPath`); the recipient, content,
@@ -158,7 +158,7 @@ structure Effect where
   deriving Repr, DecidableEq
 
 /-- A DB operation: the reads, inserts, updates, and deletes the Lean backend issues to PostgreSQL. A list is issued as
-    one read per permitted row (there is no list-only operation). -/
+    one read per returned row (there is no list-only operation). -/
 inductive Operation where
   | read (table : Table) (key : Key)
   | insert (table : Table) (key : Key) (row : Row)
@@ -388,7 +388,8 @@ of the tuple's columns are not compared; the same as NULL under PostgreSQL's `UN
 `@references("column restrict, column cascade action, …")` is referential integrity of entity reference columns (an
 insert or update whose referenced row does not exist is a conflict; deleting a referenced row is a conflict under
 `restrict` if referencing rows exist, and under `cascade` also deletes the referencing rows — each of them is decided by
-a declared action with that table's delete effect, and if even one row is not permitted, the whole request is rejected).
+a declared action with that table's delete effect, and if there is no conflict and even one row is not permitted, that
+call is rejected).
 nyxis also sets the same constraints in the DB (`PostgresSql.createTable`), and the model (`Nyxis.Authz.step`) decides
 first (a violation is `Outcome.conflict`). The DB-side constraints are a backstop for when the decision is wrong, in
 which case the whole request is closed. -/
@@ -432,15 +433,17 @@ def Reference.filterOf (column : Column) (uid : EntityUID) : List Filter :=
 
 end Db
 
-/-- The result of an action call. `denied` is decided by the authorization layer; `notFound` / `conflict` / `ok` by the
-    DB layer. -/
+/-- The result of an action call. `denied` and the `conflict` of a constraint violation are decided by the authorization
+    layer; the `notFound` / primary-key `conflict` / `ok` of a row operation by the DB layer (the `list` of a list and
+    the results of external effects by `Nyxis.Authz.step`). -/
 inductive Outcome where
-  /-- The authorization layer rejected it (no effect declaration, the operation is outside the effect's scope, or Cedar
-      denies). No DB operation has been issued. -/
+  /-- The authorization layer rejected it (no effect declaration, the operation is outside the effect's scope, Cedar
+      denies, or Cedar denies one of the rows removed by a cascade). No DB operation has been issued. -/
   | denied
   /-- The row does not exist (read, update, delete). -/
   | notFound
-  /-- The row already exists (insert). -/
+  /-- The row already exists (insert), or a permitted operation violates a uniqueness or referential integrity
+      constraint of the approved schema (in which case no DB operation is issued). -/
   | conflict
   /-- Success. For reads, that row; for writes (insert, update, delete), `none`. Returning a row from a write effect
       would be a read beyond the declared effect (for updates, the columns), so none is returned. -/

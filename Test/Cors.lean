@@ -3,8 +3,8 @@ import Nyxis.Internal.Cors
 /-!
 # Test.Cors — unit checks for the CORS configuration
 
-Checks the pure functions of `Nyxis.Internal.Cors` (origin validity, parsing the setting, matching the request's Origin)
-with `#guard`. The integration check against a real application is `scripts/check-cors.py`.
+Checks the pure functions of `Nyxis.Internal.Cors` (origin validity, parsing the setting, matching the request's Origin,
+decorating the response headers) with `#guard`. The integration check against a real application is `scripts/check-cors.py`.
 -/
 
 namespace Test.Cors
@@ -67,5 +67,34 @@ private def granted (values : List String) : Option String :=
 #guard granted ["https://example.test", "http://127.0.0.1:3000"] == none
 -- If the allow list is empty, nothing is returned for any Origin.
 #guard (allowed {} (origins ["https://example.test"])).isNone
+
+/-- A handler response (no body) that sets ETag and Location. -/
+private def handlerResponse : Std.Http.Response Std.Http.Body.Any :=
+  ((Nyxis.Http.responseBuilder ⟨.created, "x", [(.etag, "\"v1\""), (.location, "/docs/1")]⟩).body
+    ({} : Std.Http.Body.Empty) : Std.Http.Response Std.Http.Body.Empty)
+
+/-- The values (all of them) of the `name` header of a `decorate`d response. -/
+private def decorated (values : List String) (preflight : Bool) (name : String) : Option (List String) :=
+  ((decorate config (origins values) preflight handlerResponse).line.headers.getAll?
+    (Std.Http.Header.Name.ofString! name)).map (·.toList.map (·.value))
+
+-- Only for an allowed origin: a preflight gets exactly one fixed Allow-Headers (Authorization and the request headers
+-- passed to handlers), and any other response gets exactly one fixed Expose-Headers (the ETag and Location a handler
+-- can set).
+#guard decorated ["https://example.test"] true "Access-Control-Allow-Headers" ==
+  some ["Authorization, Content-Type, Accept, Accept-Language, If-Match, If-None-Match"]
+#guard decorated ["https://example.test"] true "Access-Control-Expose-Headers" == none
+#guard decorated ["https://example.test"] false "Access-Control-Expose-Headers" == some ["ETag, Location"]
+#guard decorated ["https://example.test"] false "Access-Control-Allow-Headers" == none
+#guard decorated ["https://example.test"] false "Access-Control-Allow-Origin" == some ["https://example.test"]
+-- A rejected or missing Origin gets no CORS header, only Vary.
+#guard decorated ["https://other.test"] false "Access-Control-Allow-Origin" == none
+#guard decorated ["https://other.test"] false "Access-Control-Expose-Headers" == none
+#guard decorated ["https://other.test"] true "Access-Control-Allow-Headers" == none
+#guard decorated ["https://other.test"] false "Vary" == some ["Origin"]
+#guard decorated [] false "Access-Control-Allow-Origin" == none
+#guard decorated [] false "Access-Control-Expose-Headers" == none
+#guard decorated [] true "Access-Control-Allow-Headers" == none
+#guard decorated [] false "Vary" == some ["Origin"]
 
 end Test.Cors

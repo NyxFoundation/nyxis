@@ -12,6 +12,7 @@ import Test.PostgresSnapshot
 import Test.Materials
 import Test.External
 import Test.CallSend
+import Test.MailSend
 import Test.Generated
 
 /-!
@@ -42,6 +43,8 @@ Checks run by `lake build`. If one fails, the build fails.
   recipient, URL and body decided by nyxis, consumption of the result sequence, and agreement with partial fetching.
 - `Test.CallSend` — pure parts of the connection layer for external API calls: lenient decoding of responses, the body
   JSON, and the curl configuration and splitting of its output.
+- `Test.MailSend` — pure parts of composing a mail message: base64 and its folding, the subject's encoded-words, and
+  the line lengths of the message.
 - `Test.Generated` — pure parts of server-generated values (the UUID format). `fresh`, with the real clock and
   randomness, is checked by `checkHttpAuth`.
 - `Test.PostgresValue` / `PostgresSql` / `PostgresShape` / `PostgresSnapshot` — pure parts of the PostgreSQL connection

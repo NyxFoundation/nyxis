@@ -108,6 +108,13 @@ max_frequency = "1s"
 otp_length = 6
 otp_expiry = 3600
 
+# Mail template for the sample frontend's passwordless sign-in. Auth's default magic-link template carries only
+# the link; the frontend also accepts the one-time code, so the local template renders both ({{ .Token }}).
+# The production project needs the same two placeholders in its Magic Link template (custom SMTP required).
+[auth.email.template.magic_link]
+subject = "Your sign-in link and code"
+content_path = "./supabase/templates/magic_link.html"
+
 [auth.sms]
 enable_signup = false
 enable_confirmations = false

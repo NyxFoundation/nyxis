@@ -51,7 +51,10 @@ instance : Monad Handler where
   pure := .pure
   bind := Handler.bind
 
-/-- Call an action. The only effect a handler can have. -/
+/-- Call an action. The only effect a handler can have. Build proposed sets and records with `Cedar.Data.Set.make` /
+    `Map.make` (a value built with `Set.mk` / `Map.mk` that is unsorted or has duplicates cannot be put into storage
+    format, so the connection layer of the real DB refuses that write and closes the request; the pure model
+    `Runtime.handleRequest` accepts it as is, so checks on the model do not notice). -/
 def callAction (action : EntityUID) (key : Db.Key) (values : Db.Row := Cedar.Data.Map.empty) :
     Handler Outcome :=
   .call action key values {} .pure

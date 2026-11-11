@@ -41,7 +41,10 @@ def request(method, path, origin=None, body=b'', extra=()):
         expected = {'access-control-allow-origin': origin} if allowed else {}
         if method == 'OPTIONS' and allowed:
             expected.update({'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-                             'access-control-allow-headers': 'Authorization, Content-Type'})
+                             'access-control-allow-headers':
+                                 'Authorization, Content-Type, Accept, Accept-Language, If-Match, If-None-Match'})
+        elif allowed:
+            expected['access-control-expose-headers'] = 'ETag, Location'
         assert cors == expected, (method, path, origin, cors)
         assert any(n.lower() == 'vary' and 'Origin' in v for n, v in headers)
         if method == 'OPTIONS':
@@ -71,7 +74,7 @@ def verify():
             request('OPTIONS', path, origin, b'\xff',
                     [('Authorization', 'Bearer forged'),
                      ('Access-Control-Request-Method', 'PATCH'),
-                     ('Access-Control-Request-Headers', 'Authorization, Content-Type')])
+                     ('Access-Control-Request-Headers', 'Authorization, Content-Type, If-Match')])
     request('OPTIONS', '/posts', ALLOWED, extra=[('Origin', SECOND)])
     # Unsupported requested methods/headers get exactly the same fixed grant;
     # browsers reject what is absent from that fixed allow list.

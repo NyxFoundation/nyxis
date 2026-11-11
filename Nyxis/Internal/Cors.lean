@@ -41,9 +41,16 @@ def decorate (config : Config) (headers : Std.Http.Headers) (preflight : Bool)
   if let some origin := allowed config headers then
     result := { result with line.headers := result.line.headers.insert (Std.Http.Header.Name.ofString! "Access-Control-Allow-Origin") origin }
     if preflight then
+      -- Allow Authorization and every request header passed to handlers (`Http.RequestHeader`). If-Match and
+      -- If-None-Match always need the preflight's allowance; Content-Type, Accept and Accept-Language need it
+      -- depending on their values.
       result := { result with line.headers := (result.line.headers
         |>.insert! "Access-Control-Allow-Methods" "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        |>.insert! "Access-Control-Allow-Headers" "Authorization, Content-Type") }
+        |>.insert! "Access-Control-Allow-Headers"
+          "Authorization, Content-Type, Accept, Accept-Language, If-Match, If-None-Match") }
+    else
+      -- Of the response headers a handler can set, expose ETag and Location, which a page cannot read otherwise.
+      result := { result with line.headers := result.line.headers.insert! "Access-Control-Expose-Headers" "ETag, Location" }
   return result
 
 /-- Every OPTIONS request finishes before body reading, authentication, routing and DB IO. Credentials and cookies are

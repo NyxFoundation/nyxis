@@ -4,7 +4,8 @@ import Lean.Data.Json
 /-! The internal JSONB cell format for application Cedar values. This is neither SQL execution nor authorization. Stores
 scalars (the primitives `Bool` / `Long` / `String` / entity references, and the extension values `decimal` / `datetime`
 / `duration`), sets of scalars, and records with scalar attributes. Nested sets and records (sets of sets, records
-containing sets) and `ipaddr` are rejected. The type tag keeps strings distinct from entity references, and integers
+containing sets), `ipaddr`, and sets and records that are not in canonical form (unsorted or with duplicates) are
+rejected. The type tag keeps strings distinct from entity references, and integers
 distinct from extension values. PostgreSQL JSONB cannot store NUL, so it is rejected. Errors never include the input.
 
 Format (JSON array): `["bool", b]` / `["int", "decimal digits"]` / `["string", s]` /
@@ -42,11 +43,18 @@ def scalarFields (value : Value) : Except String (Array Json) :=
 def scalar (value : Value) : Except String Json := do
   return .arr (← scalarFields value)
 
-/-- The elements of the tagged array for a whole cell. Elements of sets and records are limited to scalars. -/
+/-- The elements of the tagged array for a whole cell. Elements of sets and records are limited to scalars. Sets and
+    records are limited to the canonical form (the form of `Set.make` / `Map.make`: sorted, without duplicates). A
+    value that is unsorted or has duplicates (possible when built directly with `Set.mk` / `Map.mk`) is rejected,
+    because decoding it gives a different value (the order of a set or of attributes) or fails (a repeated attribute
+    name). -/
 def fields (value : Value) : Except String (Array Json) :=
   match value with
-  | .set s => do pure #[.str "set", .arr (← s.toList.toArray.mapM scalar)]
+  | .set s => do
+    unless s.wellFormed do invalid
+    pure #[.str "set", .arr (← s.toList.toArray.mapM scalar)]
   | .record m => do
+    unless m.wellFormed do invalid
     let pairs ← m.toList.toArray.mapM fun (k, v) => do pure (Json.arr #[← text k, ← scalar v])
     pure #[.str "record", .arr pairs]
   | v => scalarFields v

@@ -575,8 +575,8 @@ def orgStepAgrees (k : Nyxis.Materials.Known) (p : Principal) (action : String) 
 With a small approved schema declaring `@unique` / `@references`, checks that the authorization layer's decision
 (`step`) turns uniqueness and referential integrity violations of permitted operations into `conflict`, turns the delete
 of a referenced row into a conflict under `restrict` and into deletes of the referencing rows under `cascade` (each row
-is decided by the declared action; issued from the deepest rows first; if even one row is not permitted, the whole
-request is rejected), and that it agrees with partial fetches. -/
+is decided by the declared action; issued from the deepest rows first; if even one row is not permitted, that call
+is rejected), and that it agrees with partial fetches. -/
 
 def intSchemaText : String := r#"
 entity User = { "name": String };
@@ -685,7 +685,7 @@ def issuedOps (r : StepResult) : List (String × String × String) :=
   == [("deleteNote", "Note", "zn"), ("deleteDoc", "Doc", "z1"), ("deleteOrg", "Org", "zen")]
 #guard ((intStep (.user alice) "deleteOrg" "zen").store.find? orgT "zen").isNone
 #guard ((intStep (.user alice) "deleteOrg" "zen").store.find? docT "a1").isSome
--- acme has bob's document a2, and deleteDoc is not permitted to alice, so the whole request is denied and nothing is
+-- acme has bob's document a2, and deleteDoc is not permitted to alice, so this delete is denied and nothing is
 -- deleted
 #guard outDenied (intStep (.user alice) "deleteOrg" "acme").outcome
 #guard (intStep (.user alice) "deleteOrg" "acme").issued.isEmpty

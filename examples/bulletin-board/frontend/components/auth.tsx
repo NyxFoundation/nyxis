@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { AuthError, beginLogin, finishLogin, refreshSession, resetLogin, revokeSession, safeNext, saveSession, storedSession, type Session } from "../lib/auth";
+import { usePathname, useRouter } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { AuthError, beginEmailLogin, beginLogin, codePattern, emailPattern, finishLogin, pendingLogin, refreshSession, resetLogin, revokeSession, safeNext, saveSession, storedSession, verifyEmailCode, type Session } from "../lib/auth";
 import { ApiError, readUser, registerUser, withTimeout, type Failure } from "../lib/api";
 
 // Who you are viewing as right now, determined by the user row. Failure means fetching the row failed (whether you are an admin is unknown).
@@ -114,18 +114,74 @@ export function Header() {
 }
 export function Login() {
   const { ready, session, logout } = useAuth();
+  const router = useRouter();
   const [failure, setFailure] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"" | "google" | "email" | "code">("");
   const [next, setNext] = useState("/");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState(false);
+  // invalid: not sent because the input is not in shape; refused: Auth answered with a refusal. Input is kept in both cases.
+  const [invalid, setInvalid] = useState<"" | "email" | "code">("");
+  const [refused, setRefused] = useState<"" | "send" | "code">("");
   useEffect(() => { const query = new URLSearchParams(location.search); setFailure(query.get("error") || ""); setNext(safeNext(query.get("next"))); }, []);
-  async function start() {
-    setBusy(true); setFailure("");
-    try { await beginLogin(next); } catch (error) { setFailure(error instanceof AuthError ? error.kind : "oauth"); setBusy(false); }
+  function fail(error: unknown) {
+    const kind = error instanceof AuthError ? error.kind : "offline";
+    if (kind === "sendRefused") setRefused("send");
+    else if (kind === "codeRefused") setRefused("code");
+    else setFailure(kind === "offline" ? "offline" : "oauth");
   }
-  return <main className="wrap main auth-main" data-screen="S5" data-state={`Login.${session ? "alreadyLoggedIn" : failure === "offline" ? "authOffline" : failure ? "oauthError" : "anonymous"}`}>
+  async function start() {
+    setBusy("google"); setFailure(""); setRefused("");
+    try { await beginLogin(next); } catch (error) { fail(error); setBusy(""); }
+  }
+  async function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const address = email.trim();
+    setFailure(""); setRefused("");
+    if (!emailPattern.test(address)) { setInvalid("email"); return; }
+    setInvalid(""); setBusy("email");
+    try { await beginEmailLogin(address, next); setEmail(address); setCode(""); setSent(true); } catch (error) { fail(error); }
+    setBusy("");
+  }
+  async function verify(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const value = code.replace(/\s+/g, "");
+    setFailure(""); setRefused("");
+    if (!codePattern.test(value)) { setInvalid("code"); return; }
+    setInvalid(""); setBusy("code");
+    // Registration and the return destination are handled by /auth/callback, as after Google.
+    try { await verifyEmailCode(email, value, next); router.replace("/auth/callback?verified=1"); } catch (error) { fail(error); setBusy(""); }
+  }
+  function reset() { setSent(false); setCode(""); setInvalid(""); setRefused(""); setFailure(""); }
+  const state = session ? "alreadyLoggedIn" : failure === "offline" ? "authOffline" : failure ? "oauthError" : busy === "email" ? "sending" : busy === "code" ? "verifying" : invalid === "email" ? "emailInvalid" : invalid === "code" ? "codeInvalid" : refused === "send" ? "sendRejected" : refused === "code" ? "codeRejected" : sent ? "emailSent" : "anonymous";
+  return <main className="wrap main auth-main" data-screen="S5" data-state={`Login.${state}`}>
     <i className="brand-square" aria-hidden="true" /><h1>Nyxis Board</h1>
     {failure && <p className={failure === "offline" ? "offline" : ""} role="alert">{failure === "offline" ? "Can't connect" : "Couldn't sign in"}</p>}
-    {session ? <><p>You're signed in</p><Link className="btn" href="/">Go home</Link><button className="btn line" onClick={() => void logout()}>Sign out</button></> : <><button className="btn google" disabled={busy || !ready} onClick={() => void start()}><img src="/google-g.png" width="20" height="20" alt="" />Sign in with Google</button><Link href={next}>Browse without signing in</Link></>}
+    {session ? <><p>You're signed in</p><Link className="btn" href="/">Go home</Link><button className="btn line" onClick={() => void logout()}>Sign out</button></> : sent ? <>
+      <form className="email-login" onSubmit={verify} noValidate>
+        <p className="email-sent-title">Check your email</p>
+        <p className="email-sent">We sent a sign-in link and a one-time code to <strong>{email}</strong>. Open the link, or enter the code here.</p>
+        <label className="sr-only" htmlFor="login-code">One-time code</label>
+        <input id="login-code" className={`code-input ${invalid === "code" || refused === "code" ? "invalid" : ""}`} inputMode="numeric" autoComplete="one-time-code" placeholder="000000" value={code} onChange={event => { setCode(event.target.value); setInvalid(""); setRefused(""); }} disabled={busy === "code"} aria-invalid={invalid === "code" || refused === "code"} aria-describedby={invalid === "code" || refused === "code" ? "code-error" : undefined} />
+        {invalid === "code" && <p id="code-error" className="invalid" role="alert">Enter the code from the email</p>}
+        {refused === "code" && <p id="code-error" className="invalid" role="alert">That code didn't work</p>}
+        <button className="btn" type="submit" disabled={busy === "code"}>{busy === "code" ? "Signing in" : "Sign in"}</button>
+        <button type="button" className="text-button" onClick={reset} disabled={busy === "code"}>Use another address</button>
+      </form>
+      <Link href={next}>Browse without signing in</Link></> : <>
+      <button className="btn google" disabled={!!busy || !ready} onClick={() => void start()}><img src="/google-g.png" width="20" height="20" alt="" />Sign in with Google</button>
+      <p className="or" aria-hidden="true">or</p>
+      <form className="email-login" onSubmit={send} noValidate>
+        <label className="sr-only" htmlFor="login-email">Email</label>
+        <input id="login-email" type="email" autoComplete="email" placeholder="you@example.com" className={invalid === "email" || refused === "send" ? "invalid" : ""} value={email} onChange={event => { setEmail(event.target.value); setInvalid(""); setRefused(""); }} disabled={busy === "email"} aria-invalid={invalid === "email" || refused === "send"} aria-describedby={invalid === "email" || refused === "send" ? "email-error" : undefined} />
+        {invalid === "email" && <p id="email-error" className="invalid" role="alert">Enter your email address</p>}
+        {refused === "send" && <p id="email-error" className="invalid" role="alert">Couldn't send the email. Check the address, or wait a moment</p>}
+        <button className="btn line" type="submit" disabled={!!busy || !ready}>{busy === "email" ? "Sending" : "Email me a sign-in link"}</button>
+      </form>
+      <Link href={next}>Browse without signing in</Link></>}
   </main>;
 }
 type Exchange = Awaited<ReturnType<typeof finishLogin>>;
@@ -144,7 +200,7 @@ export function AuthCallback() {
     async function run() {
       if (!exchange.current) {
         const query = new URL(location.href).searchParams;
-        if (!query.has("code") && !query.has("error")) { location.replace("/login"); return; }
+        if (!query.has("code") && !query.has("error") && !pendingLogin()) { location.replace("/login"); return; }
         exchange.current = finishLogin();
       }
       let result: Exchange;
@@ -175,7 +231,7 @@ export function AuthCallback() {
   }
   return <main className="wrap main auth-main" data-screen="S6" data-state={`AuthCallback.${failure ? failure === "denied" ? "registerDenied" : failure === "badRequest" ? "registerBadRequest" : "registerOffline" : phase}`} aria-live="polite">
     <i className="brand-square" aria-hidden="true" /><h1>Signing in</h1>
-    <ol className="auth-steps" aria-label="Progress"><li className={phase !== "exchanging" ? "done" : ""}>Google</li><li className={phase === "registered" || phase === "alreadyRegistered" ? "done" : ""}>Registration</li><li>Go home</li></ol>
+    <ol className="auth-steps" aria-label="Progress"><li className={phase !== "exchanging" ? "done" : ""}>Sign in</li><li className={phase === "registered" || phase === "alreadyRegistered" ? "done" : ""}>Registration</li><li>Go home</li></ol>
     {failure && <><p className={failure === "offline" ? "offline" : "stamp"} role="alert">{failure === "offline" ? "Can't connect" : "Not allowed"}</p><button className="btn" disabled={!session} onClick={() => setAttempt(n => n + 1)}>Try again</button><button className="btn line" disabled={!session} onClick={() => void proceed()}>Continue without registering</button></>}
   </main>;
 }

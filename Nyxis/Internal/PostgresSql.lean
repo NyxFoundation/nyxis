@@ -127,7 +127,7 @@ def selectTable (schema : Authz.Schema) (table : Table) : Except String Command 
   order), and booleans as boolean. Ordering on sets, records and entity references is rejected.
 - If the column is NULL (a missing attribute), it does not match (both conditions become NULL / false).
 - If an equality constant is a value that cannot be put into storage format (a string containing NUL, `ipaddr`, nested
-  sets, etc.), no stored row can equal that value (the storage format holds only values that went through nyxis's
+  sets, a set or record not in canonical form, etc.), no stored row can equal that value (the storage format holds only values that went through nyxis's
   encoding; Assumptions 2 and 3), so the condition is the constant `false` (the model's `v == f.value` is also false). An ordering
   constant containing NUL is rejected (the model can compare it, so this errs on the closed side).
 Identifiers come only from the columns of the approved sources, and values only from parameters. `index` is the number

@@ -27,6 +27,7 @@ The checks are PostgreSQL's `SELECT 1` and HTTP 200 from Auth's health endpoint 
 It does not create app tables, seed, reset or delete data.
 Automatic seeding and the unneeded Studio/Realtime/Edge/Analytics are disabled.
 The API's exposed schemas are empty; Auth, mail capture and Storage (for the attachment integration test) are enabled.
+The magic-link mail template is `supabase/templates/magic_link.html` (`[auth.email.template.magic_link]` in `config.toml`): it carries both the sign-in link and the one-time code, which the official sample's sign-in screen accepts. A change to the template or to `config.toml` takes effect after `supabase stop` and a restart with this script.
 This does not prove that the production authentication configuration is correct.
 
 ## Passing connection information to check commands

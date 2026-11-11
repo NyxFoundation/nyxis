@@ -62,3 +62,8 @@ nav{display:flex;gap:24px}nav a{border-bottom-color:transparent}nav a[aria-curre
 @media(max-width:639px){.capabilities{grid-template-columns:repeat(2,minmax(0,1fr))}.me-actions .btn{white-space:normal}}
 .admin-lookup{max-width:560px}.admin-result{display:flex;flex-wrap:wrap;align-items:center;gap:20px 24px}.admin-person{display:flex;flex-direction:column;gap:6px;flex:1 1 300px;min-width:0}.admin-person>.mono{overflow-wrap:anywhere}.admin-tags{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.admin-tags .stamp{font-size:16px;padding:6px 14px}.admin-direct{align-self:flex-start}
 .admin-tags .stamp.success{color:var(--color-green)}
+
+.email-login{display:flex;flex-direction:column;gap:12px;width:100%;max-width:360px;text-align:left}.email-login .btn{width:100%}.email-login .text-button{align-self:center}
+.or{display:flex;align-items:center;gap:12px;width:100%;max-width:360px;font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--color-ink-3)}.or:before,.or:after{content:"";flex:1;border-top:1px solid var(--color-rule)}
+.email-sent-title{font-size:20px;font-weight:700;text-align:center}.email-sent{color:var(--color-ink-2);font-size:14px;overflow-wrap:anywhere;text-align:center}
+.code-input{font-family:var(--font-mono),ui-monospace,Menlo,monospace;font-size:28px;letter-spacing:.3em;text-align:center}

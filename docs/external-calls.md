@@ -72,7 +72,9 @@ entity Stripe;
 - `auth`: one of the following 3 kinds. Only the environment variable name appears in the sources; the value is passed via
   the core configuration. If it is not set, startup is refused.
   - `bearer <environment variable name>` — `Authorization: Bearer <value>`
-  - `header <header name> <environment variable name>` — any single header (e.g. `header X-API-Key NYXIS_EXT_MAPS`)
+  - `header <header name> <environment variable name>` — any single header (e.g. `header X-API-Key NYXIS_EXT_MAPS`).
+    After the surrounding whitespace is trimmed, the value may contain interior spaces (SP) (e.g. passing `Basic …` to
+    `header Authorization NYXIS_EXT_LEGACY`). A `bearer` value contains no spaces
   - `none`
 - Any number of destinations can be declared in one set of sources.
 

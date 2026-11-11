@@ -54,6 +54,21 @@ private def user (id : String) : Value := .prim (.entityUID ⟨⟨"User", []⟩,
 #guard (encode (.record (Cedar.Data.Map.make [("b", .prim (.bool true)), ("a", .prim (.int 1))]))).toOption ==
   some "[\"record\",[[\"a\",[\"int\",\"1\"]],[\"b\",[\"bool\",true]]]]"
 
+-- Sets and records that are not in canonical form (unsorted or with duplicates; possible when built directly with
+-- `Set.mk` / `Map.mk`) are not stored. Such a set, or a record in a different order, would decode to a different value,
+-- and a record with a repeated attribute name could not be decoded.
+#guard (encode (.set (Cedar.Data.Set.mk [user "b", user "a"]))).toOption == none
+#guard (encode (.set (Cedar.Data.Set.mk [user "a", user "a"]))).toOption == none
+#guard (encode (.record (Cedar.Data.Map.mk [("b", .prim (.bool true)), ("a", .prim (.int 1))]))).toOption == none
+#guard (encode (.record (Cedar.Data.Map.mk [("a", .prim (.int 1)), ("a", .prim (.int 2))]))).toOption == none
+-- A sorted value without duplicates is stored as canonical even when built with `Set.mk` / `Map.mk`.
+#guard (encode (.set (Cedar.Data.Set.mk [user "a", user "b"]))).toOption ==
+  some "[\"set\",[[\"entity\",[],\"User\",\"a\"],[\"entity\",[],\"User\",\"b\"]]]"
+#guard (encode (.record (Cedar.Data.Map.mk [("a", .prim (.int 1)), ("b", .prim (.bool true))]))).toOption ==
+  some "[\"record\",[[\"a\",[\"int\",\"1\"]],[\"b\",[\"bool\",true]]]]"
+#guard (encode (.set (Cedar.Data.Set.mk []))).toOption == some "[\"set\",[]]"
+#guard (encode (.record (Cedar.Data.Map.mk []))).toOption == some "[\"record\",[]]"
+
 -- Every primitive value in the fixture round-trips through the storage format back to the original Cedar value.
 #guard Test.Fixture.store.toList.all (fun (_, row) => row.toList.all (fun (_, v) => roundtrip v))
 
