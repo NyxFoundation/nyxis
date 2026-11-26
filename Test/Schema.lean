@@ -552,4 +552,14 @@ action "readDoc" appliesTo { principal: [User, Anonymous], resource: [Doc] };
 -- A parent type that itself has parents (multi-level) is also rejected for membership rows
 #guard rejectedWith (memBase.replace "entity Team = { \"org\": Org };" "@parents(\"org\")\nentity Team in [Org] = { \"org\": Org };") "multi-level parents"
 
+-- Built-in primitive types may be qualified with `__cedar::`, as in Cedar ("`__cedar::Long` uniquely refers to Cedar
+-- primitive type `Long`"); the qualified and unqualified names build the same type environment
+def qualifiedPrimitives (q : String) : String :=
+  s!"entity User = \{ \"admin\": {q}Bool, \"age\": {q}Long, \"name\": {q}String, \"tags\": Set<{q}String> };\n" ++
+  "@effect(\"read User\")\naction \"readUser\" appliesTo { principal: [User], resource: [User] };\n"
+#guard accepted (qualifiedPrimitives "__cedar::")
+#guard ((parse (qualifiedPrimitives "__cedar::")).toOption.map (·.types)) ==
+  ((parse (qualifiedPrimitives "")).toOption.map (·.types))
+#guard rejectedWith (qualifiedPrimitives "__cedar::" |>.replace "__cedar::Long" "__cedar::Integer") "__cedar::Integer"
+
 end Test.Schema

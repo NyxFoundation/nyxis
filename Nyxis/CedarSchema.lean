@@ -741,12 +741,15 @@ def resolveEntity (tys : List EntityType) : List String → Except String Entity
     else .error s!"entity type {name} does not exist"
   | p => .error s!"namespaced type {"::".intercalate p} is not supported"
 
-/-- A scalar type written as a path: a built-in type, an extension type, or an entity type. Common types are not
-    supported. -/
+/-- A scalar type written as a path: a built-in type, an extension type, or an entity type. Built-in and extension types
+    may be qualified with `__cedar::`, as in Cedar. Common types are not supported. -/
 def scalarType (tys : List EntityType) : List String → Except String Cedar.Validation.CedarType
   | ["Bool"] => .ok (.bool .anyBool)
   | ["Long"] => .ok .int
   | ["String"] => .ok .string
+  | ["__cedar", "Bool"] => .ok (.bool .anyBool)
+  | ["__cedar", "Long"] => .ok .int
+  | ["__cedar", "String"] => .ok .string
   | ["__cedar", name] =>
     match extensionType name with
     | some x => .ok (.ext x)

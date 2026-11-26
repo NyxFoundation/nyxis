@@ -47,6 +47,9 @@ private def scalarType (schema : Authz.Schema) (ty : CedarSchema.Ty) : Except St
   | .path ["Bool"] => .ok .bool
   | .path ["Long"] => .ok .int
   | .path ["String"] => .ok .string
+  | .path ["__cedar", "Bool"] => .ok .bool
+  | .path ["__cedar", "Long"] => .ok .int
+  | .path ["__cedar", "String"] => .ok .string
   | .path ["__cedar", name] =>
     match extensionTypes.lookup name with
     | some t => .ok t
