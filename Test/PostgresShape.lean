@@ -87,6 +87,10 @@ private def docShape := (compile docSource).toOption.getD []
 #guard !(compile "entity User = {admin: Set<Missing>};").isOk
 #guard !(compile "entity datetime = {admin: Bool}; entity User = {at: datetime};").isOk
 #guard !(compile "entity Long; entity User = {at: Long};").isOk
+-- Built-in primitive types qualified with `__cedar::` give the same shape as the unqualified names
+#guard (compile "entity User = {a: __cedar::Bool, n: __cedar::Long, s: Set<__cedar::String>};").toOption ==
+  (compile "entity User = {a: Bool, n: Long, s: Set<String>};").toOption
+#guard (compile "entity User = {a: __cedar::Bool, n: __cedar::Long, s: Set<__cedar::String>};").isOk
 
 private def userRef (id : String) : Value := .prim (.entityUID ⟨user, id⟩)
 private def stamp (ms : Int) : Value := .ext (.datetime ⟨Int64.ofInt ms⟩)
